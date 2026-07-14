@@ -1,0 +1,17 @@
+# Git hooks — installed by `pnpm lefthook install` (runs from postinstall).
+# Docs: https://lefthook.dev
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: eslint
+      glob: '*.{ts,tsx,mjs,cjs,js}'
+      run: pnpm exec eslint --max-warnings 0 --no-warn-ignored {staged_files}
+    - name: prettier
+      glob: '*.{ts,tsx,mjs,cjs,js,json,css,md,yml,yaml,html}'
+      run: pnpm exec prettier --check {staged_files}
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}

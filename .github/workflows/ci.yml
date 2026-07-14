@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version read from package.json "packageManager"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # postinstall runs electron-builder install-app-deps, so better-sqlite3
+      # is built for Electron's ABI — tests run through Electron's node
+      # (ELECTRON_RUN_AS_NODE, see scripts/run-vitest.mjs).
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - run: pnpm format:check
+
+      - run: pnpm typecheck
+
+      # Coverage thresholds (vitest.config.ts) are enforced: the job fails
+      # if covered scope drops below them.
+      - run: pnpm test:coverage
+
+      - run: pnpm build
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14

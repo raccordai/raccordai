@@ -1,0 +1,272 @@
+{
+  "app": {
+    "name": "Raccord"
+  },
+  "menu": {
+    "file": "File",
+    "importWorkflow": "Import a workflow (JSON)…",
+    "importing": "Importing…",
+    "exportWorkflow": "Export workflow (JSON)",
+    "exportFcpxml": "Export timeline (FCPXML + media)…",
+    "exportMediaZip": "Export video clips (ZIP)…"
+  },
+  "home": {
+    "title": "Technical foundation",
+    "subtitle": "Phase 1 — everything on this page goes through the full stack: renderer → typed IPC → services → SQLite.",
+    "version": "Version",
+    "channel": "Channel",
+    "platform": "Platform",
+    "database": "Database",
+    "localApi": "Local server",
+    "localApiRunning": "running on 127.0.0.1:{{port}}",
+    "localApiStopped": "stopped (local-api flag disabled — restart after enabling)"
+  },
+  "language": {
+    "label": "Language",
+    "fr": "Français",
+    "en": "English"
+  },
+  "flags": {
+    "title": "Feature flags",
+    "overridden": "overridden",
+    "default": "default ({{channel}})",
+    "reset": "Reset"
+  },
+  "chat": {
+    "title": "Assistant",
+    "placeholder": "Ask for an action or a question…",
+    "send": "Send",
+    "clear": "Clear conversation",
+    "thinking": "The assistant is working…",
+    "empty": "Describe what you want to build: the assistant can create nodes, wire them, write prompts and launch generations right in the workflow.",
+    "homeEmpty": "Describe the project you want: the assistant creates the project and video, picks the art direction and builds the whole workflow. E.g. “Create a 2.5-minute anime project about…”",
+    "needKey": "Add your kie.ai API key in Integrations on the home page to enable the assistant.",
+    "attach": "Attach images",
+    "imageTooBig": "Image too large (max 5 MB): {{name}}",
+    "fixPromptPrefill": "The generation of node “{{label}}” failed with: {{error}}\nAnalyze this node's prompt, fix it to avoid that error while staying true to the intent, update the node, then relaunch the generation.",
+    "adjustPromptPrefill": "The output of node “{{label}}” doesn't work for me: \n\nImprove the prompt accordingly, update the node, then relaunch the generation."
+  },
+  "integrations": {
+    "title": "Integrations",
+    "kieKeyLabel": "kie.ai API key",
+    "kieKeyPlaceholder": "Paste the API key…",
+    "kieKeyConfigured": "Key configured — encrypted with the system keychain",
+    "kieKeyMissing": "No key configured — required to run generations",
+    "save": "Save",
+    "clear": "Remove key"
+  },
+  "project": {
+    "back": "Back to projects",
+    "notFound": "Project not found.",
+    "editorSoon": "The workflow editor lands in phase 2 (porting the node graph from Video Studio)."
+  },
+  "projects": {
+    "title": "Projects",
+    "empty": "No projects yet.",
+    "namePlaceholder": "Project name",
+    "create": "Create",
+    "delete": "Delete",
+    "createdAt": "created {{date}}"
+  },
+  "library": {
+    "title": "Projects",
+    "newProject": "New project",
+    "namePlaceholder": "Project name",
+    "create": "Create",
+    "cancel": "Cancel",
+    "empty": "No projects yet.",
+    "emptyHint": "Create your first project to start editing.",
+    "videoCount_one": "{{count}} video",
+    "videoCount_other": "{{count}} videos",
+    "updated": "updated {{when}}",
+    "deleteConfirm": "Delete project “{{name}}” and all its videos?",
+    "rename": "Rename",
+    "delete": "Delete",
+    "searchPlaceholder": "Search projects…",
+    "noMatch": "No project matches “{{query}}”."
+  },
+  "videosPage": {
+    "newVideo": "New video",
+    "namePlaceholder": "Video name (e.g. Sequence 1)",
+    "empty": "No videos in this project.",
+    "emptyHint": "Create a video to open the workflow editor.",
+    "clipCount_one": "{{count}} clip",
+    "clipCount_other": "{{count}} clips",
+    "nodeCount_one": "{{count}} node",
+    "nodeCount_other": "{{count}} nodes",
+    "deleteConfirm": "Delete video “{{name}}”?",
+    "creditsUsage": "{{count}} generations · ~{{credits}} credits (estimated)",
+    "startFrom": "Start from",
+    "blankVideo": "Blank video",
+    "blankVideoDesc": "An empty graph, build freely",
+    "searchPlaceholder": "Search videos…",
+    "noMatch": "No video matches “{{query}}”."
+  },
+  "settings": {
+    "title": "Settings",
+    "general": "General",
+    "application": "Application",
+    "assistantModel": "Assistant model",
+    "backup": "Backup",
+    "backupHint": ".raccord archive containing the database and all media. API keys don't transfer to another machine (local encryption).",
+    "backupExport": "Export a backup…",
+    "backupExporting": "Exporting…",
+    "backupExportDone": "Backup exported ({{files}} files, {{size}}): {{path}}",
+    "backupImport": "Import a backup…",
+    "backupImporting": "Restoring…",
+    "backupImportConfirm": "Replace all current data (projects, videos, media) with this backup? The app will restart. The previous database is kept as a .bak next to the new one.",
+    "backupImportDone": "Backup restored — restarting…",
+    "updates": "Updates",
+    "updateChannel": "Update channel",
+    "channelStable": "Stable",
+    "channelBeta": "Beta",
+    "channelHint": "The beta channel receives new features early (beta flags on by default). Only applies to the installed app — in development the channel is always \"dev\".",
+    "updateCheck": "Check for updates",
+    "updateInstall": "Restart and install",
+    "updateStatus": {
+      "unsupported": "Updates are unavailable in development.",
+      "idle": "No check performed yet.",
+      "checking": "Checking…",
+      "downloading": "Downloading version {{version}}…",
+      "downloaded": "Version {{version}} ready to install.",
+      "up-to-date": "The app is up to date.",
+      "error": "Error: {{error}}"
+    }
+  },
+  "time": {
+    "justNow": "just now",
+    "daysAgo": "{{count}}d ago",
+    "hoursAgo": "{{count}}h ago",
+    "minutesAgo": "{{count}}min ago"
+  },
+  "assetsPage": {
+    "tabVideos": "Videos",
+    "tabAssets": "Assets",
+    "import": "Import media",
+    "empty": "No assets in this project.",
+    "emptyHint": "Import images, videos or sounds: they become reusable in every video of the project through Asset nodes.",
+    "deleteConfirm": "Delete asset “{{name}}”? Nodes using it will lose their media.",
+    "kinds": {
+      "image": "Image",
+      "video": "Video",
+      "audio": "Audio"
+    },
+    "name": "Name",
+    "description": "Description (for AIs)",
+    "descriptionPlaceholder": "e.g. Main character — young pilot in a red flight suit",
+    "addDescription": "+ add a description for AIs",
+    "keyReadonly": "key: {{key}} (auto-generated, not editable)",
+    "edit": "Edit name & description",
+    "save": "Save",
+    "cancel": "Cancel",
+    "searchPlaceholder": "Search (name, key, description, tag)…",
+    "noMatch": "No asset matches “{{query}}”.",
+    "tags": "Tags",
+    "tagsPlaceholder": "comma-separated tags",
+    "duplicate": "duplicate",
+    "duplicateHint": "Identical content to another asset in this project"
+  },
+  "editor": {
+    "addNode": "Add node",
+    "addNodeTitle": "Add a node to the canvas",
+    "filterPlaceholder": "Filter models… (e.g. seedance, image)",
+    "noModelMatch": "No model matches “{{query}}”.",
+    "assetEntry": "Asset (project library)",
+    "kinds": {
+      "image": "Image",
+      "video": "Video",
+      "audio": "Audio",
+      "asset": "Studio"
+    },
+    "generateVideos": "Generate videos",
+    "generating": "Generating…",
+    "noVideoNodes": "No video node in the workflow",
+    "generateVideosTitle": "Generate every video in the workflow (clips that already succeeded are skipped)",
+    "exporting": "Exporting…",
+    "fcpxmlBundling": "Bundling…",
+    "mediaZipEmpty": "No generated clip to export — run the video generations first.",
+    "mediaZipSkipped": "Clips without output were skipped: {{clips}}",
+    "enlarge": "Enlarge",
+    "lightboxClose": "Close (Esc)",
+    "fixWithAssistant": "Fix with the assistant",
+    "adjustWithAssistant": "Adjust with the assistant",
+    "tidy": "Tidy",
+    "tidyTitle": "Auto-arrange all nodes cleanly (left → right) and refit the view",
+    "leftRight": "Left → Right",
+    "topBottom": "Top → Bottom",
+    "fit": "Fit",
+    "fitTitle": "Fit view to all nodes",
+    "timeline": "Timeline",
+    "showTimeline": "Show the timeline",
+    "hideTimeline": "Hide the timeline",
+    "historyBtn": "History",
+    "historyBtnTitle": "Generation history (all nodes)",
+    "assistant": "Assistant",
+    "assistantTitle": "Assistant (chat)",
+    "undo": "Undo the last change",
+    "redo": "Redo the undone change",
+    "replaceConfirm": "Replace existing nodes? OK = replace, Cancel = merge.",
+    "deleteNodeConfirm": "Delete this node and all its generations?",
+    "estimatedCost": "~{{credits}} credits (estimate)",
+    "historyPanel": {
+      "title": "History",
+      "close": "Close panel",
+      "loading": "Loading…",
+      "empty": "No generations yet.",
+      "jumpToNode": "Jump to the node on the canvas",
+      "deleted": "deleted",
+      "active": "Active",
+      "statusOk": "OK",
+      "statusFailed": "Failed",
+      "statusRunning": "Running"
+    },
+    "style": "Style",
+    "styleTitle": "The video's art direction — its style bible guides every prompt",
+    "styleNone": "No style"
+  },
+  "mcp": {
+    "title": "MCP server",
+    "hint": "Point any MCP-compatible agent (Claude Code, etc.) at this endpoint — it gets the same tools as the embedded assistant. Transport: Streamable HTTP, header Authorization: Bearer <token>.",
+    "url": "URL",
+    "token": "Token",
+    "copy": "Copy",
+    "copied": "Copied ✓",
+    "stopped": "Local server stopped — enable the local-api flag and restart the app."
+  },
+  "styles": {
+    "anime": {
+      "name": "Anime / 2D",
+      "desc": "Hand-drawn Japanese animation — cel shading, painterly backgrounds"
+    },
+    "commercial": {
+      "name": "Commercial",
+      "desc": "High-end ad look — studio lighting, punchy grading"
+    },
+    "cinematic-realism": {
+      "name": "Cinematic realism",
+      "desc": "Feature-film look — anamorphic lenses, natural light, grain"
+    },
+    "documentary": {
+      "name": "Documentary",
+      "desc": "Naturalistic — available light, observational camera"
+    }
+  },
+  "templates": {
+    "product-commercial": {
+      "name": "Product ad",
+      "desc": "3 chained shots + hero visual + music (24s)"
+    },
+    "anime-sequence": {
+      "name": "Anime sequence",
+      "desc": "Key visual + 3 chained shots + music (24s)"
+    },
+    "cinematic-sequence": {
+      "name": "Cinematic sequence",
+      "desc": "3 chained realistic shots + film score (24s)"
+    },
+    "vertical-social-ad": {
+      "name": "Vertical social ad",
+      "desc": "Hook + punchline in 9:16 + energetic track (15s)"
+    }
+  }
+}

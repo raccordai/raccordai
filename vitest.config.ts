@@ -1,0 +1,47 @@
+import { resolve } from 'node:path'
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@main': resolve('src/main'),
+      '@shared': resolve('src/shared'),
+      '@renderer': resolve('src/renderer/src'),
+      // Unit tests run outside an Electron app; main-process modules get a stub.
+      electron: resolve('tests/mocks/electron.ts')
+    }
+  },
+  test: {
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      // Coverage is measured (and gated) on the logic that unit tests own.
+      // UI components, IPC wiring and the kie.ai/Anthropic engines are covered
+      // by the E2E mock harness (see docs/testing.md), not counted here.
+      include: [
+        'src/shared/**/*.ts',
+        'src/main/services/projects.ts',
+        'src/main/services/videos.ts',
+        'src/main/services/graph.ts',
+        'src/main/services/graphHistory.ts',
+        'src/main/services/genQueue.ts',
+        'src/main/services/chatStore.ts',
+        'src/main/services/chatOpenAIFormat.ts',
+        'src/main/services/assets.ts',
+        'src/main/services/backup.ts',
+        'src/main/media/files.ts',
+        'src/renderer/src/lib/relativeTime.ts',
+        'src/renderer/src/lib/formatSeconds.ts'
+      ],
+      // config.ts is a bare constant — nothing to test.
+      exclude: ['**/*.test.ts', 'src/shared/config.ts'],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 75,
+        statements: 80
+      }
+    }
+  }
+})

@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1783673406275,
+      "tag": "0000_wild_thena",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1783675360867,
+      "tag": "0001_conscious_runaways",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1783684548851,
+      "tag": "0002_mute_darkstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1783797742926,
+      "tag": "0003_clammy_karnak",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1783800190268,
+      "tag": "0004_chunky_bedlam",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1783950206704,
+      "tag": "0005_even_mercury",
+      "breakpoints": true
+    }
+  ]
+}

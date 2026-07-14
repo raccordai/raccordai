@@ -1,0 +1,59 @@
+# Multi-OS packaging WITHOUT publishing: catches Windows/Linux-specific
+# breakage (paths, safeStorage, native rebuilds) early. Binaries are uploaded
+# as short-lived artifacts for manual smoke-testing.
+name: Package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            dist: dist:mac
+            artifact: '*.dmg'
+          - os: windows-latest
+            dist: dist:win
+            artifact: '*.exe'
+          - os: ubuntu-latest
+            dist: dist:linux
+            artifact: '*.{AppImage,deb}'
+    runs-on: ${{ matrix.os }}
+    env:
+      # No signing certs in CI — build unsigned on every OS.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version read from package.json "packageManager"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # postinstall rebuilds better-sqlite3 for Electron's ABI on each OS.
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      # Tests run through Electron's node (ELECTRON_RUN_AS_NODE) — headless,
+      # no display server needed on Linux.
+      - run: pnpm test
+
+      - run: pnpm exec electron-vite build
+
+      - run: pnpm exec electron-builder --publish=never
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: raccord-${{ matrix.os }}
+          path: dist/${{ matrix.artifact }}
+          retention-days: 7

@@ -1,0 +1,42 @@
+appId: ai.raccord.app
+productName: Raccord
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+asarUnpack:
+  - '**/*.node'
+extraResources:
+  - from: drizzle
+    to: drizzle
+mac:
+  category: public.app-category.video
+  target:
+    - target: dmg
+      arch:
+        - arm64
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+linux:
+  category: AudioVideo
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+npmRebuild: true
+# Auto-update feed (electron-updater). The generic provider serves
+# latest*.yml (stable) / beta*.yml (beta channel) + binaries from a static
+# host — point this at the real endpoint (or switch to the github provider)
+# when releases ship. Binaries built by CI are NOT published automatically.
+publish:
+  provider: generic
+  url: https://updates.raccord.ai

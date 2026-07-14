@@ -1,0 +1,272 @@
+{
+  "app": {
+    "name": "Raccord"
+  },
+  "menu": {
+    "file": "Fichier",
+    "importWorkflow": "Importer un workflow (JSON)…",
+    "importing": "Import en cours…",
+    "exportWorkflow": "Exporter le workflow (JSON)",
+    "exportFcpxml": "Exporter la timeline (FCPXML + médias)…",
+    "exportMediaZip": "Exporter les clips vidéo (ZIP)…"
+  },
+  "home": {
+    "title": "Socle technique",
+    "subtitle": "Phase 1 — tout ce qui s'affiche ici traverse la pile complète : renderer → IPC typé → services → SQLite.",
+    "version": "Version",
+    "channel": "Canal",
+    "platform": "Plateforme",
+    "database": "Base de données",
+    "localApi": "Serveur local",
+    "localApiRunning": "actif sur 127.0.0.1:{{port}}",
+    "localApiStopped": "arrêté (flag local-api désactivé — redémarrer après activation)"
+  },
+  "language": {
+    "label": "Langue",
+    "fr": "Français",
+    "en": "English"
+  },
+  "flags": {
+    "title": "Feature flags",
+    "overridden": "forcé",
+    "default": "défaut ({{channel}})",
+    "reset": "Réinitialiser"
+  },
+  "chat": {
+    "title": "Assistant",
+    "placeholder": "Demander une action ou poser une question…",
+    "send": "Envoyer",
+    "clear": "Effacer la conversation",
+    "thinking": "L'assistant travaille…",
+    "empty": "Décris ce que tu veux monter : l'assistant peut créer des nœuds, les connecter, écrire les prompts et lancer les générations directement dans le workflow.",
+    "homeEmpty": "Décris le projet que tu veux : l'assistant crée le projet, la vidéo, choisit la direction artistique et construit tout le workflow. Ex. « Crée-moi un projet d'animé de 2,5 minutes sur… »",
+    "needKey": "Ajoute ta clé API kie.ai dans Intégrations, sur la page d'accueil, pour activer l'assistant.",
+    "attach": "Joindre des images",
+    "imageTooBig": "Image trop lourde (max 5 Mo) : {{name}}",
+    "fixPromptPrefill": "La génération du nœud « {{label}} » a échoué avec l'erreur : {{error}}\nAnalyse le prompt de ce nœud, corrige-le pour éviter cette erreur en restant fidèle à l'intention, mets à jour le nœud puis relance la génération.",
+    "adjustPromptPrefill": "Le résultat du nœud « {{label}} » ne me convient pas : \n\nAméliore le prompt en conséquence, mets à jour le nœud puis relance la génération."
+  },
+  "integrations": {
+    "title": "Intégrations",
+    "kieKeyLabel": "Clé API kie.ai",
+    "kieKeyPlaceholder": "Coller la clé API…",
+    "kieKeyConfigured": "Clé configurée — chiffrée par le trousseau du système",
+    "kieKeyMissing": "Aucune clé configurée — requise pour lancer des générations",
+    "save": "Enregistrer",
+    "clear": "Supprimer la clé"
+  },
+  "project": {
+    "back": "Retour aux projets",
+    "notFound": "Projet introuvable.",
+    "editorSoon": "L'éditeur de workflow arrivera avec la phase 2 (portage du graphe de nœuds depuis Video Studio)."
+  },
+  "projects": {
+    "title": "Projets",
+    "empty": "Aucun projet pour le moment.",
+    "namePlaceholder": "Nom du projet",
+    "create": "Créer",
+    "delete": "Supprimer",
+    "createdAt": "créé le {{date}}"
+  },
+  "library": {
+    "title": "Projets",
+    "newProject": "Nouveau projet",
+    "namePlaceholder": "Nom du projet",
+    "create": "Créer",
+    "cancel": "Annuler",
+    "empty": "Aucun projet pour l'instant.",
+    "emptyHint": "Crée ton premier projet pour commencer à monter.",
+    "videoCount_one": "{{count}} vidéo",
+    "videoCount_other": "{{count}} vidéos",
+    "updated": "modifié {{when}}",
+    "deleteConfirm": "Supprimer le projet « {{name}} » et toutes ses vidéos ?",
+    "rename": "Renommer",
+    "delete": "Supprimer",
+    "searchPlaceholder": "Rechercher un projet…",
+    "noMatch": "Aucun projet ne correspond à « {{query}} »."
+  },
+  "videosPage": {
+    "newVideo": "Nouvelle vidéo",
+    "namePlaceholder": "Nom de la vidéo (ex. Séquence 1)",
+    "empty": "Aucune vidéo dans ce projet.",
+    "emptyHint": "Crée une vidéo pour ouvrir l'éditeur de workflow.",
+    "clipCount_one": "{{count}} clip",
+    "clipCount_other": "{{count}} clips",
+    "nodeCount_one": "{{count}} nœud",
+    "nodeCount_other": "{{count}} nœuds",
+    "deleteConfirm": "Supprimer la vidéo « {{name}} » ?",
+    "creditsUsage": "{{count}} générations · ~{{credits}} crédits (estimation)",
+    "startFrom": "Commencer depuis",
+    "blankVideo": "Vidéo vierge",
+    "blankVideoDesc": "Un graphe vide, à construire librement",
+    "searchPlaceholder": "Rechercher une vidéo…",
+    "noMatch": "Aucune vidéo ne correspond à « {{query}} »."
+  },
+  "settings": {
+    "title": "Réglages",
+    "general": "Général",
+    "application": "Application",
+    "assistantModel": "Modèle de l'assistant",
+    "backup": "Sauvegarde",
+    "backupHint": "Archive .raccord contenant la base de données et tous les médias. Les clés API ne sont pas transférables sur une autre machine (chiffrement local).",
+    "backupExport": "Exporter une sauvegarde…",
+    "backupExporting": "Export en cours…",
+    "backupExportDone": "Sauvegarde exportée ({{files}} fichiers, {{size}}) : {{path}}",
+    "backupImport": "Importer une sauvegarde…",
+    "backupImporting": "Restauration en cours…",
+    "backupImportConfirm": "Remplacer toutes les données actuelles (projets, vidéos, médias) par cette sauvegarde ? L'application redémarrera. L'ancienne base est conservée en .bak à côté de la nouvelle.",
+    "backupImportDone": "Sauvegarde restaurée — redémarrage…",
+    "updates": "Mises à jour",
+    "updateChannel": "Canal de mise à jour",
+    "channelStable": "Stable",
+    "channelBeta": "Bêta",
+    "channelHint": "Le canal bêta reçoit les nouvelles fonctionnalités en avance (flags bêta activés par défaut). Ne s'applique qu'à l'application installée — en développement le canal est toujours « dev ».",
+    "updateCheck": "Rechercher une mise à jour",
+    "updateInstall": "Redémarrer et installer",
+    "updateStatus": {
+      "unsupported": "Mises à jour indisponibles en développement.",
+      "idle": "Aucune vérification effectuée.",
+      "checking": "Vérification en cours…",
+      "downloading": "Téléchargement de la version {{version}}…",
+      "downloaded": "Version {{version}} prête à installer.",
+      "up-to-date": "L'application est à jour.",
+      "error": "Erreur : {{error}}"
+    }
+  },
+  "time": {
+    "justNow": "à l'instant",
+    "daysAgo": "il y a {{count}} j",
+    "hoursAgo": "il y a {{count}} h",
+    "minutesAgo": "il y a {{count}} min"
+  },
+  "assetsPage": {
+    "tabVideos": "Vidéos",
+    "tabAssets": "Assets",
+    "import": "Importer des médias",
+    "empty": "Aucun asset dans ce projet.",
+    "emptyHint": "Importe des images, vidéos ou sons : ils seront réutilisables dans toutes les vidéos du projet via les nœuds Asset.",
+    "deleteConfirm": "Supprimer l'asset « {{name}} » ? Les nœuds qui l'utilisent perdront leur média.",
+    "kinds": {
+      "image": "Image",
+      "video": "Vidéo",
+      "audio": "Audio"
+    },
+    "name": "Nom",
+    "description": "Description (pour les IA)",
+    "descriptionPlaceholder": "ex. Personnage principal — jeune pilote en combinaison rouge",
+    "addDescription": "+ ajouter une description pour les IA",
+    "keyReadonly": "clé : {{key}} (générée, non modifiable)",
+    "edit": "Modifier nom & description",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "searchPlaceholder": "Rechercher (nom, clé, description, tag)…",
+    "noMatch": "Aucun asset ne correspond à « {{query}} ».",
+    "tags": "Tags",
+    "tagsPlaceholder": "tags séparés par des virgules",
+    "duplicate": "doublon",
+    "duplicateHint": "Contenu identique à un autre asset du projet"
+  },
+  "editor": {
+    "addNode": "Ajouter un nœud",
+    "addNodeTitle": "Ajouter un nœud au canvas",
+    "filterPlaceholder": "Filtrer les modèles… (ex. seedance, image)",
+    "noModelMatch": "Aucun modèle ne correspond à « {{query}} ».",
+    "assetEntry": "Asset (bibliothèque du projet)",
+    "kinds": {
+      "image": "Image",
+      "video": "Vidéo",
+      "audio": "Audio",
+      "asset": "Studio"
+    },
+    "generateVideos": "Générer les vidéos",
+    "generating": "Génération…",
+    "noVideoNodes": "Aucun nœud vidéo dans le workflow",
+    "generateVideosTitle": "Générer toutes les vidéos du workflow (les clips déjà réussis sont ignorés)",
+    "exporting": "Export…",
+    "fcpxmlBundling": "Archivage…",
+    "mediaZipEmpty": "Aucun clip généré à exporter — lance d'abord les générations vidéo.",
+    "mediaZipSkipped": "Clips sans sortie ignorés : {{clips}}",
+    "enlarge": "Agrandir",
+    "lightboxClose": "Fermer (Échap)",
+    "fixWithAssistant": "Corriger via l'assistant",
+    "adjustWithAssistant": "Ajuster via l'assistant",
+    "tidy": "Ranger",
+    "tidyTitle": "Réorganiser tous les nœuds proprement (gauche → droite) et recadrer la vue",
+    "leftRight": "Gauche → Droite",
+    "topBottom": "Haut → Bas",
+    "fit": "Cadrer",
+    "fitTitle": "Cadrer la vue sur tous les nœuds",
+    "timeline": "Timeline",
+    "showTimeline": "Afficher la timeline",
+    "hideTimeline": "Masquer la timeline",
+    "historyBtn": "Historique",
+    "historyBtnTitle": "Historique des générations (tous les nœuds)",
+    "assistant": "Assistant",
+    "assistantTitle": "Assistant (chat)",
+    "undo": "Annuler la dernière modification",
+    "redo": "Rétablir la modification annulée",
+    "replaceConfirm": "Remplacer les nœuds existants ? OK = remplacer, Annuler = fusionner.",
+    "deleteNodeConfirm": "Supprimer ce nœud et toutes ses générations ?",
+    "estimatedCost": "~{{credits}} crédits (estimation)",
+    "historyPanel": {
+      "title": "Historique",
+      "close": "Fermer le panneau",
+      "loading": "Chargement…",
+      "empty": "Aucune génération pour le moment.",
+      "jumpToNode": "Aller au nœud sur le canvas",
+      "deleted": "supprimé",
+      "active": "Actif",
+      "statusOk": "OK",
+      "statusFailed": "Échec",
+      "statusRunning": "En cours"
+    },
+    "style": "Style",
+    "styleTitle": "Direction artistique de la vidéo — sa bible de style guide chaque prompt",
+    "styleNone": "Aucun style"
+  },
+  "mcp": {
+    "title": "Serveur MCP",
+    "hint": "Branche n'importe quel agent compatible MCP (Claude Code, etc.) sur ce endpoint — il obtient les mêmes outils que l'assistant intégré. Transport : Streamable HTTP, en-tête Authorization: Bearer <token>.",
+    "url": "URL",
+    "token": "Token",
+    "copy": "Copier",
+    "copied": "Copié ✓",
+    "stopped": "Serveur local arrêté — active le flag local-api puis redémarre l'app."
+  },
+  "styles": {
+    "anime": {
+      "name": "Animé / 2D",
+      "desc": "Animation japonaise dessinée — cel shading, décors peints"
+    },
+    "commercial": {
+      "name": "Publicité",
+      "desc": "Look pub haut de gamme — lumière studio, étalonnage punchy"
+    },
+    "cinematic-realism": {
+      "name": "Cinéma réaliste",
+      "desc": "Rendu film — objectifs anamorphiques, lumière naturelle, grain"
+    },
+    "documentary": {
+      "name": "Documentaire",
+      "desc": "Naturaliste — lumière disponible, caméra observationnelle"
+    }
+  },
+  "templates": {
+    "product-commercial": {
+      "name": "Pub produit",
+      "desc": "3 plans enchaînés + visuel héro + musique (24 s)"
+    },
+    "anime-sequence": {
+      "name": "Séquence animé",
+      "desc": "Key visual + 3 plans enchaînés + musique (24 s)"
+    },
+    "cinematic-sequence": {
+      "name": "Séquence cinéma",
+      "desc": "3 plans réalistes enchaînés + musique de film (24 s)"
+    },
+    "vertical-social-ad": {
+      "name": "Pub verticale 9:16",
+      "desc": "Hook + punchline en 9:16 + musique énergique (15 s)"
+    }
+  }
+}

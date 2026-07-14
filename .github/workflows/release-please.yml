@@ -1,0 +1,22 @@
+# Automated versioning + changelog from conventional commits.
+# release-please maintains a release PR; merging it bumps package.json,
+# updates CHANGELOG.md and tags the release (vX.Y.Z). The tag is what the
+# multi-OS build workflow can later attach binaries to.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

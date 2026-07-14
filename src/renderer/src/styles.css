@@ -1,0 +1,82 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /*
+   * Semantic palette — sober, Figma-like. ALL colored UI goes through these
+   * tokens (never raw violet/red/emerald utilities):
+   *   accent  — the single action/selection color (calm blue)
+   *   success — muted green, status only (badges, checkmarks)
+   *   danger  — muted red, reserved for error STATES and destructive hover
+   *             hints; never a solid button background
+   *   warning — muted amber, status only
+   */
+  /* Palette pastel (référence Romain) :
+     #ff9bc6 rose · #ffbcd6 rose clair · #ffe5f9 rose pâle · #b7b6ff lavande · #afdeff bleu ciel
+     Sur accent/highlight pleins, le texte est FONCÉ (text-neutral-900) — jamais blanc. */
+  --color-accent: #b7b6ff;
+  --color-accent-hover: #c9c8ff;
+  --color-accent-soft: #afdeff;
+  --color-highlight: #ff9bc6;
+  --color-highlight-hover: #ffb1d3;
+  --color-highlight-soft: #ffbcd6;
+  --color-success: #86d3a2;
+  --color-danger: #f28b82;
+  --color-warning: #ffd58a;
+}
+
+/* Floating panel look — the whole editor chrome is made of these islands.
+   NO overflow:hidden here: islands with dropdowns (toolbar) must let them
+   escape; scrollable islands add `overflow-hidden` themselves. */
+@utility island {
+  border-radius: 1rem;
+  border: 1px solid rgb(38 38 38 / 0.9);
+  background-color: rgb(20 20 20 / 0.92);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 0.45);
+}
+
+/* Chromium hit-testing bug: with backdrop-filter on an ancestor (.island),
+   <video> elements render but receive NO input (controls visible, unclickable).
+   Giving the video its own stacking context restores hit-testing. */
+.island video {
+  position: relative;
+  z-index: 1;
+}
+
+/* The minimap lives in the bottom-left corner of the canvas island — the only
+   corner no floating panel ever covers. (React Flow panels carry split
+   position classes: `.bottom.left`.) */
+.react-flow__panel.bottom.left {
+  margin: 0 0 12px 12px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-neutral-950 text-neutral-200 antialiased;
+}
+
+/* No focus outlines anywhere (demande Romain) — the app is mouse-driven;
+   hover/active states carry the affordance. */
+:focus,
+:focus-visible {
+  outline: none;
+}
+
+/* macOS hidden title bar: keep the top strip draggable. */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-drag a,
+.titlebar-drag button,
+.titlebar-drag input,
+.titlebar-drag select,
+.titlebar-drag .no-drag {
+  -webkit-app-region: no-drag;
+}

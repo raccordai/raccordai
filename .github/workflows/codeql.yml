@@ -1,0 +1,32 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '30 6 * * 1' # weekly, Monday morning
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # Generated/bundled code would drown real findings.
+          config: |
+            paths-ignore:
+              - out
+              - dist
+              - drizzle
+              - src/renderer/src/routeTree.gen.ts
+
+      - uses: github/codeql-action/analyze@v3

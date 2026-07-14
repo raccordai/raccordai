@@ -1,0 +1,8 @@
+# Build outputs & generated code
+out/
+dist/
+coverage/
+node_modules/
+drizzle/
+src/renderer/src/routeTree.gen.ts
+pnpm-lock.yaml
