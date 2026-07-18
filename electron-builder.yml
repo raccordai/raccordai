@@ -1,5 +1,8 @@
 appId: ai.raccord.app
 productName: Raccord
+# No spaces (the NSIS default is "Raccord Setup X.Y.Z.exe"): these names end
+# up as GitHub release asset URLs and in electron-updater's latest*.yml.
+artifactName: '${productName}-${version}-${arch}.${ext}'
 directories:
   buildResources: build
   output: dist
@@ -18,6 +21,10 @@ mac:
     - target: dmg
       arch:
         - arm64
+    # electron-updater installs from the zip on macOS (the dmg is download-only).
+    - target: zip
+      arch:
+        - arm64
 win:
   target:
     - target: nsis
@@ -33,10 +40,10 @@ linux:
       arch:
         - x64
 npmRebuild: true
-# Auto-update feed (electron-updater). The generic provider serves
-# latest*.yml (stable) / beta*.yml (beta channel) + binaries from a static
-# host — point this at the real endpoint (or switch to the github provider)
-# when releases ship. Binaries built by CI are NOT published automatically.
+# Auto-update feed (electron-updater): GitHub releases. publish-release.yml
+# attaches binaries + latest*.yml to each release; the beta channel maps to
+# GitHub prereleases (allowPrerelease in updater.ts), not to a channel file.
 publish:
-  provider: generic
-  url: https://updates.raccord.ai
+  provider: github
+  owner: raccordai
+  repo: raccordai

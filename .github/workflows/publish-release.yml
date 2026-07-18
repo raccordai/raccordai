@@ -1,0 +1,74 @@
+# Builds the mac/windows/linux installers for a tagged release and attaches
+# them to the GitHub release. Called by release-please.yml after each release;
+# workflow_dispatch allows backfilling an existing tag (e.g. v0.2.0).
+#
+# Besides the versioned files, stable-named copies are uploaded so a website
+# can link the newest build forever:
+#   https://github.com/raccordai/raccordai/releases/latest/download/Raccord-mac.dmg
+name: publish-release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach binaries to (e.g. v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # No signing certs in CI — build unsigned on every OS.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: pnpm/action-setup@v4 # version read from package.json "packageManager"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # postinstall rebuilds better-sqlite3 for Electron's ABI on each OS.
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm exec electron-vite build
+
+      - run: pnpm exec electron-builder --publish=never
+
+      - name: Alias binaries with stable names for /releases/latest/download links
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in dist/*.dmg; do cp "$f" dist/Raccord-mac.dmg; done
+          for f in dist/*.exe; do cp "$f" dist/Raccord-windows.exe; done
+          for f in dist/*.AppImage; do cp "$f" dist/Raccord-linux.AppImage; done
+          for f in dist/*.deb; do cp "$f" dist/Raccord-linux.deb; done
+
+      # latest*.yml, blockmaps and the mac zip are what electron-updater
+      # (github provider, see electron-builder.yml) reads and downloads.
+      - name: Upload to the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          gh release upload '${{ inputs.tag }}' \
+            dist/*.dmg dist/*.zip dist/*.exe dist/*.AppImage dist/*.deb \
+            dist/*.blockmap dist/latest*.yml dist/beta*.yml --clobber

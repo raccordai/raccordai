@@ -10,9 +10,14 @@ const { autoUpdater } = electronUpdater
 /**
  * Auto-update via electron-updater, wired to the release channels:
  *   - dev (unpackaged): updater disabled, status stays 'unsupported';
- *   - packaged: the feed channel follows the `updateChannel` setting —
- *     'stable' reads latest*.yml, 'beta' reads beta*.yml from the publish
- *     endpoint declared in electron-builder.yml.
+ *   - packaged: the feed is the GitHub releases of the repo declared in
+ *     electron-builder.yml. The `updateChannel` setting maps to prereleases:
+ *     'stable' only sees full releases, 'beta' also accepts GitHub
+ *     prereleases (vX.Y.Z-beta.N tags — the provider resolves their channel
+ *     file from the tag itself, so `autoUpdater.channel` stays untouched).
+ *
+ * NOTE (macOS): electron-updater refuses to install onto an unsigned app —
+ * until builds are notarized, mac users get status 'error' on update attempts.
  *
  * Updates download in the background; installation is user-triggered from
  * Settings (quitAndInstall), never forced mid-session.
@@ -33,7 +38,7 @@ export function initUpdater(): void {
   if (initialized || !app.isPackaged) return
   initialized = true
 
-  autoUpdater.channel = getUpdateChannel() === 'beta' ? 'beta' : 'latest'
+  autoUpdater.allowPrerelease = getUpdateChannel() === 'beta'
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
@@ -71,7 +76,7 @@ export async function checkForUpdates(): Promise<UpdateState> {
 /** Applies the update channel change immediately (next check uses it). */
 export function applyUpdateChannel(): void {
   if (!initialized) return
-  autoUpdater.channel = getUpdateChannel() === 'beta' ? 'beta' : 'latest'
+  autoUpdater.allowPrerelease = getUpdateChannel() === 'beta'
 }
 
 /** Quits and installs the downloaded update. */

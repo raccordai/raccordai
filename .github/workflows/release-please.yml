@@ -1,7 +1,9 @@
 # Automated versioning + changelog from conventional commits.
 # release-please maintains a release PR; merging it bumps package.json,
-# updates CHANGELOG.md and tags the release (vX.Y.Z). The tag is what the
-# multi-OS build workflow can later attach binaries to.
+# updates CHANGELOG.md and tags the release (vX.Y.Z), then publish-release.yml
+# builds the mac/windows/linux binaries and attaches them to that release.
+# (Chained as a job on purpose: releases created with GITHUB_TOKEN never fire
+# a `release:` event, so a separate event-triggered workflow would not run.)
 name: release-please
 
 on:
@@ -15,8 +17,21 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
