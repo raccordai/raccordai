@@ -21,7 +21,9 @@ function tmp(): string {
 }
 
 afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  // maxRetries: Windows returns transient ENOTEMPTY/EBUSY while handles close
+  for (const dir of dirs.splice(0))
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 /** A fake userData layout: a db file + two media files in one project dir. */

@@ -7,7 +7,7 @@
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
-  "author": "Romain Manniez",
+  "author": "Romain Manniez <romainmanniez@gmail.com>",
   "packageManager": "pnpm@10.6.5",
   "engines": {
     "node": ">=22"
