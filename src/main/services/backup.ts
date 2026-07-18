@@ -10,7 +10,8 @@ import {
   readdirSync,
   renameSync,
   rmSync,
-  statSync
+  statSync,
+  type WriteStream
 } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { sql } from 'drizzle-orm'
@@ -70,14 +71,21 @@ export async function writeBackupArchive(opts: {
   let files = 0
 
   await new Promise<void>((resolve, reject) => {
-    out.on('error', reject)
+    // Resolve on 'close', not 'finish': Windows keeps the file locked until
+    // the descriptor is actually released (callers may move/delete it next).
+    out.on('close', resolve)
+    const fail = (err: unknown): void => {
+      out.destroy()
+      reject(err)
+    }
+    out.on('error', fail)
     const zip = new Zip((err, chunk, final) => {
       if (err) {
-        reject(err)
+        fail(err)
         return
       }
       out.write(Buffer.from(chunk))
-      if (final) out.end(() => resolve())
+      if (final) out.end()
     })
 
     const addEntry = (name: string, data: Uint8Array, compress: boolean): void => {
@@ -102,7 +110,7 @@ export async function writeBackupArchive(opts: {
         if (out.writableNeedDrain) await once(out, 'drain')
       }
       zip.end()
-    })().catch(reject)
+    })().catch(fail)
   })
 
   return { files, bytes: statSync(opts.outPath).size }
@@ -112,22 +120,34 @@ export async function writeBackupArchive(opts: {
 export async function extractBackupArchive(archivePath: string, stagingDir: string): Promise<void> {
   mkdirSync(stagingDir, { recursive: true })
   const writes: Promise<void>[] = []
+  const fileOuts: WriteStream[] = []
 
+  // The promise settles only once every descriptor is released ('close', not
+  // 'end'/'finish') — Windows locks open files, and the caller may delete the
+  // archive or the staging dir as soon as we return/throw.
   await new Promise<void>((resolve, reject) => {
+    let failure: Error | undefined
+    const fail = (err: Error): void => {
+      failure ??= err
+      stream.destroy()
+      for (const fileOut of fileOuts) fileOut.destroy()
+    }
+
     const unzip = new Unzip((file) => {
       const rel = file.name.replaceAll('\\', '/')
       if (rel.endsWith('/')) return // directory entry
       const target = join(stagingDir, rel)
       if (target !== stagingDir && !target.startsWith(stagingDir + sep)) {
-        reject(new Error(`Backup archive contains an unsafe path: "${file.name}"`))
+        fail(new Error(`Backup archive contains an unsafe path: "${file.name}"`))
         return
       }
       mkdirSync(dirname(target), { recursive: true })
       const fileOut = createWriteStream(target)
+      fileOuts.push(fileOut)
       writes.push(once(fileOut, 'close').then(() => undefined))
       file.ondata = (err, data, final) => {
         if (err) {
-          reject(err)
+          fail(err)
           return
         }
         fileOut.write(Buffer.from(data))
@@ -142,12 +162,16 @@ export async function extractBackupArchive(archivePath: string, stagingDir: stri
     stream.on('end', () => {
       try {
         unzip.push(new Uint8Array(0), true)
-        resolve()
       } catch (err) {
-        reject(err)
+        fail(err as Error)
       }
     })
-    stream.on('error', reject)
+    stream.on('error', (err) => {
+      failure ??= err
+    })
+    stream.on('close', () => {
+      Promise.allSettled(writes).then(() => (failure ? reject(failure) : resolve()))
+    })
   })
 
   await Promise.all(writes)
