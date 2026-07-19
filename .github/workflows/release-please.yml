@@ -35,3 +35,6 @@ jobs:
     uses: ./.github/workflows/publish-release.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
+    # Called workflows do NOT receive repo secrets by default — without this,
+    # release builds are unsigned even with the signing secrets configured.
+    secrets: inherit
