@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/raccordai/raccordai/compare/v0.2.0...v0.3.0) (2026-07-19)
+
+
+### Features
+
+* attach installers to releases and enable auto-update via GitHub ([78b8b85](https://github.com/raccordai/raccordai/commit/78b8b85e8ddbfd843c94d1dd34eed0191258584f))
+* sign and notarize macOS builds in CI ([0b17707](https://github.com/raccordai/raccordai/commit/0b17707584309d5d69a063437720549e12870b52))
+
 ## [0.2.0](https://github.com/raccordai/raccordai/compare/v0.1.0...v0.2.0) (2026-07-18)
 
 
