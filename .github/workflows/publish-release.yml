@@ -30,10 +30,11 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    env:
-      # Never sign from a runner keychain; macOS signs via the explicit
-      # CSC_LINK below, windows/linux builds stay unsigned.
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    # NOTE: do NOT set CSC_IDENTITY_AUTO_DISCOVERY=false here — in
+    # electron-builder 26 it short-circuits findIdentity() before the
+    # CSC_LINK keychain is even searched (no identity/CSC_NAME configured),
+    # so macOS builds silently ship unsigned. Hosted runners have no other
+    # identities, so auto-discovery only ever finds the CSC_LINK one.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,6 +62,16 @@ jobs:
           APPLE_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
+
+      # electron-builder only WARNS when signing/notarization is skipped, so a
+      # green job can otherwise publish a build macOS reports as "damaged".
+      - name: Fail if the macOS build is unsigned or not notarized
+        if: matrix.os == 'macos-latest'
+        run: |
+          app=(dist/mac*/Raccord.app)
+          codesign --verify --deep --strict "$app"
+          codesign -dvv "$app" 2>&1 | grep "Authority=Developer ID Application"
+          xcrun stapler validate "$app"
 
       - name: Alias binaries with stable names for /releases/latest/download links
         shell: bash
