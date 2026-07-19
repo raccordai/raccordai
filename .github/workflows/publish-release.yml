@@ -31,7 +31,8 @@ jobs:
         os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     env:
-      # No signing certs in CI — build unsigned on every OS.
+      # Never sign from a runner keychain; macOS signs via the explicit
+      # CSC_LINK below, windows/linux builds stay unsigned.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +51,16 @@ jobs:
 
       - run: pnpm exec electron-vite build
 
+      # macOS: signed (Developer ID .p12 in MAC_CSC_LINK) and notarized —
+      # electron-builder triggers notarization when the APPLE_* vars are set,
+      # and just warns/skips when they are absent (PR builds, forks).
       - run: pnpm exec electron-builder --publish=never
+        env:
+          CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
 
       - name: Alias binaries with stable names for /releases/latest/download links
         shell: bash

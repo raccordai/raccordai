@@ -49,7 +49,16 @@ jobs:
 
       - run: pnpm exec electron-vite build
 
+      # macOS signs + notarizes with the same secrets as publish-release.yml:
+      # a broken cert/password/secret fails HERE, on an ordinary push, instead
+      # of during a release. Fork PRs have no secrets → unsigned but green.
       - run: pnpm exec electron-builder --publish=never
+        env:
+          CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
