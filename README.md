@@ -1,6 +1,39 @@
 # Raccord
 
-AI video studio as a desktop app (Electron) — production-grade successor to video-studio.
+**Generative video, under your direction.**
+
+Raccord is a desktop orchestrator for AI video: compose multiple models into
+workflows while keeping frame-level control — and drive it from the desktop,
+from agents, or from the built-in assistant.
+
+Anyone can generate. You're here to create.
+
+Free and open source. Website: [raccord.ai](https://raccord.ai)
+
+## Features
+
+- **The canvas** — shots as composable, inspectable nodes on a node graph.
+- **The timeline** — renders land in the timeline the moment they complete.
+- **The assistant** — a native studio tool built on MCP; ask for a full
+  project in one message.
+- **Style consistency** — set the look once, shots follow it.
+- **Refine in place** — tweak a prompt inline without rebuilding the workflow.
+- **Same shot, another model** — swap the model behind a shot in one click.
+- **Inline diagnostics** — errors and retries surface right on the node.
+- **History** — compare every generation of a shot in one place.
+- **MCP server** — plug external agents (Claude Code, …) straight into your
+  project.
+
+Generation runs through a single [KIE.ai](https://kie.ai) API key — one key
+for every model, at rates 30%+ cheaper than going direct.
+
+## Download
+
+| Platform                                  | Package                                                                                                                                                                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS (Universal — Apple Silicon & Intel) | [Raccord-mac.dmg](https://github.com/raccordai/raccordai/releases/latest/download/Raccord-mac.dmg)                                                                                                                        |
+| Windows 10 & 11 (x64)                     | [Raccord-windows.exe](https://github.com/raccordai/raccordai/releases/latest/download/Raccord-windows.exe)                                                                                                                |
+| Linux (x64)                               | [Raccord-linux.AppImage](https://github.com/raccordai/raccordai/releases/latest/download/Raccord-linux.AppImage) · [Raccord-linux.deb](https://github.com/raccordai/raccordai/releases/latest/download/Raccord-linux.deb) |
 
 ## Stack
 
