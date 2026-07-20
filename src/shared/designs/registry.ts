@@ -110,6 +110,35 @@ export const DESIGN_RECIPES: DesignRecipe[] = [
         'Production-design quality, coherent light sources, no text, no watermarks.',
         styled(style)
       )
+  },
+  {
+    id: 'storyboard',
+    label: 'Storyboard (9-panel grid)',
+    description:
+      'The pre-visualization step between design sheets and video: one 3x3 grid of 9 numbered panels showing how the scene unfolds — review the staging before spending video credits, then wire it as a shot reference (Seedance 2). Build it from the design sheets with gpt-image-2-image-to-image to lock identity at the storyboard stage.',
+    slot: '[SCENE]',
+    defaultModelId: 'gpt-image-2-text-to-image',
+    params: { aspect_ratio: '16:9' },
+    buildPrompt: ({ description, style }) =>
+      join(
+        `Storyboard of ${description.trim() || '[SCENE]'}:`,
+        'a single 3x3 grid of 9 sequential panels telling the scene beat by beat, read left to right, top to bottom, a small panel number in the corner of each panel.',
+        'Same characters, outfits, location, lighting and art style in every panel; framing varies like a film — establishing wide, mediums, close-ups — so each panel implies its camera move.',
+        'Clear readable compositions over dense detail. No speech bubbles, no captions, no other text, no watermarks.',
+        styled(style)
+      ),
+    byModel: {
+      // Preferred path: the connected design sheets lock identity at the storyboard stage.
+      'gpt-image-2-image-to-image': ({ description, style }) =>
+        join(
+          `Create a storyboard of ${description.trim() || '[SCENE]'}:`,
+          'a single 3x3 grid of 9 sequential panels telling the scene beat by beat, read left to right, top to bottom, a small panel number in the corner of each panel.',
+          'Keep every character, outfit, prop and set exactly consistent with the connected design sheets (Image 1, Image 2, …) across all panels.',
+          'Framing varies like a film — establishing wide, mediums, close-ups — so each panel implies its camera move.',
+          'Clear readable compositions over dense detail. No speech bubbles, no captions, no other text, no watermarks.',
+          styled(style)
+        )
+    }
   }
 ]
 

@@ -129,6 +129,17 @@ Rules that follow:
   `importWorkflow` stamps strictly increasing `createdAt` so the template edge
   array order IS the numbering. Keep role-critical edges (design reference
   before continuity frame) ordered accordingly.
+- **Storyboard = the pre-visualization step** between design sheets and video
+  (Seedance 2.x): one 3x3 grid of 9 numbered panels showing the scene beat by
+  beat, built FROM the sheets with `gpt-image-2-image-to-image` (recipe
+  `storyboard` in `src/shared/designs/registry.ts`) so identity is locked at
+  the storyboard stage, generated at the video's aspect ratio, and reviewed by
+  the user before any video credits are spent. It is a _reference_ like any
+  design sheet, with its own role in the prompt ("@Image2 is the 9-panel
+  storyboard — follow its panels in order, left to right, top to bottom"; on
+  multi-shot scenes each shot says which panels it covers) — the video prompt
+  then describes motion, not the visuals the grid already encodes. Blueprint:
+  `storyboard-sequence` in `src/shared/templates/registry.ts`.
 
 ### Graph wiring: `inputs` / `outputs`
 

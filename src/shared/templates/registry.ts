@@ -281,6 +281,153 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     }
   },
   {
+    id: 'storyboard-sequence',
+    label: 'Storyboarded scene (character sheet + 9-panel storyboard + 3 shots + music)',
+    description:
+      'The full pre-visualization pipeline: a character design sheet feeds a 9-panel storyboard grid (review the staging THERE, before any video credits are spent), then three chained Seedance 2 shots follow the storyboard panels in order — the sheet and the grid are wired as references, they never appear on screen.',
+    styleId: 'anime',
+    slots: ['[CHARACTER]', '[PLACE]', '[ACTION]'],
+    workflow: {
+      version: 1,
+      nodes: [
+        {
+          key: 'character-sheet',
+          modelId: 'gpt-image-2-text-to-image',
+          label: '00 — Character sheet',
+          intent:
+            'Character design reference — wired into the storyboard and every shot (@Image1), it must never appear as a frame.',
+          position: { x: col(0), y: row(0) },
+          params: {
+            prompt:
+              'Character design sheet of [CHARACTER]: full-body turnaround with three aligned views of the SAME character — front, three-quarter and profile — in a neutral standing pose. ' +
+              'Identical proportions, outfit, hairstyle and colors across all views. Plain light background, no scenery, no text labels, no watermarks. ' +
+              bible('anime'),
+            aspect_ratio: '16:9',
+            resolution: '1K'
+          }
+        },
+        {
+          key: 'storyboard',
+          modelId: 'gpt-image-2-image-to-image',
+          label: '01 — Storyboard (9 panels)',
+          intent:
+            'The 9-panel storyboard of the scene — the review gate before running the shots. Wired as a reference (@Image2) on every shot; it must never appear on screen.',
+          position: { x: col(1), y: row(0) },
+          params: {
+            prompt:
+              'Create a storyboard of [CHARACTER] in [PLACE]: the scene where [CHARACTER] [ACTION]. ' +
+              'A single 3x3 grid of 9 sequential panels telling the scene beat by beat, read left to right, top to bottom, a small panel number in the corner of each panel: ' +
+              'panels 1-3 establish [PLACE] and the character entering, panels 4-6 cover the action ([ACTION]), panels 7-9 land the emotional close-up finale. ' +
+              'Keep the character exactly consistent with the connected design sheet (Image 1) across all panels. ' +
+              'Framing varies like a film — establishing wide, mediums, close-ups. Clear readable compositions, no speech bubbles, no captions, no other text, no watermarks. ' +
+              bible('anime'),
+            aspect_ratio: '16:9',
+            resolution: '1K'
+          }
+        },
+        {
+          key: 'shot-1',
+          modelId: 'bytedance/seedance-2-fast',
+          label: 'Shot 01 — Establishing (panels 1-3)',
+          intent:
+            'Wide establishing shot following storyboard panels 1-3 (character design @Image1, storyboard @Image2 — references only).',
+          position: { x: col(2), y: row(0) },
+          params: {
+            prompt:
+              '[CHARACTER] matches the character design @Image1 (reference only — the sheet must not appear on screen). ' +
+              '@Image2 is the 9-panel storyboard of this scene — follow its panels in order, left to right, top to bottom; this shot covers panels 1-3. ' +
+              'Shot 1: wide establishing shot of [PLACE], [CHARACTER] walks into frame, slow pan following the character, wind moving through the scene. ' +
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
+              bible('anime'),
+            aspect_ratio: '16:9',
+            resolution: '720p',
+            duration: 8,
+            generate_audio: true,
+            web_search: false,
+            nsfw_checker: true
+          }
+        },
+        {
+          key: 'shot-2',
+          modelId: 'bytedance/seedance-2-fast',
+          label: 'Shot 02 — Action (panels 4-6)',
+          intent:
+            'Action beat following storyboard panels 4-6, continuous with shot 1 (starts on its last frame @Image3).',
+          position: { x: col(3), y: row(0) },
+          params: {
+            prompt:
+              '@Image3 as the first frame (seamless continuation of the previous shot). ' +
+              '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
+              '@Image2 is the 9-panel storyboard of this scene — follow its panels in order, left to right, top to bottom; this shot covers panels 4-6. ' +
+              'Shot 1: dynamic medium shot, [CHARACTER] [ACTION], fluid animation on the movement, dramatic camera tilt at the peak of the action. ' +
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
+              bible('anime'),
+            aspect_ratio: '16:9',
+            resolution: '720p',
+            duration: 8,
+            generate_audio: true,
+            web_search: false,
+            nsfw_checker: true
+          }
+        },
+        {
+          key: 'shot-3',
+          modelId: 'bytedance/seedance-2-fast',
+          label: 'Shot 03 — Finale (panels 7-9)',
+          intent:
+            "Emotional close-up finale following storyboard panels 7-9 (starts on shot 2's last frame @Image3).",
+          position: { x: col(4), y: row(0) },
+          params: {
+            prompt:
+              '@Image3 as the first frame (seamless continuation of the previous shot). ' +
+              '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
+              '@Image2 is the 9-panel storyboard of this scene — follow its panels in order, left to right, top to bottom; this shot covers panels 7-9. ' +
+              "Shot 1: slow push-in close-up on [CHARACTER]'s face, a quiet emotional beat closing the scene, eyes catching the light. " +
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
+              bible('anime'),
+            aspect_ratio: '16:9',
+            resolution: '720p',
+            duration: 8,
+            generate_audio: true,
+            web_search: false,
+            nsfw_checker: true
+          }
+        },
+        {
+          key: 'music',
+          modelId: 'suno/generate-music',
+          label: 'Music — Scene score',
+          intent: 'The emotional orchestral track of the scene.',
+          position: { x: col(2), y: row(1) },
+          params: {
+            prompt: '',
+            customMode: true,
+            instrumental: true,
+            model: 'V4_5',
+            style:
+              'anime opening, J-pop orchestral hybrid, soaring strings, energetic drums, emotional build',
+            title: '[PLACE] theme',
+            negativeTags: 'metal, harsh, dissonant',
+            vocalGender: ''
+          }
+        }
+      ],
+      edges: [
+        // Array order fixes the @Image numbering on every shot: character sheet
+        // FIRST (@Image1), storyboard grid second (@Image2), continuity third (@Image3).
+        { from: 'character-sheet', to: 'storyboard', input: 'input_urls', output: 'output' },
+        { from: 'character-sheet', to: 'shot-1', input: 'reference_image_urls', output: 'output' },
+        { from: 'storyboard', to: 'shot-1', input: 'reference_image_urls', output: 'output' },
+        { from: 'character-sheet', to: 'shot-2', input: 'reference_image_urls', output: 'output' },
+        { from: 'storyboard', to: 'shot-2', input: 'reference_image_urls', output: 'output' },
+        { from: 'shot-1', to: 'shot-2', input: 'reference_image_urls', output: 'lastFrame' },
+        { from: 'character-sheet', to: 'shot-3', input: 'reference_image_urls', output: 'output' },
+        { from: 'storyboard', to: 'shot-3', input: 'reference_image_urls', output: 'output' },
+        { from: 'shot-2', to: 'shot-3', input: 'reference_image_urls', output: 'lastFrame' }
+      ]
+    }
+  },
+  {
     id: 'cinematic-sequence',
     label: 'Cinematic sequence (3 shots + score)',
     description:

@@ -33,7 +33,15 @@ MODEL TIERS (same syntax — pick by job):
     more causes style collision and subject-recognition blur.
   - Omni-reference recipe: build the scene from THREE separate labeled references — environment
     (@Image1), character(s) (@Image2…), prop (@Image3) — then describe the scene with the tags.
-    Explicit role-per-reference beats one crowded storyboard image.
+    Explicit role-per-reference beats an unlabeled pile of images.
+  - STORYBOARD recipe (pre-visualization): before spending video credits on a scene, generate ONE
+    3x3 grid of 9 numbered panels showing the scene beat by beat (same characters, lighting and
+    style in every panel, at the video's aspect ratio) and let the user review the staging on the
+    grid. Then wire the grid as its OWN reference with an explicit role: "@Image2 is the 9-panel
+    storyboard of this scene — follow its panels in order, left to right, top to bottom" (keep the
+    character sheet as a separate @Image1; on multi-shot scenes, tell each shot which panels it
+    covers, e.g. "this shot covers panels 4-6"). The storyboard already encodes composition and
+    framing — spend the video prompt on MOTION: camera direction, rhythm, transition logic.
 
 FRAME ANCHORS (First/Last frame handles — these images APPEAR on screen literally):
   - The First frame / Last frame inputs pin the clip's exact opening/closing image (scene stills,

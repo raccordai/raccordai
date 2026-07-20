@@ -99,21 +99,49 @@ describe('workflow template registry', () => {
   // handles, and prompts must assign them a role.
   describe('input semantics', () => {
     it('image nodes marked as references never feed a frame-anchor handle', () => {
-      // Derived from the registry: each InputHandle declares its own semantics.
-      const FRAME_ANCHORS = new Set(
-        MODELS.flatMap((m) => m.inputs.filter((h) => h.frameAnchor).map((h) => h.key))
-      )
-      expect(FRAME_ANCHORS.size).toBeGreaterThan(0)
+      // Derived from the registry: each InputHandle declares its own semantics,
+      // PER MODEL — the same key can be a frame anchor on one model (seedance-1.5
+      // "input_urls") and a plain edit input on another (gpt-image-2-i2i).
+      expect(MODELS.some((m) => m.inputs.some((h) => h.frameAnchor))).toBe(true)
       for (const t of WORKFLOW_TEMPLATES) {
         for (const edge of t.workflow.edges) {
           const source = t.workflow.nodes.find((n) => n.key === edge.from)!
           const isReferenceImage = /reference/i.test(source.intent ?? '')
           if (isReferenceImage) {
+            const target = getModel(t.workflow.nodes.find((n) => n.key === edge.to)!.modelId)!
+            const handle = target.inputs.find((h) => h.key === edge.input)
             expect(
-              FRAME_ANCHORS.has(edge.input),
+              handle?.frameAnchor ?? false,
               `${t.id}: reference image "${edge.from}" wired to frame-anchor "${edge.input}" of "${edge.to}" — it would appear on screen`
             ).toBe(false)
           }
+        }
+      }
+    })
+
+    it('storyboard-sequence wires sheet @Image1, storyboard @Image2, continuity @Image3', () => {
+      const t = getWorkflowTemplate('storyboard-sequence')!
+      // The storyboard is built FROM the character sheet (identity locked at storyboard stage).
+      expect(t.workflow.edges[0]).toEqual({
+        from: 'character-sheet',
+        to: 'storyboard',
+        input: 'input_urls',
+        output: 'output'
+      })
+      for (const shot of ['shot-1', 'shot-2', 'shot-3']) {
+        const incoming = t.workflow.edges.filter((e) => e.to === shot)
+        // Edge array order IS the @Image numbering (import preserves it).
+        expect(incoming[0]!.from, `${shot}: @Image1 must be the character sheet`).toBe(
+          'character-sheet'
+        )
+        expect(incoming[1]!.from, `${shot}: @Image2 must be the storyboard`).toBe('storyboard')
+        const prompt = String(t.workflow.nodes.find((n) => n.key === shot)!.params.prompt)
+        expect(prompt).toContain('@Image1')
+        expect(prompt).toContain('@Image2 is the 9-panel storyboard')
+        expect(prompt).toContain('left to right, top to bottom')
+        if (incoming.length > 2) {
+          expect(incoming[2]!.output).toBe('lastFrame')
+          expect(prompt).toContain('@Image3 as the first frame')
         }
       }
     })

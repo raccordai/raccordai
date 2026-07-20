@@ -282,6 +282,11 @@
       "name": "Image de style",
       "desc": "Un cadre qui fixe le look du film",
       "placeholder": "ex. ruelle sous la pluie, ambiance polar"
+    },
+    "storyboard": {
+      "name": "Storyboard",
+      "desc": "Grille de 9 cases de la scène — aperçu de la mise en scène avant de générer la vidéo",
+      "placeholder": "ex. Léa traverse le toit et saute au coucher du soleil"
     }
   },
   "templates": {
@@ -292,6 +297,10 @@
     "anime-sequence": {
       "name": "Séquence animé",
       "desc": "Key visual + 3 plans enchaînés + musique (24 s)"
+    },
+    "storyboard-sequence": {
+      "name": "Scène storyboardée",
+      "desc": "Planche perso + storyboard 9 cases + 3 plans enchaînés + musique (24 s)"
     },
     "cinematic-sequence": {
       "name": "Séquence cinéma",

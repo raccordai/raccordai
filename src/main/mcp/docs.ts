@@ -28,8 +28,9 @@ Typical session:
   3. pick an art direction: docs "styles" — append the chosen style bible to every
      visual prompt of the video (cross-shot consistency), or start from a full
      blueprint: docs "templates" then docs "template:<id>" → import_workflow.
-     Need a character/décor/prop sheet? docs "designs" has ready prompt recipes
-     (wire the resulting node as a REFERENCE, never a frame anchor)
+     Need a character/décor/prop sheet or a scene storyboard? docs "designs" has
+     ready prompt recipes (wire the resulting node as a REFERENCE, never a frame
+     anchor; the storyboard is the review gate before spending video credits)
   4. add_node / connect_nodes / update_node — or import_workflow for a whole plan
   5. run_node (COSTS MONEY — each run calls the kie.ai API); completion is
      asynchronous: poll get_generations until status is success/failed.
@@ -84,7 +85,11 @@ Recipes:
   - Character consistency across shots: key visual → EVERY shot's reference_image_urls on Seedance 2
     ("[character] matches the design @Image1, reference only"); impossible on 1.5 (prompt-only).
   - Style consistency: append the video's style bible (docs "styles") verbatim to every visual prompt,
-    and keep a strong style keyword in Seedance 2 prompts (prevents photoreal drift).`
+    and keep a strong style keyword in Seedance 2 prompts (prevents photoreal drift).
+  - Pre-visualization (Seedance 2): storyboard each scene BEFORE running video — a 9-panel grid built
+    from the design sheets (docs "designs", recipe "storyboard"), reviewed by the user, then wired as
+    a reference with "follow its panels in order, left to right, top to bottom"; the video prompt then
+    describes motion (camera, rhythm, transitions), not the visuals the storyboard already encodes.`
 }
 
 function modelDetail(id: string): string {
@@ -147,18 +152,30 @@ ${entries.join('\n\n')}`
 function designsIndex(): string {
   const entries = DESIGN_RECIPES.map((r) => {
     const prompt = buildDesignPrompt(r, r.defaultModelId, { description: '' })
+    const overrides = Object.keys(r.byModel ?? {}).map(
+      (id) => `\nPrompt when using ${id} instead:\n${buildDesignPrompt(r, id, { description: '' })}`
+    )
     return `── ${r.id} — ${r.label}
 ${r.description}
 Model: ${r.defaultModelId}${r.params ? ` · params: ${JSON.stringify(r.params)}` : ''}
 Node intent: ${designIntent(r)}
 Prompt (replace ${r.slot} with the subject; keep the video's style bible appended when one is set):
-${prompt}`
+${prompt}${overrides.join('')}`
   })
   return `Design recipes — ready prompts for reusable design sheets (add_node with the recipe's model,
 params and prompt; give the node the recipe's intent). CRITICAL: a design node's output is a
 REFERENCE — wire it to reference inputs only (e.g. Seedance 2 "reference_image_urls" with a role
 in the prompt like "matches the design @Image1, reference only"), NEVER to a frame-anchor input
 (seedance-1.5 "input_urls", grok "image_urls") where it would appear on screen.
+
+The pipeline: design sheets (character/decor/prop) → storyboard → video shots. The storyboard is
+the pre-visualization gate: build it FROM the sheets (gpt-image-2-image-to-image, sheets wired to
+"input_urls" — use the recipe's per-model prompt), let the user review the staging on the 9-panel
+grid before any video credits are spent, then wire it on each Seedance 2 shot with the role
+"@ImageN is the 9-panel storyboard of this scene — follow its panels in order, left to right,
+top to bottom" (on multi-shot scenes, say which panels each shot covers). The video prompt then
+describes motion, not the visuals the storyboard already encodes. Match the storyboard's
+aspect_ratio to the video's.
 
 ${entries.join('\n\n')}`
 }

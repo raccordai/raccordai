@@ -282,6 +282,11 @@
       "name": "Style frame",
       "desc": "One frame that locks the film's look",
       "placeholder": "e.g. rainy alley, noir mood"
+    },
+    "storyboard": {
+      "name": "Storyboard",
+      "desc": "9-panel grid of the scene — preview the staging before generating video",
+      "placeholder": "e.g. Léa crosses the rooftop and leaps at sunset"
     }
   },
   "templates": {
@@ -292,6 +297,10 @@
     "anime-sequence": {
       "name": "Anime sequence",
       "desc": "Key visual + 3 chained shots + music (24s)"
+    },
+    "storyboard-sequence": {
+      "name": "Storyboarded scene",
+      "desc": "Character sheet + 9-panel storyboard + 3 chained shots + music (24s)"
     },
     "cinematic-sequence": {
       "name": "Cinematic sequence",
