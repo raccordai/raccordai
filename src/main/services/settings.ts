@@ -106,9 +106,8 @@ const updateChannelSchema = z.enum(['stable', 'beta'])
 export type UpdateChannel = z.infer<typeof updateChannelSchema>
 
 /**
- * Release channel for packaged builds: drives BOTH the auto-update feed
- * (updater.ts) and the flag defaults (env.getReleaseChannel). Dev builds
- * ignore it (channel is always 'dev' unpackaged).
+ * Release channel for packaged builds: drives the auto-update feed
+ * (updater.ts). Dev builds ignore it (channel is always 'dev' unpackaged).
  */
 export function getUpdateChannel(): UpdateChannel {
   const stored = updateChannelSchema.safeParse(getSetting('updateChannel'))

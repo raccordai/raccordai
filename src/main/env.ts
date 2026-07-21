@@ -4,8 +4,8 @@ import { getUpdateChannel } from './services/settings'
 
 /**
  * dev = unpackaged run. Packaged builds follow the updateChannel setting
- * (stable by default, beta opt-in from Settings) — the same channel drives
- * the auto-update feed and the flag defaults.
+ * (stable by default, beta opt-in from Settings) — the channel drives
+ * the auto-update feed.
  */
 export function getReleaseChannel(): ReleaseChannel {
   if (!app.isPackaged) return 'dev'

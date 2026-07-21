@@ -8,7 +8,6 @@ import { DESIGN_RECIPES } from '@shared/designs/registry'
 import { WORKFLOW_TEMPLATES, getWorkflowTemplate } from '@shared/templates/registry'
 import { AssetCard } from '@renderer/components/AssetCard'
 import { LibraryCard } from '@renderer/components/LibraryCard'
-import { useFlag } from '@renderer/features/flags/useFlags'
 import { useProject } from '@renderer/features/workflow/data'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
@@ -34,7 +33,6 @@ function VideosPage(): React.JSX.Element {
   const [tab, setTab] = useState<'videos' | 'assets'>('videos')
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
-  const creativeTemplates = useFlag('creative-templates')
   const [templateId, setTemplateId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -280,48 +278,46 @@ function VideosPage(): React.JSX.Element {
           </div>
 
           {/* Workflow blueprints — pre-wired shot graphs with [SLOTS] to personalize. */}
-          {creativeTemplates && (
-            <div>
-              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-                {t('videosPage.startFrom')}
-              </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">
+          <div>
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              {t('videosPage.startFrom')}
+            </div>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">
+              <button
+                type="button"
+                onClick={() => setTemplateId(null)}
+                className={`rounded-md border px-3 py-2 text-left transition-colors ${
+                  templateId === null
+                    ? 'border-accent bg-neutral-800/60'
+                    : 'border-neutral-800 hover:border-neutral-700'
+                }`}
+              >
+                <div className="text-sm text-neutral-200">{t('videosPage.blankVideo')}</div>
+                <div className="mt-0.5 text-[10px] text-neutral-500">
+                  {t('videosPage.blankVideoDesc')}
+                </div>
+              </button>
+              {WORKFLOW_TEMPLATES.map((template) => (
                 <button
+                  key={template.id}
                   type="button"
-                  onClick={() => setTemplateId(null)}
+                  onClick={() => setTemplateId(template.id)}
                   className={`rounded-md border px-3 py-2 text-left transition-colors ${
-                    templateId === null
+                    templateId === template.id
                       ? 'border-accent bg-neutral-800/60'
                       : 'border-neutral-800 hover:border-neutral-700'
                   }`}
                 >
-                  <div className="text-sm text-neutral-200">{t('videosPage.blankVideo')}</div>
+                  <div className="text-sm text-neutral-200">
+                    {t(`templates.${template.id}.name` as never)}
+                  </div>
                   <div className="mt-0.5 text-[10px] text-neutral-500">
-                    {t('videosPage.blankVideoDesc')}
+                    {t(`templates.${template.id}.desc` as never)}
                   </div>
                 </button>
-                {WORKFLOW_TEMPLATES.map((template) => (
-                  <button
-                    key={template.id}
-                    type="button"
-                    onClick={() => setTemplateId(template.id)}
-                    className={`rounded-md border px-3 py-2 text-left transition-colors ${
-                      templateId === template.id
-                        ? 'border-accent bg-neutral-800/60'
-                        : 'border-neutral-800 hover:border-neutral-700'
-                    }`}
-                  >
-                    <div className="text-sm text-neutral-200">
-                      {t(`templates.${template.id}.name` as never)}
-                    </div>
-                    <div className="mt-0.5 text-[10px] text-neutral-500">
-                      {t(`templates.${template.id}.desc` as never)}
-                    </div>
-                  </button>
-                ))}
-              </div>
+              ))}
             </div>
-          )}
+          </div>
         </form>
       )}
 

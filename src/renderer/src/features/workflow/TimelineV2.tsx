@@ -50,7 +50,7 @@ function Timecode({ seconds, dimAll = false }: { seconds: number; dimAll?: boole
 }
 
 /**
- * Timeline v2 — continuous NLE-style playback (behind the `timeline-v2` flag).
+ * Timeline v2 — continuous NLE-style playback.
  *
  * Engine: two stacked <video> elements. The active one plays the current clip;
  * the standby one preloads the next clip's media, and becomes active the

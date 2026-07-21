@@ -36,7 +36,6 @@ import {
   type DesignRecipe
 } from '@shared/designs/registry'
 import { invoke } from '@renderer/lib/ipc'
-import { useFlag } from '@renderer/features/flags/useFlags'
 import { Button } from '@renderer/components/ui/Button'
 import { Logo } from '@renderer/components/Logo'
 import { graphKeys, useIpcMutation, useProject, useProjectAssets, useVideo } from './data'
@@ -76,8 +75,6 @@ export function WorkflowToolbar({
   const { screenToFlowPosition } = useReactFlow()
   const video = useVideo(videoId).data
   const project = useProject(projectId).data
-  const creativeTemplates = useFlag('creative-templates')
-  const designRecipes = useFlag('design-recipes')
   const { mutate: setStyle } = useIpcMutation('videos:setStyle', [['videos']])
 
   // Undo/redo — state is refreshed by the ['history'] invalidation that every
@@ -123,7 +120,7 @@ export function WorkflowToolbar({
   }
 
   // Published design sheets of the project — offered as "from library" entries
-  // in the add-node menu (design-recipes flag only).
+  // in the add-node menu.
   const projectAssets = useProjectAssets(projectId).data
   const designAssets = useMemo(
     () => (projectAssets ?? []).filter((a) => a.designId !== null),
@@ -194,17 +191,15 @@ export function WorkflowToolbar({
       {/* Right: actions */}
       <AddNodeMenu
         onAdd={addNode}
-        onAddDesign={designRecipes ? addDesignNode : undefined}
-        libraryAssets={designRecipes ? designAssets : undefined}
-        onAddFromLibrary={designRecipes ? addLibraryDesignNode : undefined}
+        onAddDesign={addDesignNode}
+        libraryAssets={designAssets}
+        onAddFromLibrary={addLibraryDesignNode}
       />
 
-      {creativeTemplates && (
-        <StyleMenu
-          current={video?.styleId ?? null}
-          onSelect={(styleId) => setStyle({ videoId, styleId })}
-        />
-      )}
+      <StyleMenu
+        current={video?.styleId ?? null}
+        onSelect={(styleId) => setStyle({ videoId, styleId })}
+      />
 
       <div className="mx-1.5 h-5 w-px bg-neutral-800" />
 
@@ -348,9 +343,9 @@ function AddNodeMenu({
   onAddFromLibrary
 }: {
   onAdd: (modelId: string) => void
-  /** Present only when the design-recipes flag is on. */
+  /** Adds a design-recipe node to the canvas. */
   onAddDesign?: (recipeId: string, description: string) => void
-  /** Published design sheets of the project (design-recipes flag only). */
+  /** Published design sheets of the project. */
   libraryAssets?: AssetWithUrl[]
   onAddFromLibrary?: (asset: AssetWithUrl) => void
 }) {

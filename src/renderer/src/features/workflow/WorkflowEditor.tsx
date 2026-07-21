@@ -19,12 +19,11 @@ import type { GraphEdge, GraphNode } from '@shared/ipc/contracts'
 import { invoke } from '@renderer/lib/ipc'
 import { ModelNode, AssetNode } from './nodes/ModelNode'
 import { NodeParamsPanel } from './NodeParamsPanel'
-import { Timeline, useCollapsed } from './Timeline'
+import { useCollapsed } from './Timeline'
 import { TimelineV2 } from './TimelineV2'
 import { HistoryPanel } from './HistoryPanel'
 import { ChatPanel } from './ChatPanel'
 import { MessageSquare } from 'lucide-react'
-import { useFlag } from '@renderer/features/flags/useFlags'
 import { Button } from '@renderer/components/ui/Button'
 import { useAppMenus, useHeaderActions, type AppMenu } from '@renderer/components/menubar/MenuBar'
 import { WorkflowToolbar } from './Toolbar'
@@ -113,7 +112,6 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
-  const chatAvailable = useFlag('assistant-chat')
   /** Draft injected into the chat input (e.g. "fix this failed prompt"). */
   const [chatPrefill, setChatPrefill] = useState<string | null>(null)
   const askAssistant = useCallback((text: string) => {
@@ -124,21 +122,19 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   // Assistant toggle lives in the title bar, next to the settings gear.
   useHeaderActions(
     useMemo(
-      () =>
-        chatAvailable ? (
-          <Button
-            variant={chatOpen ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setChatOpen((v) => !v)}
-            title={t('editor.assistantTitle')}
-          >
-            <MessageSquare className="h-3.5 w-3.5" /> {t('editor.assistant')}
-          </Button>
-        ) : null,
-      [chatAvailable, chatOpen, t]
+      () => (
+        <Button
+          variant={chatOpen ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setChatOpen((v) => !v)}
+          title={t('editor.assistantTitle')}
+        >
+          <MessageSquare className="h-3.5 w-3.5" /> {t('editor.assistant')}
+        </Button>
+      ),
+      [chatOpen, t]
     )
   )
-  const timelineV2 = useFlag('timeline-v2')
   const [timelineCollapsed, setTimelineCollapsed] = useCollapsed()
   /** True while a "generate all videos" batch run is in flight. */
   const [runningAll, setRunningAll] = useState(false)
@@ -598,7 +594,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
             />
           </div>
 
-          {chatAvailable && chatOpen && (
+          {chatOpen && (
             <div className="absolute top-16 bottom-3 left-3 z-30 flex flex-col items-stretch">
               <ChatPanel
                 videoId={videoId}
@@ -623,7 +619,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
                   projectId={projectId}
                   onClose={() => setSelectedNodeId(null)}
                   onRun={() => handleRunNode(selectedNode.id)}
-                  onAskAssistant={chatAvailable ? askAssistant : undefined}
+                  onAskAssistant={askAssistant}
                 />
               )}
               {historyOpen && (
@@ -640,23 +636,13 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
           )}
         </div>
 
-        {timelineV2 ? (
-          <TimelineV2
-            graph={graphValue}
-            videoId={videoId}
-            onFocusNode={focusNode}
-            collapsed={timelineCollapsed}
-            setCollapsed={setTimelineCollapsed}
-          />
-        ) : (
-          <Timeline
-            graph={graphValue}
-            videoId={videoId}
-            onFocusNode={focusNode}
-            collapsed={timelineCollapsed}
-            setCollapsed={setTimelineCollapsed}
-          />
-        )}
+        <TimelineV2
+          graph={graphValue}
+          videoId={videoId}
+          onFocusNode={focusNode}
+          collapsed={timelineCollapsed}
+          setCollapsed={setTimelineCollapsed}
+        />
       </div>
     </WorkflowGraphContext.Provider>
   )

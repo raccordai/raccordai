@@ -31,12 +31,6 @@
     "title": "Remaining kie.ai credits on your account",
     "refresh": "Refresh kie.ai credits"
   },
-  "flags": {
-    "title": "Feature flags",
-    "overridden": "overridden",
-    "default": "default ({{channel}})",
-    "reset": "Reset"
-  },
   "chat": {
     "title": "Assistant",
     "placeholder": "Ask for an action or a question…",

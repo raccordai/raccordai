@@ -31,12 +31,6 @@
     "title": "Crédits kie.ai restants sur votre compte",
     "refresh": "Rafraîchir les crédits kie.ai"
   },
-  "flags": {
-    "title": "Feature flags",
-    "overridden": "forcé",
-    "default": "défaut ({{channel}})",
-    "reset": "Réinitialiser"
-  },
   "chat": {
     "title": "Assistant",
     "placeholder": "Demander une action ou poser une question…",

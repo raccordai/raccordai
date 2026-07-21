@@ -4,7 +4,6 @@ import { openDatabase } from './db/client'
 import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocolHandler, registerMediaProtocolPrivileges } from './media/protocol'
 import { startLocalApi } from './server'
-import * as flags from './services/flags'
 import { resumePolling } from './services/runEngine'
 import { initUpdater } from './services/updater'
 
@@ -84,13 +83,11 @@ if (!app.requestSingleInstanceLock()) {
       resumePolling()
       initUpdater() // no-op in dev; packaged builds check the channel feed
 
-      if (flags.isEnabled('local-api')) {
-        try {
-          await startLocalApi()
-        } catch (error) {
-          // The app is fully usable without the local API; log and move on.
-          console.error('[local-api] failed to start', error)
-        }
+      try {
+        await startLocalApi()
+      } catch (error) {
+        // The app is fully usable without the local API; log and move on.
+        console.error('[local-api] failed to start', error)
       }
 
       createWindow()

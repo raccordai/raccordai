@@ -7,7 +7,7 @@ import { getReleaseChannel } from '../env'
 import { getLocalApiPort, getLocalApiToken } from '../services/settings'
 
 /**
- * Local HTTP API (Hono), bound to loopback only, gated by the `local-api` flag.
+ * Local HTTP API (Hono), bound to loopback only.
  * Port and auth token are persisted settings so external clients (MCP config,
  * CLI tools) can rely on a stable address across launches.
  * This is the mounting point for the future MCP server (Streamable HTTP

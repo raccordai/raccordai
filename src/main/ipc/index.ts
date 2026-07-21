@@ -12,7 +12,6 @@ import * as backupService from '../services/backup'
 import * as updaterService from '../services/updater'
 import * as chatService from '../services/chat'
 import * as assetsService from '../services/assets'
-import * as flags from '../services/flags'
 import * as generationsService from '../services/generations'
 import * as graph from '../services/graph'
 import * as library from '../services/library'
@@ -49,9 +48,6 @@ export function registerIpcHandlers(): void {
 
   handle('settings:getLocale', () => settingsService.getLocale())
   handle('settings:setLocale', (locale) => settingsService.setLocale(locale))
-
-  handle('flags:list', () => flags.listFlags())
-  handle('flags:setOverride', ({ key, enabled }) => flags.setOverride(key, enabled))
 
   handle('projects:list', () => projects.listProjects())
   handle('projects:get', ({ id }) => projects.getProject(id))

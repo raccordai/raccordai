@@ -37,10 +37,10 @@ Principles:
 
 ## Test pyramid
 
-| Level | Target                                                                                                                              | Tool                                                                                                          |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Unit  | pure logic in `src/shared/` (models, flags, i18n), SQLite services (`graph`, `projects`, `videos`), helpers (`media/files`, `lib/`) | Vitest                                                                                                        |
-| E2E   | full flows (generation, chat, UI)                                                                                                   | Playwright `_electron` + kie.ai/Anthropic mocks (`RACCORD_KIE_BASE`, `RACCORD_ANTHROPIC_BASE`), see CLAUDE.md |
+| Level | Target                                                                                                                       | Tool                                                                                                          |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Unit  | pure logic in `src/shared/` (models, i18n), SQLite services (`graph`, `projects`, `videos`), helpers (`media/files`, `lib/`) | Vitest                                                                                                        |
+| E2E   | full flows (generation, chat, UI)                                                                                            | Playwright `_electron` + kie.ai/Anthropic mocks (`RACCORD_KIE_BASE`, `RACCORD_ANTHROPIC_BASE`), see CLAUDE.md |
 
 The generation engine (`runEngine.ts`, `kie.ts`), the chat (`chat.ts`) and the
 IPC/MCP wiring are deliberately **outside the unit scope**: their value is in

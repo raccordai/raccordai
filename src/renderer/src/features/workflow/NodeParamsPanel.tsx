@@ -38,7 +38,7 @@ interface Props {
   onClose: () => void
   /** Run this node (auto-runs any missing upstream dependencies first). */
   onRun: () => void
-  /** Opens the assistant with a prepared draft (absent when the chat flag is off). */
+  /** Opens the assistant with a prepared draft. */
   onAskAssistant?: (text: string) => void
 }
 

@@ -63,15 +63,6 @@ export const appInfoSchema = z.object({
 })
 export type AppInfo = z.infer<typeof appInfoSchema>
 
-export const flagStateSchema = z.object({
-  key: z.string(),
-  description: z.string(),
-  enabled: z.boolean(),
-  defaultValue: z.boolean(),
-  overridden: z.boolean()
-})
-export type FlagState = z.infer<typeof flagStateSchema>
-
 export const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -235,11 +226,6 @@ export const ipcContracts = {
   'app:getInfo': { input: z.void(), output: appInfoSchema },
   'settings:getLocale': { input: z.void(), output: localeSchema },
   'settings:setLocale': { input: localeSchema, output: z.void() },
-  'flags:list': { input: z.void(), output: z.array(flagStateSchema) },
-  'flags:setOverride': {
-    input: z.object({ key: z.string(), enabled: z.boolean().nullable() }),
-    output: z.array(flagStateSchema)
-  },
   'projects:list': { input: z.void(), output: z.array(projectSchema) },
   'projects:get': { input: z.object({ id: z.string() }), output: projectSchema.nullable() },
   'projects:create': { input: z.object({ name: z.string().trim().min(1) }), output: projectSchema },

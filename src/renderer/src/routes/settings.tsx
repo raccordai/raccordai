@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useFlags, useSetFlagOverride } from '@renderer/features/flags/useFlags'
 import { AssistantModelSwitcher } from '@renderer/features/settings/AssistantModelSwitcher'
 import { LocaleSwitcher } from '@renderer/features/settings/LocaleSwitcher'
 import { invoke } from '@renderer/lib/ipc'
@@ -11,12 +10,10 @@ export const Route = createFileRoute('/settings')({
   component: SettingsPage
 })
 
-/** All configuration in one place: language, integrations, flags, app info. */
+/** All configuration in one place: language, integrations, app info. */
 function SettingsPage(): React.JSX.Element {
   const { t } = useTranslation()
   const appInfo = useQuery({ queryKey: ['appInfo'], queryFn: () => invoke('app:getInfo') })
-  const flags = useFlags()
-  const setOverride = useSetFlagOverride()
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 px-8 py-10">
@@ -42,50 +39,6 @@ function SettingsPage(): React.JSX.Element {
           />
           <McpBlock />
         </div>
-      </Section>
-
-      <Section title={t('flags.title')}>
-        <ul className="flex flex-col gap-2">
-          {flags.data?.map((flag) => (
-            <li key={flag.key} className="island flex items-center justify-between gap-4 px-4 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <code className="text-sm text-neutral-100">{flag.key}</code>
-                  <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">
-                    {flag.overridden
-                      ? t('flags.overridden')
-                      : t('flags.default', { channel: appInfo.data?.channel ?? '…' })}
-                  </span>
-                </div>
-                <p className="mt-0.5 truncate text-xs text-neutral-500">{flag.description}</p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {flag.overridden && (
-                  <button
-                    className="text-xs text-neutral-500 hover:text-neutral-300"
-                    onClick={() => setOverride.mutate({ key: flag.key, enabled: null })}
-                  >
-                    {t('flags.reset')}
-                  </button>
-                )}
-                <button
-                  role="switch"
-                  aria-checked={flag.enabled}
-                  className={`h-5 w-9 rounded-full p-0.5 transition-colors ${
-                    flag.enabled ? 'bg-accent' : 'bg-neutral-700'
-                  }`}
-                  onClick={() => setOverride.mutate({ key: flag.key, enabled: !flag.enabled })}
-                >
-                  <span
-                    className={`block h-4 w-4 rounded-full bg-white transition-transform ${
-                      flag.enabled ? 'translate-x-4' : ''
-                    }`}
-                  />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
       </Section>
 
       <Section title={t('settings.updates')}>

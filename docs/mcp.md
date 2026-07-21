@@ -10,7 +10,7 @@ manage assets.
 - **Endpoint**: `http://127.0.0.1:4517/mcp` (Streamable HTTP transport, POST)
 - **Auth**: `Authorization: Bearer <token>` — URL and token can be copied from
   **Settings → Integrations → MCP server**
-- Requires the `local-api` flag to be on (default in dev) and the app running.
+- Requires the app to be running (the local API starts with the app).
 
 Example — wiring up Claude Code:
 

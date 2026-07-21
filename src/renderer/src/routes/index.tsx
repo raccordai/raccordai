@@ -9,7 +9,6 @@ import { LibraryCard } from '@renderer/components/LibraryCard'
 import { Button } from '@renderer/components/ui/Button'
 import { useHeaderActions } from '@renderer/components/menubar/MenuBar'
 import { ChatPanel } from '@renderer/features/workflow/ChatPanel'
-import { useFlag } from '@renderer/features/flags/useFlags'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
 
@@ -26,23 +25,21 @@ function LibraryPage(): React.JSX.Element {
   const [name, setName] = useState('')
   const [query, setQuery] = useState('')
   const [chatOpen, setChatOpen] = useState(false)
-  const chatAvailable = useFlag('assistant-chat')
 
   // Home assistant: project-level (create projects/videos, build workflows).
   useHeaderActions(
     useMemo(
-      () =>
-        chatAvailable ? (
-          <Button
-            variant={chatOpen ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setChatOpen((v) => !v)}
-            title={t('editor.assistantTitle')}
-          >
-            <MessageSquare className="h-3.5 w-3.5" /> {t('editor.assistant')}
-          </Button>
-        ) : null,
-      [chatAvailable, chatOpen, t]
+      () => (
+        <Button
+          variant={chatOpen ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setChatOpen((v) => !v)}
+          title={t('editor.assistantTitle')}
+        >
+          <MessageSquare className="h-3.5 w-3.5" /> {t('editor.assistant')}
+        </Button>
+      ),
+      [chatOpen, t]
     )
   )
 
@@ -180,7 +177,7 @@ function LibraryPage(): React.JSX.Element {
         </>
       )}
 
-      {chatAvailable && chatOpen && (
+      {chatOpen && (
         <div className="fixed top-16 right-3 bottom-3 z-40 flex flex-col items-stretch">
           <ChatPanel
             videoId={HOME_CHAT_ID}
