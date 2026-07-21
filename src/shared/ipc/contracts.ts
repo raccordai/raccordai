@@ -106,6 +106,10 @@ export const assetSchema = z.object({
   size: z.number().nullable(),
   /** Normalized (lowercase, deduplicated) user labels for filtering the library. */
   tags: z.array(z.string()),
+  /** Design-recipe category when this asset is a published design sheet (e.g. 'character'). */
+  designId: z.string().nullable(),
+  /** The subject the design sheet was built from ("Mira, 12, red scarf"). */
+  designSubject: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number().nullable()
 })
@@ -303,11 +307,17 @@ export const ipcContracts = {
     input: z.object({
       assetId: z.string(),
       name: z.string().trim().min(1).optional(),
-      description: z.string().nullable().optional()
+      description: z.string().nullable().optional(),
+      designSubject: z.string().nullable().optional()
     }),
     output: z.void()
   },
   'assets:remove': { input: z.object({ assetId: z.string() }), output: z.void() },
+  /** Videos whose workflow references this asset through a studio/asset node (delete guard). */
+  'assets:references': {
+    input: z.object({ assetId: z.string() }),
+    output: z.array(z.object({ videoId: z.string(), videoName: z.string(), nodeCount: z.number() }))
+  },
   'assets:setTags': {
     input: z.object({ assetId: z.string(), tags: z.array(z.string()) }),
     output: z.void()

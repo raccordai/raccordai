@@ -274,7 +274,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'list_assets',
     description:
-      'List a project’s assets (shared by all its videos): id, portable key, name, kind, description.',
+      'List a project’s assets (shared by all its videos): id, portable key, name, kind, description. designId/designSubject are set on published design sheets (reference-only: never wire them to a frame anchor).',
     inputSchema: obj({ projectId: str() }, ['projectId']),
     execute: ({ projectId }) =>
       assets.listAssets(String(projectId)).map((a) => ({
@@ -282,7 +282,9 @@ export const AGENT_TOOLS: AgentTool[] = [
         key: a.key,
         name: a.name,
         kind: a.kind,
-        description: a.description
+        description: a.description,
+        designId: a.designId,
+        designSubject: a.designSubject
       }))
   },
   {
@@ -297,7 +299,9 @@ export const AGENT_TOOLS: AgentTool[] = [
         name: a.name,
         kind: a.kind,
         description: a.description,
-        tags: a.tags
+        tags: a.tags,
+        designId: a.designId,
+        designSubject: a.designSubject
       }))
   },
   {
@@ -365,15 +369,52 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'update_asset',
     description:
-      'Update an asset’s name and/or description. Descriptions are shown to AIs — describe what the media depicts.',
-    inputSchema: obj({ assetId: str(), name: str(), description: str() }, ['assetId']),
+      'Update an asset’s name, description and/or design subject. Descriptions are shown to AIs — describe what the media depicts.',
+    inputSchema: obj(
+      {
+        assetId: str(),
+        name: str(),
+        description: str(),
+        designSubject: str('The subject a design sheet was built from (design assets only)')
+      },
+      ['assetId']
+    ),
     mutates: true,
-    execute: ({ assetId, name, description }) => {
+    execute: ({ assetId, name, description, designSubject }) => {
       assets.updateAsset(String(assetId), {
         ...(name !== undefined ? { name: String(name) } : {}),
-        ...(description !== undefined ? { description: String(description) } : {})
+        ...(description !== undefined ? { description: String(description) } : {}),
+        ...(designSubject !== undefined ? { designSubject: String(designSubject) } : {})
       })
       return { ok: true }
+    }
+  },
+  {
+    name: 'publish_design',
+    description:
+      'Publish a design node’s successful generation into the project’s asset library as a reusable design sheet (copies the node’s design category and subject). Reuse published sheets across videos instead of regenerating them.',
+    inputSchema: obj(
+      {
+        generationId: str('A successful generation of a design node'),
+        name: str('Library display name (e.g. the character’s name)'),
+        description: str('What the sheet depicts — shown to AIs')
+      },
+      ['generationId', 'name']
+    ),
+    mutates: true,
+    execute: async ({ generationId, name, description }) => {
+      const a = await assets.promoteGeneration(
+        String(generationId),
+        String(name),
+        description ? String(description) : undefined
+      )
+      return {
+        id: a.id,
+        key: a.key,
+        name: a.name,
+        designId: a.designId,
+        designSubject: a.designSubject
+      }
     }
   }
 ]

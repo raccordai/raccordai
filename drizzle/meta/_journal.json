@@ -43,6 +43,13 @@
       "when": 1783950206704,
       "tag": "0005_even_mercury",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784576492366,
+      "tag": "0006_unknown_skaar",
+      "breakpoints": true
     }
   ]
 }

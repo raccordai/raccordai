@@ -169,7 +169,13 @@
     "tags": "Tags",
     "tagsPlaceholder": "tags séparés par des virgules",
     "duplicate": "doublon",
-    "duplicateHint": "Contenu identique à un autre asset du projet"
+    "duplicateHint": "Contenu identique à un autre asset du projet",
+    "filterAll": "Tous",
+    "filterMedia": "Médias",
+    "subject": "Sujet du design",
+    "subjectPlaceholder": "ex. Léa, 20 ans, cheveux roses, veste jaune",
+    "designBadgeHint": "Planche de design publiée — à brancher en référence, jamais en frame anchor",
+    "deleteReferencedConfirm": "Supprimer l'asset « {{name}} » ? {{count}} nœud(s) l'utilisent dans : {{videos}}. Ces nœuds perdront leur média."
   },
   "editor": {
     "addNode": "Ajouter un nœud",
@@ -188,6 +194,9 @@
     "designHint": "Décris le sujet en quelques mots — le prompt est généré pour le modèle et le style de la vidéo. Branche ensuite ce nœud en entrée « reference » de tes plans.",
     "designAdd": "Créer le nœud",
     "designBack": "Retour à la liste",
+    "designFromLibrary": "Depuis la bibliothèque",
+    "designFromLibraryDesc": "Réutiliser une planche de design publiée du projet",
+    "designLibraryFilter": "Filtrer les designs…",
     "designFrameAnchorConfirm": "« {{label}} » est une planche de design : branchée sur « {{handle}} », elle apparaîtra À L'ÉCRAN dans la vidéo. Utilise plutôt une entrée « reference » (Seedance 2). Connecter quand même ?",
     "generateVideos": "Générer les vidéos",
     "generating": "Génération…",

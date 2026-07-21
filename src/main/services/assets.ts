@@ -4,8 +4,9 @@ import { basename, extname, join } from 'node:path'
 import { and, asc, eq } from 'drizzle-orm'
 import type { Asset } from '@shared/ipc/contracts'
 import { assetMatchesQuery, normalizeTags } from '@shared/assets/search'
+import { getDesignRecipe } from '@shared/designs/registry'
 import { getDb } from '../db/client'
-import { assets, generations, videos } from '../db/schema'
+import { assets, generations, nodes, videos } from '../db/schema'
 import {
   deleteMediaFile,
   importFileToStore,
@@ -128,6 +129,8 @@ export function importAssetFromFile(projectId: string, sourcePath: string): Asse
     uploadedUrl: null,
     uploadedAt: null,
     tags: [],
+    designId: null,
+    designSubject: null,
     contentHash: hashFile(filePath),
     createdAt: Date.now(),
     updatedAt: null
@@ -193,6 +196,8 @@ export async function importAssetFromUrl(
     uploadedUrl: null,
     uploadedAt: null,
     tags: [],
+    designId: null,
+    designSubject: null,
     contentHash: createHash('sha256').update(bytes).digest('hex'),
     createdAt: Date.now(),
     updatedAt: null
@@ -204,6 +209,9 @@ export async function importAssetFromUrl(
 /**
  * Copy a successful generation's media into the asset library as an
  * independent file (so deleting either side never breaks the other).
+ * Design nodes carry `params.designId`/`designSubject` markers — promotion
+ * copies them onto the asset (plus a category tag) so the library knows this
+ * is a reusable design sheet, not raw media.
  */
 export async function promoteGeneration(
   generationId: string,
@@ -218,6 +226,17 @@ export async function promoteGeneration(
   }
   const video = db.select().from(videos).where(eq(videos.id, gen.videoId)).get()
   if (!video) throw new Error('Video not found')
+
+  const node = db.select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
+  const nodeParams = (node?.params ?? {}) as { designId?: unknown; designSubject?: unknown }
+  const designId =
+    typeof nodeParams.designId === 'string' && getDesignRecipe(nodeParams.designId)
+      ? nodeParams.designId
+      : null
+  const designSubject =
+    designId && typeof nodeParams.designSubject === 'string' && nodeParams.designSubject.trim()
+      ? nodeParams.designSubject.trim()
+      : null
 
   const id = randomUUID()
   let filePath: string
@@ -263,7 +282,9 @@ export async function promoteGeneration(
     size,
     uploadedUrl: null,
     uploadedAt: null,
-    tags: [],
+    tags: designId ? normalizeTags([designId]) : [],
+    designId,
+    designSubject,
     contentHash: hashFile(filePath),
     createdAt: Date.now(),
     updatedAt: null
@@ -274,13 +295,48 @@ export async function promoteGeneration(
 
 export function updateAsset(
   id: string,
-  patch: { name?: string; description?: string | null }
+  patch: { name?: string; description?: string | null; designSubject?: string | null }
 ): void {
   getDb()
     .update(assets)
     .set({ ...patch, updatedAt: Date.now() })
     .where(eq(assets.id, id))
     .run()
+}
+
+export interface AssetReference {
+  videoId: string
+  videoName: string
+  nodeCount: number
+}
+
+/**
+ * Videos of the asset's project whose workflow references it through a
+ * studio/asset node — surfaced before deletion so the user knows which
+ * workflows a removal would break.
+ */
+export function assetReferences(assetId: string): AssetReference[] {
+  const asset = getAsset(assetId)
+  if (!asset) return []
+  const rows = getDb()
+    .select({ nodeParams: nodes.params, videoId: videos.id, videoName: videos.name })
+    .from(nodes)
+    .innerJoin(videos, eq(nodes.videoId, videos.id))
+    .where(and(eq(videos.projectId, asset.projectId), eq(nodes.modelId, 'studio/asset')))
+    .all()
+
+  const byVideo = new Map<string, AssetReference>()
+  for (const row of rows) {
+    if ((row.nodeParams as { assetId?: unknown } | null)?.assetId !== assetId) continue
+    const ref = byVideo.get(row.videoId) ?? {
+      videoId: row.videoId,
+      videoName: row.videoName,
+      nodeCount: 0
+    }
+    ref.nodeCount += 1
+    byVideo.set(row.videoId, ref)
+  }
+  return [...byVideo.values()]
 }
 
 export function deleteAsset(id: string): void {

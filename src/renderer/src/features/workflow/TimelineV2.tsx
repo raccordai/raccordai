@@ -664,6 +664,7 @@ export function TimelineV2({
                     {clip.url ? (
                       <VideoThumb
                         src={clip.url}
+                        overlay={false}
                         className="pointer-events-none h-full w-full object-cover opacity-70 group-hover:opacity-100"
                       />
                     ) : still ? (

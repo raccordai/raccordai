@@ -45,6 +45,10 @@ export const assets = sqliteTable(
     uploadedAt: integer('uploaded_at'),
     /** User-defined labels for filtering the library (normalized lowercase). */
     tags: text('tags', { mode: 'json' }).$type<string[]>(),
+    /** Design-recipe category when this asset is a published design sheet (e.g. 'character'). */
+    designId: text('design_id'),
+    /** The subject the sheet was built from — identity for reuse and agent context. */
+    designSubject: text('design_subject'),
     /** SHA-256 of the managed file — duplicate detection within a project. */
     contentHash: text('content_hash'),
     createdAt: integer('created_at').notNull(),

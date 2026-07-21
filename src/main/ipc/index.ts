@@ -106,6 +106,7 @@ export function registerIpcHandlers(): void {
   })
   handle('assets:update', ({ assetId, ...patch }) => assetsService.updateAsset(assetId, patch))
   handle('assets:remove', ({ assetId }) => assetsService.deleteAsset(assetId))
+  handle('assets:references', ({ assetId }) => assetsService.assetReferences(assetId))
   handle('assets:setTags', ({ assetId, tags }) => assetsService.setAssetTags(assetId, tags))
   handle('assets:duplicateGroups', ({ projectId }) => assetsService.duplicateAssetGroups(projectId))
 

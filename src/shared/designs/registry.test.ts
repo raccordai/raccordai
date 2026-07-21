@@ -73,12 +73,23 @@ describe('design recipe registry', () => {
           parsed.success,
           `invalid params — ${parsed.success ? '' : JSON.stringify(parsed.error.issues)}`
         ).toBe(true)
-        // Apart from the deliberate designId marker, only declared model fields.
+        // Apart from the deliberate design markers, only declared model fields.
         const known = new Set(model.paramFields.map((f) => f.key))
         for (const key of Object.keys(params)) {
-          if (key === 'designId') continue
+          if (key === 'designId' || key === 'designSubject') continue
           expect(known.has(key), `param "${key}" is not a ${model.id} field`).toBe(true)
         }
+      })
+
+      it('stamps the subject marker only when a description is given', () => {
+        const withSubject = designNodeParams(recipe, recipe.defaultModelId, {
+          description: '  Léa, pink hair  '
+        })
+        expect(withSubject.designSubject).toBe('Léa, pink hair')
+        const withoutSubject = designNodeParams(recipe, recipe.defaultModelId, {
+          description: '  '
+        })
+        expect('designSubject' in withoutSubject).toBe(false)
       })
 
       it('rejects unknown models', () => {

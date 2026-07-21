@@ -4,6 +4,7 @@ import { Film, FolderInput, Image as ImageIcon, Pencil, Plus, Search } from 'luc
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { assetMatchesQuery, nameMatchesQuery } from '@shared/assets/search'
+import { DESIGN_RECIPES } from '@shared/designs/registry'
 import { WORKFLOW_TEMPLATES, getWorkflowTemplate } from '@shared/templates/registry'
 import { AssetCard } from '@renderer/components/AssetCard'
 import { LibraryCard } from '@renderer/components/LibraryCard'
@@ -88,9 +89,26 @@ function VideosPage(): React.JSX.Element {
     queryFn: () => invoke('assets:listByProject', { projectId })
   })
   const [assetQuery, setAssetQuery] = useState('')
+  // 'all' | a design category present in the library | 'media' (non-design assets)
+  const [assetFilter, setAssetFilter] = useState('all')
+  const designFilters = useMemo(() => {
+    const present = new Set(
+      (assets.data ?? []).map((a) => a.designId).filter((id): id is string => id !== null)
+    )
+    return DESIGN_RECIPES.map((r) => r.id).filter((id) => present.has(id))
+  }, [assets.data])
   const filteredAssets = useMemo(
-    () => (assets.data ?? []).filter((a) => assetMatchesQuery(a, assetQuery)),
-    [assets.data, assetQuery]
+    () =>
+      (assets.data ?? [])
+        .filter((a) =>
+          assetFilter === 'all'
+            ? true
+            : assetFilter === 'media'
+              ? a.designId === null
+              : a.designId === assetFilter
+        )
+        .filter((a) => assetMatchesQuery(a, assetQuery)),
+    [assets.data, assetQuery, assetFilter]
   )
   const [videoQuery, setVideoQuery] = useState('')
   const filteredVideos = useMemo(
@@ -117,8 +135,12 @@ function VideosPage(): React.JSX.Element {
     onSuccess: invalidateAssets
   })
   const updateAsset = useMutation({
-    mutationFn: (input: { assetId: string; name: string; description: string | null }) =>
-      invoke('assets:update', input),
+    mutationFn: (input: {
+      assetId: string
+      name: string
+      description: string | null
+      designSubject: string | null
+    }) => invoke('assets:update', input),
     onSuccess: invalidateAssets
   })
   const setAssetTags = useMutation({
@@ -327,6 +349,27 @@ function VideosPage(): React.JSX.Element {
                 className="w-full bg-transparent text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
               />
             </div>
+            {designFilters.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {['all', ...designFilters, 'media'].map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => setAssetFilter(key)}
+                    className={`rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                      assetFilter === key
+                        ? 'bg-accent font-medium text-neutral-900'
+                        : 'bg-neutral-800/80 text-neutral-400 hover:text-neutral-200'
+                    }`}
+                  >
+                    {key === 'all'
+                      ? t('assetsPage.filterAll')
+                      : key === 'media'
+                        ? t('assetsPage.filterMedia')
+                        : t(`designs.${key}.name` as never)}
+                  </button>
+                ))}
+              </div>
+            )}
             {filteredAssets.length === 0 ? (
               <p className="text-sm italic text-neutral-500">
                 {t('assetsPage.noMatch', { query: assetQuery })}
@@ -342,14 +385,26 @@ function VideosPage(): React.JSX.Element {
                       updateAsset.mutate({
                         assetId: asset.id,
                         name: patch.name,
-                        description: patch.description
+                        description: patch.description,
+                        designSubject: patch.designSubject
                       })
                       setAssetTags.mutate({ assetId: asset.id, tags: patch.tags })
                     }}
                     onDelete={() => {
-                      if (confirm(t('assetsPage.deleteConfirm', { name: asset.name }))) {
-                        removeAsset.mutate(asset.id)
-                      }
+                      void (async () => {
+                        // Workflows referencing the asset via studio/asset nodes would
+                        // break — surface them before confirming the deletion.
+                        const refs = await invoke('assets:references', { assetId: asset.id })
+                        const message =
+                          refs.length > 0
+                            ? t('assetsPage.deleteReferencedConfirm', {
+                                name: asset.name,
+                                count: refs.reduce((sum, r) => sum + r.nodeCount, 0),
+                                videos: refs.map((r) => r.videoName).join(', ')
+                              })
+                            : t('assetsPage.deleteConfirm', { name: asset.name })
+                        if (confirm(message)) removeAsset.mutate(asset.id)
+                      })()
                     }}
                   />
                 ))}

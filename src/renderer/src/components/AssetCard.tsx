@@ -1,12 +1,15 @@
-import { Check, Copy, Image as ImageIcon, Music, Pencil, Trash2, X } from 'lucide-react'
+import { Check, Copy, Image as ImageIcon, Music, Palette, Pencil, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AssetWithUrl } from '@shared/ipc/contracts'
+import { VideoThumb } from '@renderer/components/VideoThumb'
 
 /**
  * Asset card (port of the studio's) — thumbnail / audio player, name,
  * portable key, tags, and the LLM-facing description with an inline edit form.
  * The description feeds the assistant and workflow-JSON asset manifests.
+ * Published design sheets additionally carry a category badge and an editable
+ * subject (the character/place/prop identity the sheet was built from).
  */
 export function AssetCard({
   asset,
@@ -17,7 +20,12 @@ export function AssetCard({
   asset: AssetWithUrl
   /** Another asset in the project has byte-identical content. */
   isDuplicate?: boolean
-  onSave: (patch: { name: string; description: string | null; tags: string[] }) => void
+  onSave: (patch: {
+    name: string
+    description: string | null
+    tags: string[]
+    designSubject: string | null
+  }) => void
   onDelete: () => void
 }): React.JSX.Element {
   const { t } = useTranslation()
@@ -25,6 +33,7 @@ export function AssetCard({
   const [name, setName] = useState(asset.name)
   const [description, setDescription] = useState(asset.description ?? '')
   const [tagsDraft, setTagsDraft] = useState(asset.tags.join(', '))
+  const [subject, setSubject] = useState(asset.designSubject ?? '')
 
   function save(e: React.FormEvent): void {
     e.preventDefault()
@@ -36,7 +45,8 @@ export function AssetCard({
       tags: tagsDraft
         .split(',')
         .map((tag) => tag.trim())
-        .filter((tag) => tag !== '')
+        .filter((tag) => tag !== ''),
+      designSubject: subject.trim() === '' ? null : subject.trim()
     })
     setEditing(false)
   }
@@ -51,10 +61,8 @@ export function AssetCard({
           </div>
         ) : asset.url ? (
           asset.kind === 'video' ? (
-            <video
+            <VideoThumb
               src={asset.url}
-              muted
-              preload="metadata"
               className="pointer-events-none h-full w-full object-cover"
             />
           ) : (
@@ -65,13 +73,25 @@ export function AssetCard({
             <ImageIcon className="h-8 w-8 text-neutral-700" />
           </div>
         )}
-        {isDuplicate && (
-          <span
-            className="absolute top-2 left-2 flex items-center gap-1 rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-medium text-warning"
-            title={t('assetsPage.duplicateHint')}
-          >
-            <Copy className="h-3 w-3" /> {t('assetsPage.duplicate')}
-          </span>
+        {(asset.designId || isDuplicate) && (
+          <div className="absolute top-2 left-2 flex items-center gap-1">
+            {asset.designId && (
+              <span
+                className="flex items-center gap-1 rounded bg-highlight/25 px-1.5 py-0.5 text-[10px] font-medium text-highlight-soft"
+                title={t('assetsPage.designBadgeHint')}
+              >
+                <Palette className="h-3 w-3" /> {t(`designs.${asset.designId}.name` as never)}
+              </span>
+            )}
+            {isDuplicate && (
+              <span
+                className="flex items-center gap-1 rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                title={t('assetsPage.duplicateHint')}
+              >
+                <Copy className="h-3 w-3" /> {t('assetsPage.duplicate')}
+              </span>
+            )}
+          </div>
         )}
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           <button
@@ -108,6 +128,14 @@ export function AssetCard({
             <div className="mt-0.5 font-mono text-[10px] text-accent-soft/80">
               key: <span className="text-accent-soft">{asset.key}</span>
             </div>
+            {asset.designSubject && (
+              <p
+                className="mt-1 text-[11px] leading-snug text-neutral-300"
+                title={t('assetsPage.subject')}
+              >
+                {asset.designSubject}
+              </p>
+            )}
             {asset.tags.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-1">
                 {asset.tags.map((tag) => (
@@ -146,6 +174,19 @@ export function AssetCard({
                 className="mt-0.5 w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 focus:border-accent focus:outline-none"
               />
             </div>
+            {asset.designId && (
+              <div>
+                <label className="text-[10px] tracking-wider text-neutral-500 uppercase">
+                  {t('assetsPage.subject')}
+                </label>
+                <input
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder={t('assetsPage.subjectPlaceholder')}
+                  className="mt-0.5 w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
+                />
+              </div>
+            )}
             <div>
               <label className="text-[10px] tracking-wider text-neutral-500 uppercase">
                 {t('assetsPage.description')}
@@ -179,6 +220,7 @@ export function AssetCard({
                   setName(asset.name)
                   setDescription(asset.description ?? '')
                   setTagsDraft(asset.tags.join(', '))
+                  setSubject(asset.designSubject ?? '')
                   setEditing(false)
                 }}
                 className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"

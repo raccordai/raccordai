@@ -7,6 +7,7 @@ import {
   Loader2,
   Maximize2,
   MessageSquare,
+  Palette,
   Play,
   Sparkles,
   Trash2,
@@ -14,11 +15,13 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { DESIGN_RECIPES } from '@shared/designs/registry'
 import type { GraphNode } from '@shared/ipc/contracts'
 import type { ModelDefinition } from '@shared/models'
 import { defaultParamsFor, getModel } from '@shared/models'
 import { Button } from '@renderer/components/ui/Button'
 import { Lightbox } from '@renderer/components/Lightbox'
+import { VideoThumb } from '@renderer/components/VideoThumb'
 import { Label, Select, TextArea, TextField } from '@renderer/components/ui/Input'
 import { incomingConnectionsFor, useWorkflowGraph } from './workflowContext'
 import { downloadMedia } from '@renderer/lib/downloadMedia'
@@ -82,6 +85,7 @@ function AssetNodeEditor({
   onClose: () => void
   onDelete: () => void
 }) {
+  const { t } = useTranslation()
   const assets = useProjectAssets(projectId).data
   const updateParams = useIpcMutation('nodes:updateParams', [graphKeys.graph(node.videoId)])
   const updateLabel = useIpcMutation('nodes:updateLabel', [graphKeys.graph(node.videoId)])
@@ -92,6 +96,14 @@ function AssetNodeEditor({
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  // 'all' | design category | 'media' — chips only show when the library has design sheets.
+  const [filter, setFilter] = useState('all')
+  const designFilters = DESIGN_RECIPES.map((r) => r.id).filter((id) =>
+    (assets ?? []).some((a) => a.designId === id)
+  )
+  const visibleAssets = (assets ?? []).filter((a) =>
+    filter === 'all' ? true : filter === 'media' ? a.designId === null : a.designId === filter
+  )
 
   async function handleDownload() {
     if (!currentAsset?.url) return
@@ -151,6 +163,27 @@ function AssetNodeEditor({
           </button>
         </div>
         {importError && <div className="mb-1 text-[10px] text-danger">{importError}</div>}
+        {designFilters.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {['all', ...designFilters, 'media'].map((key) => (
+              <button
+                key={key}
+                onClick={() => setFilter(key)}
+                className={`rounded-full px-2 py-0.5 text-[10px] transition-colors ${
+                  filter === key
+                    ? 'bg-accent font-medium text-neutral-900'
+                    : 'bg-neutral-800/80 text-neutral-400 hover:text-neutral-200'
+                }`}
+              >
+                {key === 'all'
+                  ? t('assetsPage.filterAll')
+                  : key === 'media'
+                    ? t('assetsPage.filterMedia')
+                    : t(`designs.${key}.name` as never)}
+              </button>
+            ))}
+          </div>
+        )}
         {assets === undefined ? (
           <div className="text-xs text-neutral-500">Loading…</div>
         ) : assets.length === 0 ? (
@@ -159,7 +192,7 @@ function AssetNodeEditor({
           </div>
         ) : (
           <ul className="grid grid-cols-3 gap-2">
-            {assets.map((a) => (
+            {visibleAssets.map((a) => (
               <li key={a.id}>
                 <button
                   onClick={() =>
@@ -176,16 +209,19 @@ function AssetNodeEditor({
                     <img src={a.url} loading="lazy" className="h-full w-full object-cover" alt="" />
                   )}
                   {a.kind === 'video' && a.url && (
-                    <video
-                      src={a.url}
-                      muted
-                      preload="none"
-                      className="h-full w-full object-cover"
-                    />
+                    <VideoThumb src={a.url} className="h-full w-full object-cover" />
                   )}
                   {a.kind === 'audio' && (
                     <div className="flex h-full items-center justify-center text-xs text-neutral-500">
                       🔊
+                    </div>
+                  )}
+                  {a.designId && (
+                    <div
+                      className="absolute left-1 top-1 rounded bg-highlight/90 p-0.5"
+                      title={t(`designs.${a.designId}.name` as never)}
+                    >
+                      <Palette className="h-3 w-3 text-neutral-900" />
                     </div>
                   )}
                   {currentAssetId === a.id && (

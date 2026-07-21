@@ -1,5 +1,6 @@
 import { Pencil, Trash2, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
+import { VideoThumb } from '@renderer/components/VideoThumb'
 
 /**
  * One card of the project/video libraries: 16:9 thumbnail (image, muted video
@@ -48,10 +49,8 @@ export function LibraryCard({
       <div className="relative aspect-video w-full overflow-hidden bg-neutral-900">
         {thumbnailUrl ? (
           thumbnailKind === 'video' ? (
-            <video
+            <VideoThumb
               src={thumbnailUrl}
-              muted
-              preload="metadata"
               className="pointer-events-none h-full w-full object-cover"
             />
           ) : (

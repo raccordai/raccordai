@@ -25,7 +25,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import type { GraphEdge, GraphNode } from '@shared/ipc/contracts'
+import type { AssetWithUrl, GraphEdge, GraphNode } from '@shared/ipc/contracts'
 import { MODELS, defaultParamsFor } from '@shared/models'
 import { STYLES, getStyle } from '@shared/styles/registry'
 import {
@@ -39,7 +39,7 @@ import { invoke } from '@renderer/lib/ipc'
 import { useFlag } from '@renderer/features/flags/useFlags'
 import { Button } from '@renderer/components/ui/Button'
 import { Logo } from '@renderer/components/Logo'
-import { graphKeys, useIpcMutation, useProject, useVideo } from './data'
+import { graphKeys, useIpcMutation, useProject, useProjectAssets, useVideo } from './data'
 import type { LayoutDirection } from './autoLayout'
 
 interface Props {
@@ -122,6 +122,29 @@ export function WorkflowToolbar({
     })
   }
 
+  // Published design sheets of the project — offered as "from library" entries
+  // in the add-node menu (design-recipes flag only).
+  const projectAssets = useProjectAssets(projectId).data
+  const designAssets = useMemo(
+    () => (projectAssets ?? []).filter((a) => a.designId !== null),
+    [projectAssets]
+  )
+
+  /**
+   * Library design sheet → a studio/asset node wired to it, with the same
+   * reference-only intent convention as freshly created design nodes.
+   */
+  async function addLibraryDesignNode(asset: AssetWithUrl) {
+    await createNode({
+      videoId,
+      modelId: 'studio/asset',
+      position: spawnPosition(),
+      params: { assetId: asset.id },
+      label: asset.name,
+      intent: `Design sheet "${asset.name}"${asset.designSubject ? ` (${asset.designSubject})` : ''} from the project library — reference only; on a frame anchor it would appear on screen.`
+    })
+  }
+
   /**
    * Design recipe → a pre-configured image node: prompt built for the target
    * model and the video's current style, reference-only intent, marker in
@@ -169,7 +192,12 @@ export function WorkflowToolbar({
       <div className="flex-1" />
 
       {/* Right: actions */}
-      <AddNodeMenu onAdd={addNode} onAddDesign={designRecipes ? addDesignNode : undefined} />
+      <AddNodeMenu
+        onAdd={addNode}
+        onAddDesign={designRecipes ? addDesignNode : undefined}
+        libraryAssets={designRecipes ? designAssets : undefined}
+        onAddFromLibrary={designRecipes ? addLibraryDesignNode : undefined}
+      />
 
       {creativeTemplates && (
         <StyleMenu
@@ -291,6 +319,8 @@ interface AddEntry {
   kind: 'design' | 'image' | 'video' | 'audio' | 'asset'
   /** Set on design entries — choosing one opens the description step instead of adding. */
   recipe?: DesignRecipe
+  /** Set on the "from library" entry — choosing it opens the design-asset picker step. */
+  library?: boolean
 }
 
 const KIND_ICONS: Record<AddEntry['kind'], React.ReactNode> = {
@@ -313,11 +343,16 @@ function normalize(s: string): string {
 
 function AddNodeMenu({
   onAdd,
-  onAddDesign
+  onAddDesign,
+  libraryAssets,
+  onAddFromLibrary
 }: {
   onAdd: (modelId: string) => void
   /** Present only when the design-recipes flag is on. */
   onAddDesign?: (recipeId: string, description: string) => void
+  /** Published design sheets of the project (design-recipes flag only). */
+  libraryAssets?: AssetWithUrl[]
+  onAddFromLibrary?: (asset: AssetWithUrl) => void
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -326,16 +361,35 @@ function AddNodeMenu({
   /** Non-null while the second step (design subject description) is showing. */
   const [pendingDesign, setPendingDesign] = useState<DesignRecipe | null>(null)
   const [designDesc, setDesignDesc] = useState('')
+  /** True while the design-asset picker step is showing. */
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [libraryQuery, setLibraryQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const designInputRef = useRef<HTMLInputElement>(null)
-  // Mirror for the search input's onBlur timeout (the state value is stale there).
+  const libraryInputRef = useRef<HTMLInputElement>(null)
+  // Mirrors for the search input's onBlur timeout (the state values are stale there).
   const pendingDesignRef = useRef<DesignRecipe | null>(null)
+  const libraryOpenRef = useRef(false)
   useEffect(() => {
     pendingDesignRef.current = pendingDesign
   }, [pendingDesign])
+  useEffect(() => {
+    libraryOpenRef.current = libraryOpen
+  }, [libraryOpen])
 
   const entries = useMemo<AddEntry[]>(
     () => [
+      ...(onAddFromLibrary && (libraryAssets?.length ?? 0) > 0
+        ? [
+            {
+              id: 'design:library',
+              label: t('editor.designFromLibrary'),
+              desc: t('editor.designFromLibraryDesc'),
+              kind: 'design' as const,
+              library: true
+            }
+          ]
+        : []),
       ...(onAddDesign
         ? DESIGN_RECIPES.map((r) => ({
             id: `design:${r.id}`,
@@ -359,7 +413,7 @@ function AddNodeMenu({
         kind: 'asset'
       }
     ],
-    [t, onAddDesign]
+    [t, onAddDesign, onAddFromLibrary, libraryAssets]
   )
 
   const q = normalize(query.trim())
@@ -379,22 +433,34 @@ function AddNodeMenu({
   }, [query])
 
   useEffect(() => {
-    if (open && !pendingDesign) inputRef.current?.focus()
-  }, [open, pendingDesign])
+    if (open && !pendingDesign && !libraryOpen) inputRef.current?.focus()
+  }, [open, pendingDesign, libraryOpen])
 
   useEffect(() => {
     if (pendingDesign) designInputRef.current?.focus()
   }, [pendingDesign])
+
+  useEffect(() => {
+    if (libraryOpen) libraryInputRef.current?.focus()
+  }, [libraryOpen])
 
   function close() {
     setOpen(false)
     setQuery('')
     setPendingDesign(null)
     setDesignDesc('')
+    setLibraryOpen(false)
+    setLibraryQuery('')
   }
 
   function choose(entry: AddEntry | undefined) {
     if (!entry) return
+    if (entry.library) {
+      // Second step: pick a published design sheet from the project library.
+      setLibraryOpen(true)
+      setLibraryQuery('')
+      return
+    }
     if (entry.recipe) {
       // Second step: ask for the subject before building the prompt.
       setPendingDesign(entry.recipe)
@@ -489,6 +555,79 @@ function AddNodeMenu({
                 </Button>
               </div>
             </div>
+          ) : libraryOpen ? (
+            <div className="p-2.5">
+              <div className="flex items-center gap-2">
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setLibraryOpen(false)
+                  }}
+                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+                  title={t('editor.designBack')}
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                </button>
+                {KIND_ICONS.design}
+                <span className="text-sm font-medium text-neutral-100">
+                  {t('editor.designFromLibrary')}
+                </span>
+              </div>
+              <input
+                ref={libraryInputRef}
+                value={libraryQuery}
+                onChange={(e) => setLibraryQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.stopPropagation()
+                    setLibraryOpen(false)
+                  }
+                }}
+                onBlur={() => setTimeout(close, 150)}
+                placeholder={t('editor.designLibraryFilter')}
+                className="mt-2 w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
+              />
+              <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+                {(libraryAssets ?? [])
+                  .filter((a) =>
+                    normalize(
+                      `${a.name} ${a.designSubject ?? ''} ${a.designId ?? ''} ${a.tags.join(' ')}`
+                    ).includes(normalize(libraryQuery.trim()))
+                  )
+                  .map((a) => (
+                    <li key={a.id}>
+                      <button
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          onAddFromLibrary?.(a)
+                          close()
+                        }}
+                        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-neutral-800"
+                      >
+                        {a.url ? (
+                          <img
+                            src={a.url}
+                            alt=""
+                            loading="lazy"
+                            className="h-9 w-9 flex-shrink-0 rounded object-cover"
+                          />
+                        ) : (
+                          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded bg-neutral-800">
+                            {KIND_ICONS.design}
+                          </span>
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm text-neutral-100">{a.name}</span>
+                          <span className="block truncate text-[11px] leading-snug text-neutral-500">
+                            {t(`designs.${a.designId}.name` as never)}
+                            {a.designSubject ? ` — ${a.designSubject}` : ''}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </div>
           ) : (
             <>
               <div className="flex items-center gap-2 border-b border-neutral-800 px-2.5 py-2">
@@ -500,8 +639,8 @@ function AddNodeMenu({
                   onKeyDown={onKeyDown}
                   onBlur={() =>
                     setTimeout(() => {
-                      // Not when the blur is the hand-off to the design step input.
-                      if (!pendingDesignRef.current) close()
+                      // Not when the blur is the hand-off to a second-step input.
+                      if (!pendingDesignRef.current && !libraryOpenRef.current) close()
                     }, 150)
                   }
                   placeholder={t('editor.filterPlaceholder')}

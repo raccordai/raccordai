@@ -11,6 +11,7 @@ import { createProject } from './projects'
 import { createVideo } from './videos'
 import { createNode } from './graph'
 import {
+  assetReferences,
   deleteAsset,
   duplicateAssetGroups,
   getAsset,
@@ -113,12 +114,13 @@ describe('update / delete', () => {
     expect(b.key).toBe('hero-shot-2')
   })
 
-  it('updates name and description', () => {
+  it('updates name, description and design subject', () => {
     const asset = importAssetFromFile(projectId, writeMedia('a.png', 'x'))
-    updateAsset(asset.id, { name: 'Renamed', description: 'desc' })
+    updateAsset(asset.id, { name: 'Renamed', description: 'desc', designSubject: 'Léa' })
     const updated = getAsset(asset.id)
     expect(updated?.name).toBe('Renamed')
     expect(updated?.description).toBe('desc')
+    expect(updated?.designSubject).toBe('Léa')
   })
 
   it('deletes the row and the managed file', () => {
@@ -172,12 +174,16 @@ describe('importAssetFromUrl', () => {
 })
 
 describe('promoteGeneration', () => {
-  function insertGeneration(overrides: Partial<typeof generations.$inferInsert>): string {
+  function insertGeneration(
+    overrides: Partial<typeof generations.$inferInsert>,
+    nodeParams?: unknown
+  ): string {
     const videoId = createVideo(projectId, 'V').id
     const node = createNode({
       videoId,
-      modelId: 'bytedance/seedance-2-fast',
-      position: { x: 0, y: 0 }
+      modelId: nodeParams ? 'gpt-image-2-text-to-image' : 'bytedance/seedance-2-fast',
+      position: { x: 0, y: 0 },
+      params: nodeParams
     })
     const id = randomUUID()
     db.insert(generations)
@@ -212,5 +218,59 @@ describe('promoteGeneration', () => {
   it('refuses a success with no media at all', async () => {
     const genId = insertGeneration({ resultPath: null, resultUrl: null })
     await expect(promoteGeneration(genId, 'x')).rejects.toThrowError(/no media/)
+  })
+
+  it('copies the design markers of a design node onto the asset', async () => {
+    const media = writeMedia('sheet.png', 'sheet-bytes')
+    const genId = insertGeneration(
+      { resultPath: media, resultMimeType: 'image/png' },
+      { prompt: 'sheet', designId: 'character', designSubject: 'Léa, pink hair' }
+    )
+    const asset = await promoteGeneration(genId, 'Léa')
+    expect(asset.designId).toBe('character')
+    expect(asset.designSubject).toBe('Léa, pink hair')
+    expect(asset.tags).toContain('character')
+  })
+
+  it('ignores unknown design ids and stays a plain media asset', async () => {
+    const media = writeMedia('odd.png', 'odd-bytes')
+    const genId = insertGeneration(
+      { resultPath: media, resultMimeType: 'image/png' },
+      { prompt: 'x', designId: 'not-a-recipe', designSubject: 'whatever' }
+    )
+    const asset = await promoteGeneration(genId, 'Odd')
+    expect(asset.designId).toBeNull()
+    expect(asset.designSubject).toBeNull()
+    expect(asset.tags).toEqual([])
+  })
+})
+
+describe('assetReferences', () => {
+  it('lists the videos whose studio/asset nodes point at the asset', () => {
+    const asset = importAssetFromFile(projectId, writeMedia('ref.png', 'r'))
+    const used = createVideo(projectId, 'Uses it').id
+    createNode({
+      videoId: used,
+      modelId: 'studio/asset',
+      position: { x: 0, y: 0 },
+      params: { assetId: asset.id }
+    })
+    createNode({
+      videoId: used,
+      modelId: 'studio/asset',
+      position: { x: 0, y: 200 },
+      params: { assetId: asset.id }
+    })
+    const other = createVideo(projectId, 'Untouched').id
+    createNode({
+      videoId: other,
+      modelId: 'studio/asset',
+      position: { x: 0, y: 0 },
+      params: { assetId: 'someone-else' }
+    })
+
+    const refs = assetReferences(asset.id)
+    expect(refs).toEqual([{ videoId: used, videoName: 'Uses it', nodeCount: 2 }])
+    expect(assetReferences('missing')).toEqual([])
   })
 })

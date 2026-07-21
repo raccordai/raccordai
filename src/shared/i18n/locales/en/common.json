@@ -169,7 +169,13 @@
     "tags": "Tags",
     "tagsPlaceholder": "comma-separated tags",
     "duplicate": "duplicate",
-    "duplicateHint": "Identical content to another asset in this project"
+    "duplicateHint": "Identical content to another asset in this project",
+    "filterAll": "All",
+    "filterMedia": "Media",
+    "subject": "Design subject",
+    "subjectPlaceholder": "e.g. Léa, 20, pink hair, yellow jacket",
+    "designBadgeHint": "Published design sheet — wire it as a reference, never a frame anchor",
+    "deleteReferencedConfirm": "Delete asset “{{name}}”? {{count}} node(s) use it in: {{videos}}. Those nodes will lose their media."
   },
   "editor": {
     "addNode": "Add node",
@@ -188,6 +194,9 @@
     "designHint": "Describe the subject in a few words — the prompt is built for the model and the video's style. Then wire this node into your shots' “reference” inputs.",
     "designAdd": "Create node",
     "designBack": "Back to the list",
+    "designFromLibrary": "From the library",
+    "designFromLibraryDesc": "Reuse a published design sheet from this project",
+    "designLibraryFilter": "Filter designs…",
     "designFrameAnchorConfirm": "“{{label}}” is a design sheet: wired to “{{handle}}”, it will appear ON SCREEN in the video. Use a “reference” input instead (Seedance 2). Connect anyway?",
     "generateVideos": "Generate videos",
     "generating": "Generating…",

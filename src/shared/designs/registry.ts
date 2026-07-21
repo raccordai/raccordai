@@ -162,9 +162,10 @@ export function buildDesignPrompt(
 
 /**
  * Full node params for a design node: model defaults + recipe overrides + the
- * built prompt + the `designId` marker. The marker is deliberately not a model
- * field — run-time validation strips it, but the editor reads it to warn when
- * the node's output is wired to a frame-anchor input.
+ * built prompt + the `designId`/`designSubject` markers. The markers are
+ * deliberately not model fields — run-time validation strips them — but the
+ * editor reads `designId` to warn when the node's output is wired to a
+ * frame-anchor input, and library promotion copies both onto the asset.
  */
 export function designNodeParams(
   recipe: DesignRecipe,
@@ -172,11 +173,13 @@ export function designNodeParams(
   args: DesignPromptArgs
 ): Record<string, unknown> {
   getModelOrThrow(modelId)
+  const subject = args.description.trim()
   return {
     ...defaultParamsFor(modelId),
     ...recipe.params,
     prompt: buildDesignPrompt(recipe, modelId, args),
-    designId: recipe.id
+    designId: recipe.id,
+    ...(subject ? { designSubject: subject } : {})
   }
 }
 

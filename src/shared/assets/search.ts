@@ -9,6 +9,8 @@ export interface SearchableAsset {
   key: string
   description: string | null
   tags: string[]
+  /** Subject of a published design sheet — searchable so "Léa" finds her sheet. */
+  designSubject?: string | null
 }
 
 /** Lowercase + strip accents, so "foret" matches "Forêt". */
@@ -34,10 +36,16 @@ export function nameMatchesQuery(text: string, query: string): boolean {
     .every((term) => haystack.includes(term))
 }
 
-/** Same semantics over an asset's name, key, description and tags. */
+/** Same semantics over an asset's name, key, description, tags and design subject. */
 export function assetMatchesQuery(asset: SearchableAsset, query: string): boolean {
   return nameMatchesQuery(
-    [asset.name, asset.key, asset.description ?? '', asset.tags.join(' ')].join(' '),
+    [
+      asset.name,
+      asset.key,
+      asset.description ?? '',
+      asset.tags.join(' '),
+      asset.designSubject ?? ''
+    ].join(' '),
     query
   )
 }

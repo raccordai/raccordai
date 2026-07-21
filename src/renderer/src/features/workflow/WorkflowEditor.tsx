@@ -32,7 +32,7 @@ import { useWorkflowIO } from './useWorkflowIO'
 import { WorkflowGraphContext, type WorkflowGraph } from './workflowContext'
 import { autoLayoutPositions, resolveOverlaps, type LayoutDirection } from './autoLayout'
 import { useLastFrameExtractor } from './useLastFrameExtractor'
-import { graphKeys, useGraph, useIpcMutation } from './data'
+import { graphKeys, useGraph, useIpcMutation, useProjectAssets } from './data'
 import { runNode } from './generationRuntime'
 import { getModel } from '@shared/models'
 
@@ -57,6 +57,9 @@ export function WorkflowEditor(props: Props) {
 function WorkflowEditorInner({ videoId, projectId }: Props) {
   const { t } = useTranslation()
   const graph = useGraph(videoId).data
+  // Needed by the frame-anchor guard: a studio/asset node's design category
+  // lives on the asset, not in the node params.
+  const projectAssets = useProjectAssets(projectId).data
 
   // Auto-extracts the last frame of every successful video generation in this
   // video so downstream `sourceHandle === 'lastFrame'` edges have a resolvable URL.
@@ -293,8 +296,15 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
       if (!connection.source || !connection.target || !connection.targetHandle) return
       // Design sheets (character/décor/prop) are references: wired to a frame
       // anchor they would literally appear on screen — warn before connecting.
+      // Same rule for studio/asset nodes carrying a published design sheet.
       const source = graph?.nodes.find((n) => n.id === connection.source)
-      const designId = (source?.params as { designId?: string } | null | undefined)?.designId
+      const sourceParams = source?.params as
+        { designId?: string; assetId?: string } | null | undefined
+      const designId =
+        sourceParams?.designId ??
+        (source?.modelId === 'studio/asset' && sourceParams?.assetId
+          ? (projectAssets?.find((a) => a.id === sourceParams.assetId)?.designId ?? undefined)
+          : undefined)
       if (designId) {
         const target = graph?.nodes.find((n) => n.id === connection.target)
         const handle = target
@@ -320,7 +330,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
         targetHandle: connection.targetHandle
       })
     },
-    [connectEdge, videoId, graph, t]
+    [connectEdge, videoId, graph, projectAssets, t]
   )
 
   // ── Recenter the canvas on a single node ────────────────────────────────

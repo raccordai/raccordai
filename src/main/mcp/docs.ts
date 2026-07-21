@@ -177,6 +177,12 @@ top to bottom" (on multi-shot scenes, say which panels each shot covers). The vi
 describes motion, not the visuals the storyboard already encodes. Match the storyboard's
 aspect_ratio to the video's.
 
+The project library: BEFORE generating a new sheet, check list_assets/search_assets for a published
+design sheet of the same subject (designId/designSubject are set on those) and reuse it via an
+add_node "studio/asset" node ({"assetId": ...}) wired to reference inputs. After the user approves
+a freshly generated sheet, publish_design its generation so every video of the project can reuse
+it. Published sheets follow the same rule as design nodes: reference only, never a frame anchor.
+
 ${entries.join('\n\n')}`
 }
 

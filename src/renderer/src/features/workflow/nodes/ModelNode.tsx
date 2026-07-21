@@ -12,6 +12,7 @@ import {
 import { useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
 import type { GraphNode } from '@shared/ipc/contracts'
+import { VideoThumb } from '@renderer/components/VideoThumb'
 import { MODELS, getModel, type ModelDefinition } from '@shared/models'
 import { incomingConnectionsFor, useWorkflowGraph } from '../workflowContext'
 import { useAsset, useIpcMutation, useNodeGenerations, graphKeys } from '../data'
@@ -344,7 +345,7 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <video src={currentGen.url} muted loop className="w-full" />
+              <VideoThumb src={currentGen.url} className="w-full" />
             )}
             <div className="absolute right-1 top-1 rounded bg-black/70 p-1">
               <CheckCircle2 className="h-3 w-3 text-success" />
@@ -454,7 +455,7 @@ export function AssetNode({ data, selected }: NodeProps<AssetRFNode>) {
           <img src={assetMeta.url} alt="" loading="lazy" className="h-full w-full object-cover" />
         )}
         {assetMeta?.url && assetMeta.kind === 'video' && (
-          <video src={assetMeta.url} muted preload="none" className="h-full w-full object-cover" />
+          <VideoThumb src={assetMeta.url} className="h-full w-full object-cover" />
         )}
         {!assetMeta && (
           <div className="flex h-full items-center justify-center text-xs text-neutral-600">

@@ -58,7 +58,7 @@ You are also the film director. When the user asks for a video (an ad, an anime 
 2. Pick an art direction: read_docs "styles", choose the closest style template (or write your own equivalent), call set_video_style so it sticks to the video. The style bible paragraph must then be appended VERBATIM to every image/video prompt of the video — this is the single biggest lever for cross-shot visual consistency.
 3. For a standard shape of video (product ad, anime scene, cinematic sequence, vertical social ad), start from a blueprint: read_docs "templates" then "template:<id>", fill the [SLOTS] with the user's subject, import_workflow — then refine per shot.
 4. Break the video into shots (2-4s of intent each): establishing → action → emotion/punchline. Chain clips by wiring each video node's lastFrame output into the next node's image input so every cut is seamless.
-5. Pre-visualize before spending video credits (Seedance 2): read_docs "designs" — design sheets (character/décor/prop) first, then one "storyboard" node per scene: a 9-panel grid built FROM the sheets (gpt-image-2-image-to-image) showing the scene beat by beat. The user reviews the staging on the grid, THEN you wire it as a reference on the scene's shots ("@ImageN is the 9-panel storyboard — follow its panels in order, left to right, top to bottom"; the character sheet stays its own reference, and each shot's prompt says which panels it covers). The storyboard encodes composition — keep the video prompts about motion: camera, rhythm, transitions.
+5. Pre-visualize before spending video credits (Seedance 2): read_docs "designs" — design sheets (character/décor/prop) first, then one "storyboard" node per scene: a 9-panel grid built FROM the sheets (gpt-image-2-image-to-image) showing the scene beat by beat. Check the project library BEFORE generating a sheet: assets with designId/designSubject (see get_workflow, or search_assets) are published design sheets — reuse one for the same subject via a studio/asset node (reference inputs only, never a frame anchor) instead of regenerating it. And once the user approves a freshly generated sheet, publish_design it so the whole project can reuse it. The user reviews the staging on the grid, THEN you wire it as a reference on the scene's shots ("@ImageN is the 9-panel storyboard — follow its panels in order, left to right, top to bottom"; the character sheet stays its own reference, and each shot's prompt says which panels it covers). The storyboard encodes composition — keep the video prompts about motion: camera, rhythm, transitions.
 6. Before writing ANY prompt, read_docs "prompting:<model id>" and follow that model's grammar exactly (camera vocabulary, dialogue syntax, @references, shot markers). Write prompts in English; per-shot: subject + action + camera + lighting + style bible + soundscape.
 7. Score last: add a Suno node once the shots exist, matching the style's music hint; wire it into Seedance reference_audio_urls when the model supports it.
 8. Report the estimated credit cost before proposing to run anything; propose running the cheap design/storyboard images first so the user validates the staging before any video shot.`
@@ -72,7 +72,7 @@ Every graph tool here takes an explicit videoId — always pass the id of the vi
 How to deliver a full project:
 1. Brief: subject, tone, duration, aspect ratio. Turn the duration into a shot plan: clips are 4-12s (8s is the sweet spot), so a 2.5-minute piece is ~18-19 shots — organize them as scenes of 3-4 shots (establishing → action → emotion). Ask only what you truly cannot infer.
 2. create_project (short name from the subject), then create_video. Prefer ONE video for the whole piece (the timeline chains its clips); split into several videos only if the user asks for separate sequences.
-3. read_docs "models" FIRST — the frame-anchor vs reference distinction decides your wiring: character sheets/storyboards go to Seedance 2 reference_image_urls (with an explicit role in the prompt, they never appear on screen); Seedance 1.5 / Grok image inputs literally BECOME frames. read_docs "styles" → set_video_style; the style bible must be appended VERBATIM to every visual prompt. For standard shapes, scale a template (read_docs "template:<id>") to the requested duration.
+3. read_docs "models" FIRST — the frame-anchor vs reference distinction decides your wiring: character sheets/storyboards go to Seedance 2 reference_image_urls (with an explicit role in the prompt, they never appear on screen); Seedance 1.5 / Grok image inputs literally BECOME frames. read_docs "styles" → set_video_style; the style bible must be appended VERBATIM to every visual prompt. For standard shapes, scale a template (read_docs "template:<id>") to the requested duration. On an existing project, search_assets first: published design sheets (designId/designSubject set) are reused via studio/asset nodes (reference inputs only) instead of regenerating them; publish_design a newly approved sheet so later videos can reuse it.
 4. Build the graph in ONE import_workflow call (nodes + edges, left-to-right positions x: 0, 420, 840…, y by scene ~350): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (read_docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "follow its panels in order, left to right, top to bottom"; it is the user's review gate before any video run); lastFrame chaining with "@Image3 as the first frame" (seamless cuts); one Suno music node per video matching the style's music hint.
 5. read_docs "prompting:<model id>" before writing ANY prompt. English prompts: subject + action + camera + lighting + style bible + soundscape.
 6. Report the plan and the estimated credit cost; ASK before running anything (run_node costs money — when you do launch it, the app wakes you automatically on completion, never poll).
@@ -199,6 +199,32 @@ const TOOLS: Anthropic.Tool[] = [
       properties: { styleId: { type: ['string', 'null'] } },
       required: ['styleId']
     }
+  },
+  {
+    name: 'search_assets',
+    description:
+      'Search the project’s asset library by name, key, description or tag. Published design sheets carry designId/designSubject — reuse them via a studio/asset node (reference inputs only) instead of regenerating a sheet for the same subject.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search terms (AND, accent-insensitive)' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'publish_design',
+    description:
+      'Publish a design node’s successful generation into the project’s asset library as a reusable design sheet (its design category and subject are copied from the node). Do this once the user approves a sheet, so other videos of the project can reuse it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        generationId: { type: 'string' },
+        name: { type: 'string', description: 'Library display name (e.g. the character’s name)' },
+        description: { type: 'string', description: 'What the sheet depicts — shown to AIs' }
+      },
+      required: ['generationId', 'name']
+    }
   }
 ]
 
@@ -250,6 +276,24 @@ const VIDEO_SCOPED_TOOLS = new Set([
   'set_video_style'
 ])
 
+/** Tools whose scope is a whole project: the home variant requires a projectId param. */
+const PROJECT_SCOPED_TOOLS = new Set(['search_assets'])
+
+function withProjectIdParam(tool: Anthropic.Tool): Anthropic.Tool {
+  const schema = tool.input_schema as { properties?: Record<string, unknown>; required?: string[] }
+  return {
+    ...tool,
+    input_schema: {
+      ...tool.input_schema,
+      properties: {
+        projectId: { type: 'string', description: 'The project whose assets this acts on' },
+        ...(schema.properties ?? {})
+      },
+      required: ['projectId', ...(schema.required ?? [])]
+    } as Anthropic.Tool['input_schema']
+  }
+}
+
 function withVideoIdParam(tool: Anthropic.Tool): Anthropic.Tool {
   const schema = tool.input_schema as { properties?: Record<string, unknown>; required?: string[] }
   return {
@@ -267,7 +311,13 @@ function withVideoIdParam(tool: Anthropic.Tool): Anthropic.Tool {
 
 const TOOLS_HOME: Anthropic.Tool[] = [
   ...PROJECT_TOOLS,
-  ...TOOLS.map((t) => (VIDEO_SCOPED_TOOLS.has(t.name) ? withVideoIdParam(t) : t))
+  ...TOOLS.map((t) =>
+    VIDEO_SCOPED_TOOLS.has(t.name)
+      ? withVideoIdParam(t)
+      : PROJECT_SCOPED_TOOLS.has(t.name)
+        ? withProjectIdParam(t)
+        : t
+  )
 ]
 
 // ── Tool execution against the local services ────────────────────────────────
@@ -369,7 +419,10 @@ async function executeTool(
           key: a.key,
           name: a.name,
           kind: a.kind,
-          description: a.description
+          description: a.description,
+          // Set on published design sheets — reference-only, never a frame anchor.
+          designId: a.designId,
+          designSubject: a.designSubject
         }))
       }
       return { result: JSON.stringify(payload), mutatedVideoId: null, label: 'Read workflow' }
@@ -481,6 +534,42 @@ async function executeTool(
       videos.setVideoStyle(videoId, styleId)
       const label = styleId ? (getStyle(styleId)?.label ?? styleId) : 'none'
       return { result: '{"ok":true}', mutatedVideoId: videoId, label: `Style · ${label}` }
+    }
+    case 'search_assets': {
+      const explicit =
+        typeof input['projectId'] === 'string' && input['projectId'] !== ''
+          ? (input['projectId'] as string)
+          : null
+      const projectId = explicit ?? videos.getVideo(resolveVideoId(input, ctx))?.projectId
+      if (!projectId) throw new Error('This tool needs a "projectId".')
+      const rows = assets.searchAssets(projectId, String(input['query'])).map((a) => ({
+        id: a.id,
+        key: a.key,
+        name: a.name,
+        kind: a.kind,
+        description: a.description,
+        tags: a.tags,
+        designId: a.designId,
+        designSubject: a.designSubject
+      }))
+      return { result: JSON.stringify(rows), mutatedVideoId: null, label: 'Read assets' }
+    }
+    case 'publish_design': {
+      const asset = await assets.promoteGeneration(
+        String(input['generationId']),
+        String(input['name']),
+        input['description'] ? String(input['description']) : undefined
+      )
+      return {
+        result: JSON.stringify({
+          assetId: asset.id,
+          key: asset.key,
+          designId: asset.designId,
+          designSubject: asset.designSubject
+        }),
+        mutatedVideoId: ctx.videoId ?? '',
+        label: `Design published · ${asset.name}`
+      }
     }
     default:
       throw new Error(`Unknown tool: ${name}`)
