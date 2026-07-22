@@ -19,7 +19,7 @@ import type { GraphEdge, GraphNode } from '@shared/ipc/contracts'
 import { invoke } from '@renderer/lib/ipc'
 import { ModelNode, AssetNode } from './nodes/ModelNode'
 import { NodeParamsPanel } from './NodeParamsPanel'
-import { useCollapsed } from './Timeline'
+import { useCollapsed } from './timelineHooks'
 import { TimelineV2 } from './TimelineV2'
 import { HistoryPanel } from './HistoryPanel'
 import { ChatPanel } from './ChatPanel'
@@ -525,6 +525,12 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
                 label: io.exportingMedia ? t('editor.fcpxmlBundling') : t('menu.exportMediaZip'),
                 onSelect: io.exportMediaZip,
                 disabled: !io.canExportFcpxml || io.exportingMedia
+              },
+              {
+                id: 'export-mp4',
+                label: io.renderingMp4 ? t('editor.rendering') : t('menu.exportMp4'),
+                onSelect: io.exportMp4,
+                disabled: !io.canExportFcpxml || io.renderingMp4
               }
             ]
           }
@@ -603,6 +609,33 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
                 onPrefillConsumed={() => setChatPrefill(null)}
                 onClose={() => setChatOpen(false)}
               />
+            </div>
+          )}
+
+          {/* Also shown for renders launched by an agent through MCP — progress
+              events arrive regardless of who started the render. */}
+          {(io.renderingMp4 || io.renderProgress) && (
+            <div className="island absolute bottom-3 left-1/2 z-30 flex w-80 -translate-x-1/2 flex-col gap-2 px-4 py-3">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="font-semibold text-neutral-200">{t('editor.rendering')}</span>
+                <span className="text-neutral-400">
+                  {io.renderProgress
+                    ? `${t(`editor.renderStep.${io.renderProgress.step}`)} — ${io.renderProgress.percent}%`
+                    : t('editor.renderStep.probe')}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-neutral-800">
+                <div
+                  className="h-full rounded-full bg-accent transition-[width] duration-300"
+                  style={{ width: `${io.renderProgress?.percent ?? 0}%` }}
+                />
+              </div>
+              <button
+                onClick={io.cancelRenderMp4}
+                className="self-end rounded px-2 py-0.5 text-[11px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+              >
+                {t('editor.renderCancel')}
+              </button>
             </div>
           )}
 

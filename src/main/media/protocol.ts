@@ -42,6 +42,20 @@ interface ResolvedMedia {
   mime: string | null
 }
 
+/**
+ * Resolves a media:// URL to its file on disk — for main-process consumers
+ * (MP4 render) that need the path itself, not a served response. Returns null
+ * for non-media:// URLs (remote http(s) media stays a URL).
+ */
+export function resolveMediaUrlToFile(url: string): ResolvedMedia | null {
+  if (!url.startsWith('media://')) return null
+  try {
+    return resolveMedia(new URL(url))
+  } catch {
+    return null
+  }
+}
+
 function resolveMedia(url: URL): ResolvedMedia | null {
   // For media://asset/<id>, URL parses host="asset" and pathname="/<id>".
   const kind = url.host

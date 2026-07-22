@@ -26,6 +26,7 @@ export default defineConfig({
         'src/main/services/graph.ts',
         'src/main/services/graphHistory.ts',
         'src/main/services/genQueue.ts',
+        'src/main/services/renderPlan.ts',
         'src/main/services/chatStore.ts',
         'src/main/services/chatOpenAIFormat.ts',
         'src/main/services/assets.ts',

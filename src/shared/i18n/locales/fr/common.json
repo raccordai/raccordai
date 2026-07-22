@@ -8,7 +8,8 @@
     "importing": "Import en cours…",
     "exportWorkflow": "Exporter le workflow (JSON)",
     "exportFcpxml": "Exporter la timeline (FCPXML + médias)…",
-    "exportMediaZip": "Exporter les clips vidéo (ZIP)…"
+    "exportMediaZip": "Exporter les clips vidéo (ZIP)…",
+    "exportMp4": "Exporter la vidéo (MP4)…"
   },
   "home": {
     "title": "Socle technique",
@@ -236,7 +237,16 @@
     },
     "style": "Style",
     "styleTitle": "Direction artistique de la vidéo — sa bible de style guide chaque prompt",
-    "styleNone": "Aucun style"
+    "styleNone": "Aucun style",
+    "rendering": "Rendu MP4…",
+    "renderCancel": "Annuler",
+    "renderSkipped": "Plans sans média utilisable, ignorés au rendu : {{clips}}",
+    "renderStep": {
+      "probe": "Analyse des clips",
+      "normalize": "Normalisation",
+      "concat": "Assemblage",
+      "mux": "Mixage audio"
+    }
   },
   "mcp": {
     "title": "Serveur MCP",

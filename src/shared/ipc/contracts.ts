@@ -514,6 +514,30 @@ export const ipcContracts = {
     output: z.object({ mediaFiles: z.number() }).nullable()
   },
 
+  // Rendered MP4 export of the timeline (ffmpeg in main). Output is nullable:
+  // null means the user cancelled the native save dialog. Progress is pushed
+  // via event:renderProgress; the promise resolves when the file is written.
+  'render:export': {
+    input: z.object({
+      videoId: z.string(),
+      // Optional overrides — default: probed from the first clip.
+      fps: z.number().int().min(1).max(120).optional(),
+      resolution: z
+        .object({ width: z.number().int().min(2), height: z.number().int().min(2) })
+        .optional()
+    }),
+    output: z
+      .object({
+        path: z.string(),
+        durationSeconds: z.number(),
+        /** Labels of timeline slots that had no usable media and were skipped. */
+        skipped: z.array(z.string())
+      })
+      .nullable()
+  },
+  // Resolves true if a render was in flight and got cancelled.
+  'render:cancel': { input: z.object({ videoId: z.string() }), output: z.boolean() },
+
   'chat:get': { input: z.object({ videoId: z.string() }), output: chatStateSchema },
   'chat:send': {
     input: z.object({
@@ -532,13 +556,25 @@ export const ipcEvents = [
   'event:generationsChanged',
   'event:workflowChanged',
   'event:chatUpdate',
-  'event:creditsChanged'
+  'event:creditsChanged',
+  'event:renderProgress'
 ] as const
 export type IpcEvent = (typeof ipcEvents)[number]
 
 export interface GenerationsChangedPayload {
   videoId: string
   nodeId: string
+}
+
+/** Progress of an MP4 render. One terminal event is always sent: done or error. */
+export interface RenderProgressPayload {
+  videoId: string
+  /** 0–100 across the whole pipeline (probe → normalize → concat → mux). */
+  percent: number
+  step: 'probe' | 'normalize' | 'concat' | 'mux'
+  done?: boolean
+  /** Set on the terminal event when the render failed (or was cancelled). */
+  error?: string
 }
 
 export type IpcContracts = typeof ipcContracts

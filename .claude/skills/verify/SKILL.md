@@ -21,7 +21,8 @@ const app = await _electron.launch({
 - `GET /api/v1/jobs/recordInfo?taskId=` → `{data:{state:'success', resultJson:'{"resultUrls":[...]}'}}`
 - `GET /api/v1/chat/credit` → `{data:<number>}` (toolbar credits chip)
 - `POST /api/file-stream-upload` → `{data:{downloadUrl}}` (lastFrame/asset uploads)
-- Serve real media bytes for resultUrls — a real mp4 is needed for last-frame extraction/preview (no ffmpeg on this machine; borrow one from `~/Library/Application Support/Raccord/media/`).
+- Suno (music nodes): `POST /api/v1/generate` → `{data:{taskId}}`; `GET /api/v1/generate/record-info?taskId=` → `{data:{taskId, status:'SUCCESS', response:{sunoData:[{audioUrl}]}}}`.
+- Serve real media bytes for resultUrls — a real mp4 is needed for last-frame extraction/preview. Homebrew ffmpeg/ffprobe exist at `/opt/homebrew/bin` — generate fixtures with `-f lavfi testsrc2/sine` instead of borrowing user media.
 
 ## Gotchas
 
@@ -33,4 +34,6 @@ const app = await _electron.launch({
 - Cleanup: `invoke('projects:delete', {id})` removes the project and its media dir.
 - After touching chat.ts, the MCP registry or docs topics: run `pnpm test:assistant` too.
 
-Reference script from a past session: fixture = 2 chained seedance-2-fast nodes (`lastFrame` → `reference_image_urls`), asserts credits chip refreshes, media:// serves 206 + DB mime, preview plays.
+- **MP4 render**: `render:export` opens a native save dialog (blocks automation) — drive the render through the MCP tool instead: `settings:localApiInfo` gives `{url, token}` (`url` already ends in `/mcp`), then POST a JSON-RPC `tools/call` of `render_video` with an explicit `outputPath` (response may be SSE — parse `data:` lines). Progress: collect `window.api.on('event:renderProgress', …)` payloads from the page. Cancellation is racy on tiny fixtures — spam `render:cancel` until it returns true instead of sleeping.
+
+Reference scripts from past sessions: fixture = 2 chained seedance-2-fast nodes (`lastFrame` → `reference_image_urls`), asserts credits chip refreshes, media:// serves 206 + DB mime, preview plays. Render E2E (July 2026): 2 heterogeneous grok t2v clips + suno music → MCP render_video → ffprobe asserts spec/duration/audio, volumedetect proves the music lane, then a cancel pass.

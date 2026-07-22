@@ -1,0 +1,140 @@
+import { describe, expect, it } from 'vitest'
+import type { GraphNode } from './ipc/contracts'
+import {
+  bestGeneration,
+  clipDuration,
+  clipResolution,
+  collectAudioNodes,
+  collectTimelineClips,
+  shotNumber,
+  timelineOrder
+} from './timeline'
+
+let seq = 0
+function node(overrides: Partial<GraphNode> = {}): GraphNode {
+  seq += 1
+  return {
+    id: `n${seq}`,
+    videoId: 'v1',
+    key: `node-${seq}`,
+    modelId: 'bytedance/seedance-2',
+    label: null,
+    intent: null,
+    position: { x: 0, y: 0 },
+    params: {},
+    selectedGenerationId: null,
+    createdAt: seq,
+    updatedAt: seq,
+    ...overrides
+  }
+}
+
+describe('shotNumber', () => {
+  it('reads the first number in the label', () => {
+    expect(shotNumber(node({ label: 'Clip — Shot 28' }))).toBe(28)
+    expect(shotNumber(node({ label: '03 - finale' }))).toBe(3)
+  })
+
+  it('falls back to the key, then undefined', () => {
+    expect(shotNumber(node({ label: null, key: 'shot-7' }))).toBe(7)
+    expect(shotNumber(node({ label: 'intro', key: 'intro' }))).toBeUndefined()
+  })
+})
+
+describe('timelineOrder', () => {
+  it('sorts numbered nodes numerically (2 before 12), unnumbered last by position', () => {
+    const a = node({ label: 'Shot 12' })
+    const b = node({ label: 'Shot 2' })
+    const c = node({ label: 'outro', key: 'outro', position: { x: 0, y: 10 } })
+    const d = node({ label: 'intro', key: 'intro', position: { x: 0, y: 5 } })
+    expect(timelineOrder([a, c, b, d]).map((n) => n.id)).toEqual([b.id, a.id, d.id, c.id])
+  })
+
+  it('breaks position ties on X', () => {
+    const right = node({ label: 'x', key: 'x', position: { x: 10, y: 0 } })
+    const left = node({ label: 'y', key: 'y', position: { x: 0, y: 0 } })
+    expect(timelineOrder([right, left]).map((n) => n.id)).toEqual([left.id, right.id])
+  })
+})
+
+describe('collectTimelineClips', () => {
+  it('keeps only video-kind model nodes', () => {
+    const video = node({ label: 'Shot 1' })
+    const image = node({ modelId: 'nano-banana-2' })
+    const audio = node({ modelId: 'suno/generate-music' })
+    const asset = node({ modelId: 'studio/asset' })
+    const unknown = node({ modelId: 'ghost/none' })
+    expect(collectTimelineClips([video, image, audio, asset, unknown]).map((n) => n.id)).toEqual([
+      video.id
+    ])
+  })
+
+  it('deduplicates a shot number: a node with a selected generation wins', () => {
+    const failed = node({ label: 'Shot 1', updatedAt: 100 })
+    const replacement = node({ label: 'Shot 1 bis', selectedGenerationId: 'g1', updatedAt: 50 })
+    expect(collectTimelineClips([failed, replacement]).map((n) => n.id)).toEqual([replacement.id])
+  })
+
+  it('deduplicates on updatedAt when neither has a selection', () => {
+    const old = node({ label: 'Shot 1', updatedAt: 10 })
+    const fresh = node({ label: 'Shot 1 v2', updatedAt: 20 })
+    expect(collectTimelineClips([old, fresh]).map((n) => n.id)).toEqual([fresh.id])
+  })
+
+  it('keeps all unnumbered clips', () => {
+    const a = node({ label: 'intro', key: 'intro' })
+    const b = node({ label: 'outro', key: 'outro' })
+    expect(collectTimelineClips([a, b])).toHaveLength(2)
+  })
+})
+
+describe('collectAudioNodes', () => {
+  it('returns only audio-kind nodes, in timeline order', () => {
+    const music2 = node({ modelId: 'suno/generate-music', label: 'Music 2' })
+    const music1 = node({ modelId: 'suno/generate-music', label: 'Music 1' })
+    const video = node({ label: 'Shot 1' })
+    expect(collectAudioNodes([music2, video, music1]).map((n) => n.id)).toEqual([
+      music1.id,
+      music2.id
+    ])
+  })
+})
+
+describe('bestGeneration', () => {
+  const gens = [
+    { id: 'g3', status: 'failed', url: null },
+    { id: 'g2', status: 'success', url: 'media://generation/g2/result' },
+    { id: 'g1', status: 'success', url: 'media://generation/g1/result' }
+  ]
+
+  it('returns the selected generation when it is a playable success', () => {
+    expect(bestGeneration(node({ selectedGenerationId: 'g1' }), gens)?.id).toBe('g1')
+  })
+
+  it('falls back to the newest success when the selection is failed or stale', () => {
+    expect(bestGeneration(node({ selectedGenerationId: 'g3' }), gens)?.id).toBe('g2')
+    expect(bestGeneration(node({ selectedGenerationId: 'gone' }), gens)?.id).toBe('g2')
+  })
+
+  it('returns the selected failure when nothing succeeded (error display)', () => {
+    const onlyFailed = [{ id: 'g9', status: 'failed', url: null }]
+    expect(bestGeneration(node({ selectedGenerationId: 'g9' }), onlyFailed)?.id).toBe('g9')
+    expect(bestGeneration(node(), onlyFailed)).toBeUndefined()
+    expect(bestGeneration(node(), undefined)).toBeUndefined()
+  })
+})
+
+describe('clipDuration / clipResolution', () => {
+  it('reads numeric duration and formats resolution + aspect ratio', () => {
+    const n = node({ params: { duration: 10, resolution: '1080p', aspect_ratio: '16:9' } })
+    expect(clipDuration(n)).toBe(10)
+    expect(clipResolution(n)).toBe('1080p · 16:9')
+  })
+
+  it('tolerates partial or missing params', () => {
+    expect(clipDuration(node({ params: { duration: '10' } }))).toBeUndefined()
+    expect(clipResolution(node({ params: { resolution: '720p' } }))).toBe('720p')
+    expect(clipResolution(node({ params: { aspect_ratio: '9:16' } }))).toBe('9:16')
+    expect(clipResolution(node({ params: {} }))).toBeUndefined()
+  })
+})

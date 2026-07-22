@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { zipSync, type Zippable } from 'fflate'
-import type { GraphNode } from '@shared/ipc/contracts'
+import type { GraphNode, RenderProgressPayload } from '@shared/ipc/contracts'
 import { invoke } from '@renderer/lib/ipc'
 import {
   buildFcpxml,
@@ -12,7 +12,7 @@ import {
 } from '@renderer/lib/exportFcpxml'
 import { fetchMediaBlob } from '@renderer/lib/mediaProxy'
 import { detectVideoFps, probeVideoDimensions } from '@renderer/lib/probeMedia'
-import { bestGeneration, collectTimelineClips } from './Timeline'
+import { bestGeneration, collectTimelineClips } from '@shared/timeline'
 import { graphKeys, useIpcMutation, useVideo } from './data'
 
 // Workflow import/export actions, extracted from the toolbar so the app menu
@@ -41,18 +41,29 @@ function pickFile(accept: string): Promise<File | null> {
   })
 }
 
+export interface RenderProgressState {
+  percent: number
+  step: RenderProgressPayload['step']
+}
+
 export interface WorkflowIO {
   importWorkflow: () => Promise<void>
   exportJson: () => Promise<void>
   exportFcpxmlZip: () => Promise<void>
   exportMediaZip: () => Promise<void>
+  /** Rendered MP4 export (ffmpeg in main; save dialog lives in the handler). */
+  exportMp4: () => Promise<void>
+  cancelRenderMp4: () => void
   importing: boolean
   exporting: boolean
   exportingZip: boolean
   exportingMedia: boolean
+  renderingMp4: boolean
+  /** Live progress of the MP4 render (event:renderProgress), null when idle. */
+  renderProgress: RenderProgressState | null
   /** JSON export needs at least one node. */
   canExport: boolean
-  /** FCPXML and media exports need at least one timeline clip. */
+  /** FCPXML, media and MP4 exports need at least one timeline clip. */
   canExportFcpxml: boolean
 }
 
@@ -67,6 +78,8 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
   const [exporting, setExporting] = useState(false)
   const [exportingZip, setExportingZip] = useState(false)
   const [exportingMedia, setExportingMedia] = useState(false)
+  const [renderingMp4, setRenderingMp4] = useState(false)
+  const [renderProgress, setRenderProgress] = useState<RenderProgressState | null>(null)
 
   const timelineClips = useMemo(() => collectTimelineClips(nodes), [nodes])
   const videoName = video?.name
@@ -244,16 +257,54 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
     }
   }, [t, timelineClips, videoName])
 
+  // Live percent/step pushed by main while ffmpeg works.
+  useEffect(() => {
+    return window.api.on('event:renderProgress', (payload) => {
+      const p = payload as RenderProgressPayload
+      if (p.videoId !== videoId) return
+      setRenderProgress(p.done ? null : { percent: p.percent, step: p.step })
+    })
+  }, [videoId])
+
+  /**
+   * Rendered MP4 of the timeline. The whole pipeline runs in main (ffmpeg);
+   * the invoke resolves when the file is written (null = dialog cancelled).
+   */
+  const exportMp4 = useCallback(async () => {
+    setRenderingMp4(true)
+    try {
+      const result = await invoke('render:export', { videoId })
+      if (result && result.skipped.length > 0) {
+        alert(t('editor.renderSkipped', { clips: result.skipped.join(', ') }))
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      // User-initiated cancellation is not an error worth an alert.
+      if (!message.includes('Render cancelled')) alert(message)
+    } finally {
+      setRenderingMp4(false)
+      setRenderProgress(null)
+    }
+  }, [t, videoId])
+
+  const cancelRenderMp4 = useCallback(() => {
+    void invoke('render:cancel', { videoId })
+  }, [videoId])
+
   return useMemo(
     () => ({
       importWorkflow,
       exportJson: exportJsonAction,
       exportFcpxmlZip,
       exportMediaZip,
+      exportMp4,
+      cancelRenderMp4,
       importing,
       exporting,
       exportingZip,
       exportingMedia,
+      renderingMp4,
+      renderProgress,
       canExport: nodes.length > 0,
       canExportFcpxml: timelineClips.length > 0
     }),
@@ -262,10 +313,14 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
       exportJsonAction,
       exportFcpxmlZip,
       exportMediaZip,
+      exportMp4,
+      cancelRenderMp4,
       importing,
       exporting,
       exportingZip,
       exportingMedia,
+      renderingMp4,
+      renderProgress,
       nodes.length,
       timelineClips.length
     ]

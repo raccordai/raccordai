@@ -8,7 +8,8 @@
     "importing": "Importing…",
     "exportWorkflow": "Export workflow (JSON)",
     "exportFcpxml": "Export timeline (FCPXML + media)…",
-    "exportMediaZip": "Export video clips (ZIP)…"
+    "exportMediaZip": "Export video clips (ZIP)…",
+    "exportMp4": "Export video (MP4)…"
   },
   "home": {
     "title": "Technical foundation",
@@ -236,7 +237,16 @@
     },
     "style": "Style",
     "styleTitle": "The video's art direction — its style bible guides every prompt",
-    "styleNone": "No style"
+    "styleNone": "No style",
+    "rendering": "Rendering MP4…",
+    "renderCancel": "Cancel",
+    "renderSkipped": "Slots without usable media were skipped: {{clips}}",
+    "renderStep": {
+      "probe": "Probing clips",
+      "normalize": "Normalizing",
+      "concat": "Assembling",
+      "mux": "Mixing audio"
+    }
   },
   "mcp": {
     "title": "MCP server",

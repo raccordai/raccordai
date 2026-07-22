@@ -17,6 +17,7 @@ import * as graph from '../services/graph'
 import * as library from '../services/library'
 import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
+import * as renderService from '../services/render'
 import * as runEngine from '../services/runEngine'
 import * as settingsService from '../services/settings'
 import * as videosService from '../services/videos'
@@ -237,6 +238,25 @@ export function registerIpcHandlers(): void {
     }, 300)
     return restored
   })
+
+  handle('render:export', async ({ videoId, fps, resolution }) => {
+    const video = videosService.getVideo(videoId)
+    const base = (video?.name ?? 'video').replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'video'
+    const result = await dialog.showSaveDialog({
+      title: 'Export MP4',
+      defaultPath: `${base}.mp4`,
+      filters: [{ name: 'MPEG-4 video', extensions: ['mp4'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const { durationSeconds, skipped } = await renderService.renderVideo({
+      videoId,
+      outputPath: result.filePath,
+      fps,
+      resolution
+    })
+    return { path: result.filePath, durationSeconds, skipped }
+  })
+  handle('render:cancel', ({ videoId }) => renderService.cancelRender(videoId))
 
   handle('chat:get', ({ videoId }) => chatService.getChatState(videoId))
   handle('chat:send', ({ videoId, projectId, text, images }) =>

@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron'
+import type { RenderProgressPayload } from '@shared/ipc/contracts'
 
 /**
  * Main→renderer push events. The desktop replacement for Convex's reactive
@@ -34,5 +35,12 @@ export function broadcastCreditsChanged(): void {
 export function broadcastChatUpdate(videoId: string): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:chatUpdate', { videoId })
+  }
+}
+
+/** MP4 render progress (see RenderProgressPayload in the shared contracts). */
+export function broadcastRenderProgress(payload: RenderProgressPayload): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:renderProgress', payload)
   }
 }

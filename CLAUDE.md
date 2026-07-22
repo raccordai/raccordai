@@ -36,6 +36,14 @@ Electron app (main / preload / renderer). Package manager: pnpm.
 - The API key is encrypted with `safeStorage` (never in the clear outside the main process). Local input media are uploaded on demand to kie.ai's File Upload API (48h TTL cache in the database; files expire on kie's side after ~3 days).
 - **Credit-free E2E tests**: `RACCORD_KIE_BASE=http://127.0.0.1:<port>` points the client (`src/main/services/kie.ts`) at a local mock that simulates `POST /api/v1/jobs/createTask`, `GET /api/v1/jobs/recordInfo` (resultJson → `{"resultUrls":[...]}`) and serves the resulting media.
 
+## Rendered MP4 export
+
+- Entry points: `render:export` IPC (native save dialog in the handler, progress via `event:renderProgress`, cancel via `render:cancel`) and the MCP `render_video` tool (headless, explicit/default output path). Both call `src/main/services/render.ts`.
+- **Split**: `renderPlan.ts` holds ALL decisions (ffprobe parsing, lossless-concat-vs-normalize, ffmpeg argv builders, progress mapping) — pure, unit-tested, in `coverage.include`; `render.ts` only spawns/files (E2E scope, like runEngine). New render behavior goes in renderPlan + tests, not inline in render.ts.
+- **Timeline resolution is `src/shared/timeline.ts`** (`collectTimelineClips`/`bestGeneration`/`clipDuration`/`collectAudioNodes`): the single source of truth shared by TimelineV2, the FCPXML export and the MP4 render — never fork this logic.
+- Pipeline: probe every clip → homogeneous (h264/hevc mp4, same dims/fps/audio layout) = concat demuxer `-c copy`, else normalize each clip (scale+pad+fps, H.264+AAC, silent stereo track injected on silent clips) then concat → Suno audio lane muxed over (apad + amix, video stream copied). Failed shots fall back to their input still (`timelineFallbackImages`) for the clip's declared duration; slots without any media are skipped and returned in `skipped`.
+- Binaries: `ffmpeg-static` + `ffprobe-static`, `asarUnpack`'d in electron-builder.yml and de-asar'd at runtime in render.ts. `ffmpeg-static` downloads its binary in a postinstall script — it must stay in `pnpm.onlyBuiltDependencies`.
+
 ## MCP server
 
 - `src/main/mcp/`: `registry.ts` (THE extension point — one capability = one `AgentTool` entry), `docs.ts` (in-band exploratory docs, model topics generated from the model registry), `server.ts` (stateless Streamable HTTP on Hono `/mcp`, Bearer auth). Full docs: `docs/mcp.md`.

@@ -1,6 +1,6 @@
 import type { GraphNode } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
-import { clipDuration } from '@renderer/features/workflow/Timeline'
+import { clipDuration } from '@shared/timeline'
 
 /**
  * FCPXML 1.8 timeline export, bundled with its media into a ZIP.

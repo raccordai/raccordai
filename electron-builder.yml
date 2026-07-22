@@ -12,6 +12,10 @@ files:
   - '!**/*.map'
 asarUnpack:
   - '**/*.node'
+  # ffmpeg/ffprobe must be real executables on disk — they are spawned as
+  # child processes (MP4 render) and can't run from inside the asar.
+  - 'node_modules/ffmpeg-static/**'
+  - 'node_modules/ffprobe-static/**'
 extraResources:
   - from: drizzle
     to: drizzle

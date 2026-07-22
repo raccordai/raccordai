@@ -7,14 +7,12 @@ North star: **be the most intuitive tool to create AI videos through
 workflows**. The July 2026 audit (renderer UX, workflow building blocks,
 generation lifecycle) found the capabilities largely in place — templates,
 design recipes, storyboard pre-viz, a full-project assistant, dependency-aware
-runs, undo/redo, gapless timeline — and the friction concentrated in three
-moments of the user journey:
+runs, undo/redo, gapless timeline, rendered MP4 export — and the remaining
+friction concentrated in two moments of the user journey:
 
 1. **The first fifteen minutes** — no onboarding, nothing pushes the user to
    configure the kie.ai key without which the app is inert.
-2. **The finish line** — no rendered MP4; the only outputs are an FCPXML
-   bundle or loose clips, so finishing a video requires an external NLE.
-3. **Trust while generating** — queue position, automatic retries and
+2. **Trust while generating** — queue position, automatic retries and
    aggregate cost are invisible; errors surface as native `alert()`s.
 
 The assistant currently exists to paper over manual-editor friction. The
@@ -48,15 +46,25 @@ Landed in July 2026 (see CHANGELOG once releases start):
   provider on raccordai/raccordai releases, channel setting (stable|beta,
   Settings → Updates) drives both the update feed and `getReleaseChannel()`.
   macOS builds are signed + notarized in the publish workflow.
+- **Rendered MP4 export** (§4.3, July 2026): `render:export` IPC + MCP
+  `render_video` → `src/main/services/render.ts` (orchestration) +
+  `renderPlan.ts` (pure decisions, unit-tested). ffmpeg-static/ffprobe-static
+  binaries (asarUnpack'd), probe → lossless concat or per-clip normalize →
+  Suno lane muxed over; still fallback for failed shots; progress island +
+  cancel driven by `event:renderProgress`. The timeline helpers moved to
+  `src/shared/timeline.ts` and the dead `Timeline.tsx` component was removed
+  (§4.9). Verified end-to-end against the kie mock (heterogeneous clips +
+  music, cancellation).
 
 ## 1. Open-source hygiene — before publishing
 
-| Proposal                                                              | Effort | Why                                                                                           |
-| --------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------- |
-| Public README: screenshots, demo GIF, quickstart                      | S      | It is the project's landing page                                                              |
-| `CODE_OF_CONDUCT.md` + issue templates (bug / feature / kie.ai model) | S      | Frames the discussions and structures bug reports (version, OS, channel)                      |
-| Security policy (`SECURITY.md`)                                       | S      | Private vulnerability reporting channel — the app handles API keys                            |
-| Enable secret scanning + push protection on the GitHub repo           | S      | Repo setting, not a file — flip it right after the first push (documented in CONTRIBUTING.md) |
+| Proposal                                                              | Effort | Why                                                                                                                                                      |
+| --------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public README: screenshots, demo GIF, quickstart                      | S      | It is the project's landing page                                                                                                                         |
+| `CODE_OF_CONDUCT.md` + issue templates (bug / feature / kie.ai model) | S      | Frames the discussions and structures bug reports (version, OS, channel)                                                                                 |
+| Security policy (`SECURITY.md`)                                       | S      | Private vulnerability reporting channel — the app handles API keys                                                                                       |
+| Enable secret scanning + push protection on the GitHub repo           | S      | Repo setting, not a file — flip it right after the first push (documented in CONTRIBUTING.md)                                                            |
+| Confirm mac notarization covers the asarUnpack'd ffmpeg/ffprobe       | S      | One-time check on the next publish run — electron-builder signs `app.asar.unpacked` by default, but only the signed pipeline (repo secrets) can prove it |
 
 The "audit personal strings/paths in git history" item is resolved by
 construction: the repo publishes with a fresh history (no pre-publication
@@ -64,9 +72,9 @@ commits), and the working tree was swept before the first push.
 
 ## 2. Quality & CI chain
 
-| Proposal                                                                                                                                                 | Effort | Why                                                                                                                                                                            |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Formalized E2E: promote the Playwright drivers + kie/Anthropic mocks from the session scratchpads into a versioned `e2e/` suite, with a dedicated CI job | L      | This is the layer that covers runEngine/chat/IPC, deliberately outside the unit scope. The harness exists (RACCORD_KIE_BASE / RACCORD_ANTHROPIC_BASE), it just isn't versioned |
+| Proposal                                                                                                                                                 | Effort | Why                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formalized E2E: promote the Playwright drivers + kie/Anthropic mocks from the session scratchpads into a versioned `e2e/` suite, with a dedicated CI job | L      | This is the layer that covers runEngine/chat/IPC/render, deliberately outside the unit scope. The harness exists (RACCORD_KIE_BASE / RACCORD_ANTHROPIC_BASE), it just isn't versioned. Ready to promote: the MP4-render driver (heterogeneous clips + Suno music + cancellation, MCP-driven to bypass the save dialog; suno mock endpoints documented in the verify skill) |
 
 ## 3. Technical robustness
 
@@ -154,51 +162,7 @@ user must find and hand-edit each node's prompt. The template experience is
 fields yields a graph with zero remaining `[...]` markers; the registry test
 fails if a template adds an undeclared slot.
 
-### 4.3 Rendered MP4 export — effort L (highest product priority)
-
-**Problem.** `TimelineV2.tsx` plays clips gaplessly in-app, but the only
-exports (`useWorkflowIO.ts`) are the FCPXML 1.8 + media zip
-(`exportFcpxml.ts`) and a flat media zip. There is no ffmpeg anywhere in
-main. The target user does not own Final Cut/DaVinci: today the product
-stops at "clips to assemble", not "finished video".
-
-**Spec.**
-
-- Ship `ffmpeg-static` (per-platform binary, `asarUnpack` in
-  `electron-builder.yml`; verify the mac notarization pass covers the
-  unpacked binary). Wasm ffmpeg rejected: too slow for multi-minute 1080p.
-- New service `src/main/services/render.ts` (service, not handler — the Hono
-  routes and MCP get it for free), consumed by a new `render:export` IPC
-  channel (contract: `videoId`, target `{container: 'mp4'}`, optional
-  fps/resolution override; native save dialog lives in the IPC handler, per
-  convention).
-- Clip resolution: reuse the timeline's selection logic — the ordered
-  video-kind nodes and each node's `selectedGenerationId` (fallback rules of
-  `bestGeneration`). This logic currently lives in the renderer
-  (`Timeline.tsx` helpers `collectTimelineClips`/`bestGeneration`/
-  `clipDuration`); **move it to `src/shared/`** so renderer preview, FCPXML
-  export and MP4 render can never disagree on what the sequence is (also
-  resolves the Timeline.tsx dead-code cleanup, §4.9).
-- Pipeline:
-  1. Probe every clip (ffprobe): codec, resolution, fps.
-  2. Homogeneous clips → lossless concat demuxer. Heterogeneous → normalize
-     pass per clip (scale+pad to the sequence resolution, common fps, H.264 +
-     AAC) into the scratchpad, then concat.
-  3. Audio lane (Suno nodes) muxed over the concatenated video, trimmed/
-     padded to sequence duration.
-  4. Failed/missing clips: same policy as FCPXML — substitute the input
-     still (`timelineFallbackImages`) for the clip duration, or skip with a
-     warning listing skipped nodes.
-- Progress: `event:renderProgress` push (percent + current step) driving a
-  progress toast (§4.4); render is cancellable (kill the child process,
-  clean scratchpad).
-- Later (separate item): export presets per destination (9:16, 1:1, 16:9)
-  building on the video-level aspect-ratio setting (§4.5).
-
-**Acceptance.** A 3-shot template video renders to a single playable MP4 with
-music; mixed-resolution generations render without A/V desync; the E2E mock
-(`RACCORD_KIE_BASE`) serves small real media so this is covered credit-free
-in the versioned E2E suite (§2).
+### 4.3 Rendered MP4 export — shipped (see "Shipped"; follow-ups folded into §2, §4.4, §4.5)
 
 ### 4.4 Generation feedback layer — effort S/M (best ratio of the roadmap)
 
@@ -218,7 +182,8 @@ through native `alert()`/`confirm()`.
    confirm modal. Replace every native call site: node/asset delete and
    frame-anchor guard in `WorkflowEditor.tsx`, run failures in
    `runWithDeps`/`handleRunAllVideos`, refresh/cancel in `ModelNode.tsx`,
-   export errors in `useWorkflowIO.ts`, model-replace confirm. All strings
+   export errors in `useWorkflowIO.ts` (incl. the MP4 render failure and
+   skipped-clips alerts), model-replace confirm. All strings
    through i18n (several of these are currently hardcoded English — folds in
    part of §4.9).
 2. **Queue & retry visibility (S)** — new read-only channel
@@ -283,6 +248,10 @@ style change propagates to nothing, and prompts are 80% boilerplate.
   instructing verbatim copying, `registry.test.ts` invariants adjusted.
   The params panel shows the business prompt in the textarea and the style
   suffix as a read-only collapsed section ("Style: anime — applied at run").
+- **Follow-up unlocked by the defaults**: MP4 export presets per destination
+  (9:16, 1:1, 16:9) on top of the render pipeline's existing fps/resolution
+  overrides (`render:export` already accepts them; only the preset UI is
+  missing once the video-level aspect ratio exists).
 
 **Acceptance.** Switching a video's style then re-running a node uses the new
 bible with no prompt edit; changing the default ratio and applying updates
@@ -383,9 +352,6 @@ panels?}], style, totalCredits`). The ChatPanel renders it as a card list
 - Remove the stale `TODO(phase-3)` comments in `WorkflowEditor.tsx` — the
   engine is wired (`generationRuntime.ts` invokes `generations:run`,
   `generationEngineReady = true`); the comments now actively mislead readers.
-- `Timeline.tsx` vs `TimelineV2.tsx`: only V2 is mounted. Extract the shared
-  helpers (`collectTimelineClips`, `bestGeneration`, `clipDuration`) — to
-  `src/shared/` per §4.3 — and delete the unmounted component.
 - Undo/redo stacks (`graphHistory.ts`, in-memory, cap 100) and retry budgets
   reset silently on restart — acceptable, but document it in the UI (tooltip
   on the undo button) or persist if it ever bites.
@@ -399,22 +365,24 @@ panels?}], style, totalCredits`). The ChatPanel renders it as a card list
 | "Headless" mode: the Hono server + generation engine without a window, drivable via MCP/HTTP                                         | L      | Opens batch/server use cases (personal render farm) reusing `src/main/services/` as-is                                  |
 | Docs site (VitePress) generated from `docs/` + model docs generated from the registry                                                | M      | The model docs already exist in-band for LLMs (`mcp/docs.ts`) — publish them for humans too                             |
 
-Note: headless + MCP becomes a complete pitch only once §4.3 ships — "an
-agent-drivable render pipeline" needs the pipeline to end in a video file.
+Note: with §4.3 shipped, the "agent-drivable render pipeline" pitch is
+complete end-to-end — the MCP `render_video` tool already closes the loop
+(brief → graph → generations → MP4 file) for any MCP client; headless mode
+would remove the last constraint (a running window).
 
 ## Suggested order
 
-1. **Rendered MP4 export** (§4.3) — the one change that moves the product
-   from "prepares your clips" to "produces your video".
-2. **First-run + template slot form** (§4.1, §4.2) — cost of entry drops
+1. **First-run + template slot form** (§4.1, §4.2) — cost of entry drops
    from "read the docs" to "three fields and go".
-3. **Feedback layer** (§4.4) — mostly wiring existing engine state to the
-   UI; lowest effort-to-trust ratio on the list.
-4. **Video-level settings + style-at-payload** (§4.5) — removes the two main
-   sources of sequence incoherence.
-5. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
+2. **Feedback layer** (§4.4) — mostly wiring existing engine state to the
+   UI; lowest effort-to-trust ratio on the list. Also absorbs the render
+   error/skipped `alert()`s left interim by §4.3.
+3. **Video-level settings + style-at-payload** (§4.5) — removes the two main
+   sources of sequence incoherence, and unlocks the §4.3 follow-up (export
+   presets per destination).
+4. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
    long-term differentiation.
-6. **OSS hygiene items** (§1) remain the blockers for a good first
+5. **OSS hygiene items** (§1) remain the blockers for a good first
    impression at publication; the **versioned E2E suite** (§2) should land
-   before contributors arrive and is a prerequisite for testing §4.3
-   credit-free.
+   before contributors arrive — the §4.3 render E2E driver (session
+   scratchpad) is ready to be promoted into it.

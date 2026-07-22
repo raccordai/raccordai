@@ -5,6 +5,7 @@ import * as graph from '../services/graph'
 import * as graphHistory from '../services/graphHistory'
 import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
+import * as renderService from '../services/render'
 import { runNode } from '../services/runEngine'
 import * as videos from '../services/videos'
 import { DOC_TOPICS, getDoc } from './docs'
@@ -268,6 +269,25 @@ export const AGENT_TOOLS: AgentTool[] = [
         error: g.errorMessage,
         createdAt: g.createdAt
       }))
+  },
+  {
+    name: 'render_video',
+    description:
+      'Render a video’s timeline into a single MP4 file (local ffmpeg, no credits): clips concatenated in shot order, music lane muxed over. Synchronous — returns the output path.',
+    inputSchema: obj(
+      { videoId: str(), outputPath: str('Absolute .mp4 destination (default: Downloads folder)') },
+      ['videoId']
+    ),
+    execute: async ({ videoId, outputPath }) => {
+      const target = outputPath
+        ? String(outputPath)
+        : renderService.defaultOutputPath(String(videoId))
+      const { durationSeconds, skipped } = await renderService.renderVideo({
+        videoId: String(videoId),
+        outputPath: target
+      })
+      return { path: target, durationSeconds, skipped }
+    }
   },
 
   // ── Assets (project-wide media library) ────────────────────────────────────
