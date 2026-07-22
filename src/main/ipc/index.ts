@@ -16,7 +16,7 @@ import * as generationsService from '../services/generations'
 import * as graph from '../services/graph'
 import * as library from '../services/library'
 import * as projects from '../services/projects'
-import { kieGetCredits } from '../services/kie'
+import { kieGetCredits, kieTestApiKey } from '../services/kie'
 import * as renderService from '../services/render'
 import * as runEngine from '../services/runEngine'
 import * as settingsService from '../services/settings'
@@ -193,6 +193,9 @@ export function registerIpcHandlers(): void {
   })
   handle('settings:setKieApiKey', ({ key }) => settingsService.setKieApiKey(key))
   handle('settings:kieApiKeyStatus', () => settingsService.kieApiKeyStatus())
+  handle('settings:testKieApiKey', async () => ({ status: await kieTestApiKey() }))
+  handle('settings:getOnboardingCompleted', () => settingsService.getOnboardingCompleted())
+  handle('settings:setOnboardingCompleted', () => settingsService.setOnboardingCompleted())
   handle('settings:getGenerationConcurrency', () => settingsService.getMaxConcurrentGenerations())
   handle('settings:setGenerationConcurrency', ({ value }) =>
     settingsService.setMaxConcurrentGenerations(value)

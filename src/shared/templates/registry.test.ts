@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import enCommon from '../i18n/locales/en/common.json'
+import frCommon from '../i18n/locales/fr/common.json'
 import { MODELS, getModel } from '../models'
 import { getStyle } from '../styles/registry'
-import { WORKFLOW_TEMPLATES, getWorkflowTemplate, workflowTemplateIds } from './registry'
+import {
+  WORKFLOW_TEMPLATES,
+  fillTemplateSlots,
+  getWorkflowTemplate,
+  workflowTemplateIds
+} from './registry'
 
 describe('workflow template registry', () => {
   it('has unique ids and resolves by id', () => {
@@ -63,11 +70,34 @@ describe('workflow template registry', () => {
         }
       })
 
-      it('declared slots all appear in the blueprint', () => {
-        const text = JSON.stringify(t.workflow)
+      it('declares exactly the slot tokens present in the blueprint (no drift)', () => {
+        // Whole-workflow scan (prompts, labels, intents, music titles…) — the
+        // slot form string-replaces across the full JSON, so parity must hold
+        // everywhere, in both directions.
+        const found = new Set(JSON.stringify(t.workflow).match(/\[[A-Z][A-Z_ ]*\]/g) ?? [])
+        const declared = new Set(t.slots.map((s) => s.token))
+        expect(declared).toEqual(found)
         for (const slot of t.slots) {
-          expect(slot).toMatch(/^\[[A-Z ]+\]$/)
-          expect(text.includes(slot), `slot ${slot} not used`).toBe(true)
+          expect(slot.token).toMatch(/^\[[A-Z][A-Z_ ]*\]$/)
+          expect(slot.example.trim().length, `${slot.token}: empty example`).toBeGreaterThan(0)
+        }
+      })
+
+      it('slot labels resolve in both locales', () => {
+        for (const slot of t.slots) {
+          expect(slot.i18nKey).toMatch(/^templates\.slots\./)
+          for (const [locale, resource] of [
+            ['fr', frCommon],
+            ['en', enCommon]
+          ] as const) {
+            const value = slot.i18nKey
+              .split('.')
+              .reduce<unknown>(
+                (acc, key) => (acc as Record<string, unknown> | undefined)?.[key],
+                resource
+              )
+            expect(typeof value, `${slot.i18nKey} missing in ${locale}/common.json`).toBe('string')
+          }
         }
       })
 
@@ -92,6 +122,49 @@ describe('workflow template registry', () => {
       })
     })
   }
+
+  describe('fillTemplateSlots', () => {
+    const t = getWorkflowTemplate('product-commercial')!
+
+    it('replaces every occurrence of filled tokens across the whole blueprint', () => {
+      const filled = fillTemplateSlots(t.workflow, {
+        '[PRODUCT]': 'Aurora headphones',
+        '[SETTING]': 'a sunlit loft',
+        '[TAGLINE]': 'Sound, redefined.'
+      })
+      const text = JSON.stringify(filled)
+      expect(text).not.toMatch(/\[[A-Z][A-Z_ ]*\]/)
+      expect(text).toContain('Aurora headphones')
+      // Intents are covered too, not just prompts ([TAGLINE] only appears there).
+      expect(filled.nodes.find((n) => n.key === 'shot-3')!.intent).toContain('Sound, redefined.')
+    })
+
+    it('leaves the token in place for empty or blank values', () => {
+      const filled = fillTemplateSlots(t.workflow, {
+        '[PRODUCT]': 'Aurora headphones',
+        '[SETTING]': '   ',
+        '[TAGLINE]': ''
+      })
+      const text = JSON.stringify(filled)
+      expect(text).toContain('[SETTING]')
+      expect(text).toContain('[TAGLINE]')
+      expect(text).not.toContain('[PRODUCT]')
+    })
+
+    it('is safe with quotes, backslashes and replacement-pattern characters', () => {
+      const value = 'the "Über-$&\\1" bottle'
+      const filled = fillTemplateSlots(t.workflow, { '[PRODUCT]': value })
+      const prompt = String(filled.nodes.find((n) => n.key === 'hero-image')!.params.prompt)
+      expect(prompt).toContain(value)
+      expect(() => JSON.parse(JSON.stringify(filled))).not.toThrow()
+    })
+
+    it('does not mutate the source blueprint', () => {
+      const before = JSON.stringify(t.workflow)
+      fillTemplateSlots(t.workflow, { '[PRODUCT]': 'mutated?' })
+      expect(JSON.stringify(t.workflow)).toBe(before)
+    })
+  })
 
   // Frame anchors (seedance-1.5 input_urls, grok image_urls) put the image ON
   // SCREEN — a design/reference image wired there leaks into the clip (the

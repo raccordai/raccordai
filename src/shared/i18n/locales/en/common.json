@@ -46,6 +46,33 @@
     "fixPromptPrefill": "The generation of node “{{label}}” failed with: {{error}}\nAnalyze this node's prompt, fix it to avoid that error while staying true to the intent, update the node, then relaunch the generation.",
     "adjustPromptPrefill": "The output of node “{{label}}” doesn't work for me: \n\nImprove the prompt accordingly, update the node, then relaunch the generation."
   },
+  "onboarding": {
+    "skip": "Skip",
+    "back": "Back",
+    "next": "Continue",
+    "welcomeTitle": "Welcome to Raccord",
+    "welcomeText": "Create AI videos through workflows: designs, storyboard, shots and music come together on one canvas. Three steps to get started.",
+    "keyTitle": "Your kie.ai API key",
+    "keyExplain": "One key powers everything — image, video and music generation, credit balance and the assistant. Get it on",
+    "keyTest": "Save and test",
+    "keyTesting": "Testing…",
+    "keyStatus": {
+      "ok": "Key valid — credit balance reachable ✓",
+      "unauthorized": "Key rejected by kie.ai — check it and try again.",
+      "network": "Could not reach kie.ai — key saved, check your connection.",
+      "missing": "No key saved."
+    },
+    "starterTitle": "First project",
+    "starterCreate": "Create an example project",
+    "starterCreateDesc": "A product ad ready to run: hero visual, 3 chained shots and music, prompts already filled in.",
+    "starterCreating": "Creating…",
+    "starterEmpty": "Start empty",
+    "starterEmptyDesc": "Open the app on the project library.",
+    "starterProjectName": "Example project",
+    "starterVideoName": "Product ad — example",
+    "bannerText": "Configure your kie.ai key to enable generation.",
+    "bannerCta": "Open settings"
+  },
   "integrations": {
     "title": "Integrations",
     "kieKeyLabel": "kie.ai API key",
@@ -99,6 +126,9 @@
     "startFrom": "Start from",
     "blankVideo": "Blank video",
     "blankVideoDesc": "An empty graph, build freely",
+    "slotsTitle": "Personalize",
+    "slotPlaceholder": "e.g. {{example}}",
+    "slotsHint": "Empty fields keep their [SLOT] marker in the prompts — the assistant can fill them later.",
     "searchPlaceholder": "Search videos…",
     "noMatch": "No video matches “{{query}}”."
   },
@@ -303,6 +333,18 @@
     }
   },
   "templates": {
+    "slots": {
+      "product": "Product",
+      "setting": "Setting",
+      "tagline": "Tagline",
+      "character": "Character",
+      "place": "Place",
+      "action": "Action",
+      "subject": "Subject",
+      "location": "Location",
+      "mood": "Mood",
+      "hook": "Hook"
+    },
     "product-commercial": {
       "name": "Product ad",
       "desc": "3 chained shots + hero visual + music (24s)"

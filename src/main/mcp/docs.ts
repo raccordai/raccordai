@@ -193,7 +193,7 @@ ${entries.join('\n\n')}`
 function templatesIndex(): string {
   const lines = WORKFLOW_TEMPLATES.map(
     (t) =>
-      `${t.id} — ${t.label}\n  ${t.description}\n  style: ${t.styleId} · slots to fill: ${t.slots.join(', ')}`
+      `${t.id} — ${t.label}\n  ${t.description}\n  style: ${t.styleId} · slots to fill: ${t.slots.map((s) => s.token).join(', ')}`
   )
   return `Workflow templates — ready-to-import graph blueprints (get the JSON with docs "template:<id>",
 fill the [SLOTS] with the user's subject, then import_workflow). Each blueprint's prompts already
@@ -207,7 +207,9 @@ function templateDetail(id: string): string {
   const style = getStyle(t.styleId)
   return `${t.label} — id "${t.id}" (style: ${style?.label ?? t.styleId})
 ${t.description}
-Slots to replace with the user's subject before running: ${t.slots.join(', ')}
+Slots to replace with the user's subject before running: ${t.slots
+    .map((s) => `${s.token} (e.g. "${s.example}")`)
+    .join(', ')}
 Also set the video's style with set_video_style("${t.styleId}") so later shots stay coherent.
 
 Workflow JSON (pass as-is to import_workflow after filling the slots):

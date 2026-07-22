@@ -100,6 +100,35 @@ export async function kieGetCredits(): Promise<number> {
   return json.data
 }
 
+export type KieKeyTestResult = 'ok' | 'unauthorized' | 'network' | 'missing'
+
+/**
+ * Cheap authenticated probe (the same credit-balance endpoint HeaderCredits
+ * uses) so onboarding/settings can show live key validation instead of just
+ * "saved". Never throws — the outcome is the classification.
+ */
+export async function kieTestApiKey(): Promise<KieKeyTestResult> {
+  const key = getKieApiKey()
+  if (!key) return 'missing'
+  try {
+    const res = await fetch(`${KIE_BASE}/api/v1/chat/credit`, {
+      headers: { Authorization: `Bearer ${key}` }
+    })
+    let code: number | undefined
+    try {
+      code = ((await res.json()) as KieCreditResponse).code
+    } catch {
+      code = undefined
+    }
+    if ([401, 403].includes(res.status) || (code !== undefined && [401, 403].includes(code))) {
+      return 'unauthorized'
+    }
+    return res.ok && code === 200 ? 'ok' : 'network'
+  } catch {
+    return 'network'
+  }
+}
+
 /** Extracts the first result URL from kie.ai's stringified resultJson. */
 export function parseResultUrl(resultJson: string | undefined | null): string | undefined {
   if (!resultJson) return undefined

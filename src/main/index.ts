@@ -5,6 +5,7 @@ import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocolHandler, registerMediaProtocolPrivileges } from './media/protocol'
 import { startLocalApi } from './server'
 import { resumePolling } from './services/runEngine'
+import { backfillOnboardingCompleted } from './services/settings'
 import { initUpdater } from './services/updater'
 
 // Must run before app ready.
@@ -79,6 +80,8 @@ if (!app.requestSingleInstanceLock()) {
       }
 
       registerMediaProtocolHandler()
+      // Existing users (kie key already configured) never see the first-run overlay.
+      backfillOnboardingCompleted()
       registerIpcHandlers()
       resumePolling()
       initUpdater() // no-op in dev; packaged builds check the channel feed

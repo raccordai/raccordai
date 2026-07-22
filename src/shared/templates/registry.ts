@@ -24,6 +24,15 @@ export interface WorkflowTemplateEdge {
   output?: 'output' | 'lastFrame'
 }
 
+export interface WorkflowTemplateSlot {
+  /** The literal token as it appears in the blueprint, e.g. "[PRODUCT]". */
+  token: string
+  /** i18n key of the field label in the new-video dialog (`templates.slots.*`, fr+en). */
+  i18nKey: string
+  /** Example value — field placeholder, and the fill used by the starter project. */
+  example: string
+}
+
 export interface WorkflowTemplate {
   id: string
   /** Agent-facing English name; UI display names live in i18n under `templates.<id>`. */
@@ -31,14 +40,53 @@ export interface WorkflowTemplate {
   description: string
   /** The style template the blueprint's prompts are written with. */
   styleId: string
-  /** Placeholder slots present in the prompts, e.g. "[PRODUCT]" — fill before running. */
-  slots: string[]
+  /** Placeholder slots present in the blueprint — fill before running (see fillTemplateSlots). */
+  slots: WorkflowTemplateSlot[]
   workflow: {
     version: 1
     nodes: WorkflowTemplateNode[]
     edges: WorkflowTemplateEdge[]
   }
 }
+
+// Shared slot vocabulary — templates reference these so the same token always
+// carries the same label key; the registry test enforces token/blueprint parity.
+const SLOTS = {
+  product: {
+    token: '[PRODUCT]',
+    i18nKey: 'templates.slots.product',
+    example: 'Aurora wireless headphones'
+  },
+  setting: { token: '[SETTING]', i18nKey: 'templates.slots.setting', example: 'a sunlit loft' },
+  tagline: { token: '[TAGLINE]', i18nKey: 'templates.slots.tagline', example: 'Sound, redefined.' },
+  character: {
+    token: '[CHARACTER]',
+    i18nKey: 'templates.slots.character',
+    example: 'Léa, 20, pink hair, yellow jacket'
+  },
+  place: {
+    token: '[PLACE]',
+    i18nKey: 'templates.slots.place',
+    example: 'a rooftop garden above a neon city'
+  },
+  action: {
+    token: '[ACTION]',
+    i18nKey: 'templates.slots.action',
+    example: 'leaps across the gap at sunset'
+  },
+  subject: {
+    token: '[SUBJECT]',
+    i18nKey: 'templates.slots.subject',
+    example: 'an old lighthouse keeper'
+  },
+  location: {
+    token: '[LOCATION]',
+    i18nKey: 'templates.slots.location',
+    example: 'a storm-battered coastline'
+  },
+  mood: { token: '[MOOD]', i18nKey: 'templates.slots.mood', example: 'melancholic, hopeful' },
+  hook: { token: '[HOOK]', i18nKey: 'templates.slots.hook', example: 'Your feed stops here.' }
+} satisfies Record<string, WorkflowTemplateSlot>
 
 // Non-null: every template's styleId is validated against the style registry by the tests.
 const bible = (styleId: string): string => getStyle(styleId)!.styleBible
@@ -54,7 +102,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description:
       'A 24s product ad: hero product image, then three chained cinematic shots (reveal → detail → tagline), scored with an upbeat track.',
     styleId: 'commercial',
-    slots: ['[PRODUCT]', '[SETTING]', '[TAGLINE]'],
+    slots: [SLOTS.product, SLOTS.setting, SLOTS.tagline],
     workflow: {
       version: 1,
       nodes: [
@@ -163,7 +211,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description:
       'A 24s anime scene: a key visual sets the character design (used as an @Image reference — it never appears on screen), then three chained Seedance 2 shots (establishing → action → emotion) with a J-pop orchestral track.',
     styleId: 'anime',
-    slots: ['[CHARACTER]', '[PLACE]', '[ACTION]'],
+    slots: [SLOTS.character, SLOTS.place, SLOTS.action],
     workflow: {
       version: 1,
       nodes: [
@@ -286,7 +334,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description:
       'The full pre-visualization pipeline: a character design sheet feeds a 9-panel storyboard grid (review the staging THERE, before any video credits are spent), then three chained Seedance 2 shots follow the storyboard panels in order — the sheet and the grid are wired as references, they never appear on screen.',
     styleId: 'anime',
-    slots: ['[CHARACTER]', '[PLACE]', '[ACTION]'],
+    slots: [SLOTS.character, SLOTS.place, SLOTS.action],
     workflow: {
       version: 1,
       nodes: [
@@ -436,7 +484,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description:
       'A 24s photorealistic film sequence: three chained shots (establishing → tracking → close-up) with an emotional film score.',
     styleId: 'cinematic-realism',
-    slots: ['[SUBJECT]', '[LOCATION]', '[MOOD]'],
+    slots: [SLOTS.subject, SLOTS.location, SLOTS.mood],
     workflow: {
       version: 1,
       nodes: [
@@ -528,7 +576,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description:
       'A snappy 9:16 social ad: product image animated by Seedance 2 via @Image1, a punchline shot, and an energetic track.',
     styleId: 'commercial',
-    slots: ['[PRODUCT]', '[HOOK]'],
+    slots: [SLOTS.product, SLOTS.hook],
     workflow: {
       version: 1,
       nodes: [
@@ -619,3 +667,30 @@ export function getWorkflowTemplate(id: string): WorkflowTemplate | undefined {
 }
 
 export const workflowTemplateIds = WORKFLOW_TEMPLATES.map((t) => t.id)
+
+/**
+ * Replaces slot tokens across every string of a blueprint (prompts, labels,
+ * intents, music titles…), keyed by the literal token ("[PRODUCT]" → value).
+ * Blank values leave their token in place — still assistant-fillable later.
+ * Pure and non-mutating: returns a fresh workflow, string-safe by construction
+ * (no JSON round-trip of user input).
+ */
+export function fillTemplateSlots(
+  workflow: WorkflowTemplate['workflow'],
+  values: Record<string, string>
+): WorkflowTemplate['workflow'] {
+  const entries = Object.entries(values)
+    .map(([token, value]) => [token, value.trim()] as const)
+    .filter(([, value]) => value !== '')
+  const fill = (input: unknown): unknown => {
+    if (typeof input === 'string') {
+      return entries.reduce<string>((acc, [token, value]) => acc.split(token).join(value), input)
+    }
+    if (Array.isArray(input)) return input.map(fill)
+    if (input !== null && typeof input === 'object') {
+      return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, fill(value)]))
+    }
+    return input
+  }
+  return fill(workflow) as WorkflowTemplate['workflow']
+}

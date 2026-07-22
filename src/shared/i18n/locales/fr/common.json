@@ -46,6 +46,33 @@
     "fixPromptPrefill": "La génération du nœud « {{label}} » a échoué avec l'erreur : {{error}}\nAnalyse le prompt de ce nœud, corrige-le pour éviter cette erreur en restant fidèle à l'intention, mets à jour le nœud puis relance la génération.",
     "adjustPromptPrefill": "Le résultat du nœud « {{label}} » ne me convient pas : \n\nAméliore le prompt en conséquence, mets à jour le nœud puis relance la génération."
   },
+  "onboarding": {
+    "skip": "Passer",
+    "back": "Retour",
+    "next": "Continuer",
+    "welcomeTitle": "Bienvenue dans Raccord",
+    "welcomeText": "Crée des vidéos IA par workflows : designs, storyboard, plans et musique s'assemblent sur un canvas. Trois étapes pour démarrer.",
+    "keyTitle": "Ta clé API kie.ai",
+    "keyExplain": "Une seule clé alimente tout — générations d'images, de vidéos et de musique, solde de crédits et assistant. Récupère-la sur",
+    "keyTest": "Enregistrer et tester",
+    "keyTesting": "Test en cours…",
+    "keyStatus": {
+      "ok": "Clé valide — solde de crédits accessible ✓",
+      "unauthorized": "Clé refusée par kie.ai — vérifie-la et réessaie.",
+      "network": "Impossible de joindre kie.ai — clé enregistrée, vérifie ta connexion.",
+      "missing": "Aucune clé enregistrée."
+    },
+    "starterTitle": "Premier projet",
+    "starterCreate": "Créer un projet d'exemple",
+    "starterCreateDesc": "Une pub produit prête à lancer : visuel héro, 3 plans enchaînés et musique, prompts déjà remplis.",
+    "starterCreating": "Création…",
+    "starterEmpty": "Commencer vide",
+    "starterEmptyDesc": "Ouvrir l'app sur la bibliothèque de projets.",
+    "starterProjectName": "Projet d'exemple",
+    "starterVideoName": "Pub produit — exemple",
+    "bannerText": "Configure ta clé kie.ai pour activer les générations.",
+    "bannerCta": "Ouvrir les réglages"
+  },
   "integrations": {
     "title": "Intégrations",
     "kieKeyLabel": "Clé API kie.ai",
@@ -99,6 +126,9 @@
     "startFrom": "Commencer depuis",
     "blankVideo": "Vidéo vierge",
     "blankVideoDesc": "Un graphe vide, à construire librement",
+    "slotsTitle": "Personnaliser",
+    "slotPlaceholder": "ex. {{example}}",
+    "slotsHint": "Les champs vides gardent leur repère [SLOT] dans les prompts — l'assistant pourra les remplir plus tard.",
     "searchPlaceholder": "Rechercher une vidéo…",
     "noMatch": "Aucune vidéo ne correspond à « {{query}} »."
   },
@@ -303,6 +333,18 @@
     }
   },
   "templates": {
+    "slots": {
+      "product": "Produit",
+      "setting": "Cadre / décor",
+      "tagline": "Slogan",
+      "character": "Personnage",
+      "place": "Lieu",
+      "action": "Action",
+      "subject": "Sujet",
+      "location": "Lieu",
+      "mood": "Ambiance",
+      "hook": "Accroche"
+    },
     "product-commercial": {
       "name": "Pub produit",
       "desc": "3 plans enchaînés + visuel héro + musique (24 s)"

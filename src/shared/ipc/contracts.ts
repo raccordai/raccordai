@@ -485,6 +485,13 @@ export const ipcContracts = {
     input: z.void(),
     output: z.object({ configured: z.boolean(), encryptionAvailable: z.boolean() })
   },
+  /** Live validation of the stored kie key (cheap authenticated balance call). */
+  'settings:testKieApiKey': {
+    input: z.void(),
+    output: z.object({ status: z.enum(['ok', 'unauthorized', 'network', 'missing']) })
+  },
+  'settings:getOnboardingCompleted': { input: z.void(), output: z.boolean() },
+  'settings:setOnboardingCompleted': { input: z.void(), output: z.void() },
   'settings:getAssistantModel': { input: z.void(), output: assistantModelSchema },
   'settings:setAssistantModel': {
     input: z.object({ model: assistantModelSchema }),

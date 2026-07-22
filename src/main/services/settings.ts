@@ -79,6 +79,26 @@ export function kieApiKeyStatus(): { configured: boolean; encryptionAvailable: b
   }
 }
 
+/**
+ * First-run onboarding overlay — shown once, then never again (completing OR
+ * skipping any step marks it done).
+ */
+export function getOnboardingCompleted(): boolean {
+  return getSetting('onboardingCompleted') === true
+}
+
+export function setOnboardingCompleted(): void {
+  setSetting('onboardingCompleted', true)
+}
+
+/**
+ * Called at startup: existing users (a kie key already configured) never see
+ * the first-run overlay — the setting is back-filled as completed.
+ */
+export function backfillOnboardingCompleted(): void {
+  if (!getOnboardingCompleted() && getKieApiKey() !== null) setOnboardingCompleted()
+}
+
 const concurrencySchema = z.number().int().min(1).max(8)
 const DEFAULT_MAX_CONCURRENT_GENERATIONS = 2
 

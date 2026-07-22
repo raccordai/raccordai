@@ -8,12 +8,13 @@ workflows**. The July 2026 audit (renderer UX, workflow building blocks,
 generation lifecycle) found the capabilities largely in place — templates,
 design recipes, storyboard pre-viz, a full-project assistant, dependency-aware
 runs, undo/redo, gapless timeline, rendered MP4 export — and the remaining
-friction concentrated in two moments of the user journey:
+friction concentrated in two moments of the user journey. The first — **the
+first fifteen minutes** (no onboarding, nothing pushing the user to configure
+the kie.ai key without which the app is inert) — is now addressed by the
+first-run onboarding + template slot form (see "Shipped"). The remaining one:
 
-1. **The first fifteen minutes** — no onboarding, nothing pushes the user to
-   configure the kie.ai key without which the app is inert.
-2. **Trust while generating** — queue position, automatic retries and
-   aggregate cost are invisible; errors surface as native `alert()`s.
+- **Trust while generating** — queue position, automatic retries and
+  aggregate cost are invisible; errors surface as native `alert()`s.
 
 The assistant currently exists to paper over manual-editor friction. The
 long-term differentiator is to invert that: make the conversational path the
@@ -46,6 +47,20 @@ Landed in July 2026 (see CHANGELOG once releases start):
   provider on raccordai/raccordai releases, channel setting (stable|beta,
   Settings → Updates) drives both the update feed and `getReleaseChannel()`.
   macOS builds are signed + notarized in the publish workflow.
+- **First-run onboarding + template slot form** (§4.1 + §4.2, July 2026):
+  `onboardingCompleted` setting (back-filled at startup when a kie key already
+  exists), three-step overlay from `__root.tsx` (language / kie key with live
+  validation via the new `settings:testKieApiKey` channel / starter project
+  seeded from `product-commercial` with example fills), persistent missing-key
+  banner with CTA to Settings. Templates now declare slot metadata
+  (`slots: {token, i18nKey, example}[]` + shared `SLOTS` vocabulary) rendered
+  as a per-slot field form in the new-video dialog; `fillTemplateSlots` (pure,
+  unit-tested) string-replaces across the whole blueprint, blank fields keep
+  their token (assistant-fillable). Registry test enforces token↔blueprint
+  parity in both directions and fr/en label resolution; the MCP `templates`
+  docs topics expose tokens + examples. Verified end-to-end (fresh profile,
+  invalid/valid key, starter project with zero remaining `[SLOT]` markers,
+  back-fill, banner).
 - **Rendered MP4 export** (§4.3, July 2026): `render:export` IPC + MCP
   `render_video` → `src/main/services/render.ts` (orchestration) +
   `renderPlan.ts` (pure decisions, unit-tested). ffmpeg-static/ffprobe-static
@@ -93,76 +108,7 @@ i18next key in `fr/common.json` **and** `en/common.json`; graph mutations go
 through the graph service so `withGraphHistory` journals them; colors through
 the tokens in `styles.css`.
 
-### 4.1 First-run & onboarding — effort M
-
-**Problem.** A new user sees no prompt to configure the kie.ai key (the only
-mentions are Settings → Integrations and the ChatPanel's `chat.needKey`
-warning), and the app is functionally dead without it. There is no tutorial,
-tour, or sample project (confirmed: zero onboarding/welcome/firstRun code in
-the renderer or locales). Node creation is only discoverable through the
-toolbar combobox.
-
-**Spec.**
-
-- New persisted setting `onboardingCompleted: boolean` (settings service,
-  `src/main/services/settings.ts` — key/value, no schema migration needed if
-  settings are stored as rows; otherwise additive).
-- A first-run overlay (rendered from `__root.tsx` when
-  `!onboardingCompleted`), three steps as floating islands:
-  1. **Welcome + language** — reuse `LocaleSwitcher`.
-  2. **kie.ai key** — reuse the `ApiKeyRow` logic
-     (`settings:setKieApiKey` / `settings:kieApiKeyStatus`); add a
-     `settings:testKieApiKey` channel that performs a cheap authenticated call
-     (the credits-balance endpoint already used by `HeaderCredits`) and
-     returns ok/unauthorized/network so the user gets live validation, not
-     just "saved". Explain in one sentence what the key powers (generations,
-     balance, assistant) with a link to kie.ai.
-  3. **Starter project** — offer "create an example project" which creates a
-     project + video seeded from a template (§4.2 slot form pre-filled with
-     example values), or "start empty".
-- Skippable at every step; completing or skipping sets `onboardingCompleted`.
-- **Persistent fallback**: when the kie key status is `missing`, `__root.tsx`
-  shows a slim non-blocking banner ("Configure your kie.ai key to enable
-  generation" + CTA to `/settings`). Removes the current failure mode where
-  the requirement is only discovered via the gear icon.
-- i18n: `onboarding.*` keys, fr + en.
-
-**Acceptance.** Fresh profile → app opens on the overlay; entering an invalid
-key shows the failure inline; finishing lands in a project ready to run.
-Existing users (key already configured) never see the overlay
-(`onboardingCompleted` back-filled when a key exists at startup).
-
-### 4.2 Template slot filling — effort S
-
-**Problem.** The five templates (`src/shared/templates/registry.ts`) ship
-prompts containing literal `[PRODUCT]`, `[CHARACTER]`, `[ACTION]`… slots. The
-new-video dialog (`projects.$projectId.tsx`) imports the JSON as-is and the
-user must find and hand-edit each node's prompt. The template experience is
-"skeleton to finish" instead of "video in three fields".
-
-**Spec.**
-
-- Extend `WorkflowTemplate` with explicit slot metadata:
-  `slots: Array<{ token: string; i18nKey: string; example: string }>` (token
-  is the literal `[PRODUCT]` string). i18n keys `templates.slots.*` for label
-  - placeholder, fr + en.
-- Registry test (`registry.test.ts`): every `[A-Z_]+`-shaped token appearing
-  in any node param of a template must be declared in its `slots`, and vice
-  versa — prevents drift when templates evolve.
-- New-video dialog: after picking a non-blank blueprint, render one text field
-  per slot (label, placeholder = example). On create, do a plain
-  string-replace of each token across the template's workflow JSON **before**
-  calling `workflow:import`. Empty fields leave the token in place (current
-  behavior, still assistant-fillable).
-- The assistant path is untouched (it already fills slots itself after
-  `read_docs "template:<id>"`), but the docs topic for templates should
-  mention the declared slots so both paths stay in sync.
-
-**Acceptance.** Creating a "product commercial" video with three filled
-fields yields a graph with zero remaining `[...]` markers; the registry test
-fails if a template adds an undeclared slot.
-
-### 4.3 Rendered MP4 export — shipped (see "Shipped"; follow-ups folded into §2, §4.4, §4.5)
+### 4.1–4.3 First-run & onboarding, template slot filling, rendered MP4 export — shipped (see "Shipped"; §4.3 follow-ups folded into §2, §4.4, §4.5)
 
 ### 4.4 Generation feedback layer — effort S/M (best ratio of the roadmap)
 
@@ -372,17 +318,15 @@ would remove the last constraint (a running window).
 
 ## Suggested order
 
-1. **First-run + template slot form** (§4.1, §4.2) — cost of entry drops
-   from "read the docs" to "three fields and go".
-2. **Feedback layer** (§4.4) — mostly wiring existing engine state to the
+1. **Feedback layer** (§4.4) — mostly wiring existing engine state to the
    UI; lowest effort-to-trust ratio on the list. Also absorbs the render
    error/skipped `alert()`s left interim by §4.3.
-3. **Video-level settings + style-at-payload** (§4.5) — removes the two main
+2. **Video-level settings + style-at-payload** (§4.5) — removes the two main
    sources of sequence incoherence, and unlocks the §4.3 follow-up (export
    presets per destination).
-4. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
+3. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
    long-term differentiation.
-5. **OSS hygiene items** (§1) remain the blockers for a good first
+4. **OSS hygiene items** (§1) remain the blockers for a good first
    impression at publication; the **versioned E2E suite** (§2) should land
    before contributors arrive — the §4.3 render E2E driver (session
    scratchpad) is ready to be promoted into it.

@@ -5,7 +5,11 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { assetMatchesQuery, nameMatchesQuery } from '@shared/assets/search'
 import { DESIGN_RECIPES } from '@shared/designs/registry'
-import { WORKFLOW_TEMPLATES, getWorkflowTemplate } from '@shared/templates/registry'
+import {
+  WORKFLOW_TEMPLATES,
+  fillTemplateSlots,
+  getWorkflowTemplate
+} from '@shared/templates/registry'
 import { AssetCard } from '@renderer/components/AssetCard'
 import { LibraryCard } from '@renderer/components/LibraryCard'
 import { useProject } from '@renderer/features/workflow/data'
@@ -34,6 +38,8 @@ function VideosPage(): React.JSX.Element {
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState<string | null>(null)
+  // Slot form values, keyed by literal token ("[PRODUCT]" → user input).
+  const [slotValues, setSlotValues] = useState<Record<string, string>>({})
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
 
@@ -48,15 +54,16 @@ function VideosPage(): React.JSX.Element {
     void queryClient.invalidateQueries({ queryKey: ['projects'] })
   }
   const createVideo = useMutation({
-    // Optionally seed the fresh video from a workflow blueprint: import its graph
-    // (prompts pre-filled with [SLOTS]) and attach the matching style template.
+    // Optionally seed the fresh video from a workflow blueprint: fill its [SLOTS]
+    // from the form (blank fields keep their token, still assistant-fillable),
+    // import the graph and attach the matching style template.
     mutationFn: async (value: string) => {
       const video = await invoke('videos:create', { projectId, name: value })
       const template = templateId ? getWorkflowTemplate(templateId) : undefined
       if (template) {
         await invoke('workflow:import', {
           videoId: video.id,
-          json: JSON.stringify(template.workflow),
+          json: JSON.stringify(fillTemplateSlots(template.workflow, slotValues)),
           replace: false
         })
         await invoke('videos:setStyle', { videoId: video.id, styleId: template.styleId })
@@ -68,6 +75,7 @@ function VideosPage(): React.JSX.Element {
       setName('')
       setShowForm(false)
       setTemplateId(null)
+      setSlotValues({})
       void navigate({
         to: '/projects/$projectId/videos/$videoId',
         params: { projectId, videoId: video.id }
@@ -285,7 +293,10 @@ function VideosPage(): React.JSX.Element {
             <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">
               <button
                 type="button"
-                onClick={() => setTemplateId(null)}
+                onClick={() => {
+                  setTemplateId(null)
+                  setSlotValues({})
+                }}
                 className={`rounded-md border px-3 py-2 text-left transition-colors ${
                   templateId === null
                     ? 'border-accent bg-neutral-800/60'
@@ -301,7 +312,10 @@ function VideosPage(): React.JSX.Element {
                 <button
                   key={template.id}
                   type="button"
-                  onClick={() => setTemplateId(template.id)}
+                  onClick={() => {
+                    setTemplateId(template.id)
+                    setSlotValues({})
+                  }}
                   className={`rounded-md border px-3 py-2 text-left transition-colors ${
                     templateId === template.id
                       ? 'border-accent bg-neutral-800/60'
@@ -318,6 +332,35 @@ function VideosPage(): React.JSX.Element {
               ))}
             </div>
           </div>
+
+          {/* Slot form — one field per [TOKEN] of the chosen blueprint ("video in three fields"). */}
+          {(() => {
+            const selected = templateId ? getWorkflowTemplate(templateId) : undefined
+            if (!selected || selected.slots.length === 0) return null
+            return (
+              <div>
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                  {t('videosPage.slotsTitle')}
+                </div>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
+                  {selected.slots.map((slot) => (
+                    <label key={slot.token} className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400">{t(slot.i18nKey as never)}</span>
+                      <input
+                        value={slotValues[slot.token] ?? ''}
+                        onChange={(e) =>
+                          setSlotValues((prev) => ({ ...prev, [slot.token]: e.target.value }))
+                        }
+                        placeholder={t('videosPage.slotPlaceholder', { example: slot.example })}
+                        className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[10px] text-neutral-500">{t('videosPage.slotsHint')}</p>
+              </div>
+            )
+          })()}
         </form>
       )}
 
