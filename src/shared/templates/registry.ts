@@ -335,8 +335,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               '[CHARACTER] matches the character design @Image1 (reference only — the sheet must not appear on screen). ' +
-              '@Image2 is the 9-panel storyboard of this scene — follow its panels in order, left to right, top to bottom; this shot covers panels 1-3. ' +
+              '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 1-3. ' +
               'Shot 1: wide establishing shot of [PLACE], [CHARACTER] walks into frame, slow pan following the character, wind moving through the scene. ' +
+              'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
               bible('anime'),
             aspect_ratio: '16:9',
@@ -358,8 +359,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
             prompt:
               '@Image3 as the first frame (seamless continuation of the previous shot). ' +
               '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
-              '@Image2 is the 9-panel storyboard of this scene — follow its panels in order, left to right, top to bottom; this shot covers panels 4-6. ' +
+              '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 4-6. ' +
               'Shot 1: dynamic medium shot, [CHARACTER] [ACTION], fluid animation on the movement, dramatic camera tilt at the peak of the action. ' +
+              'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
               bible('anime'),
             aspect_ratio: '16:9',
@@ -381,8 +383,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
             prompt:
               '@Image3 as the first frame (seamless continuation of the previous shot). ' +
               '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
-              '@Image2 is the 9-panel storyboard of this scene — follow its panels in order, left to right, top to bottom; this shot covers panels 7-9. ' +
+              '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 7-9. ' +
               "Shot 1: slow push-in close-up on [CHARACTER]'s face, a quiet emotional beat closing the scene, eyes catching the light. " +
+              'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
               bible('anime'),
             aspect_ratio: '16:9',

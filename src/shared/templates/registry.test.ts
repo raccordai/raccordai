@@ -139,6 +139,10 @@ describe('workflow template registry', () => {
         expect(prompt).toContain('@Image1')
         expect(prompt).toContain('@Image2 is the 9-panel storyboard')
         expect(prompt).toContain('left to right, top to bottom')
+        // Anti-grid guard: without it the model may render the storyboard grid
+        // itself in the video instead of treating it as a staging plan.
+        expect(prompt).toContain('must NEVER appear on screen')
+        expect(prompt).toContain('no 3x3 grid, no panel borders, no panel numbers')
         if (incoming.length > 2) {
           expect(incoming[2]!.output).toBe('lastFrame')
           expect(prompt).toContain('@Image3 as the first frame')

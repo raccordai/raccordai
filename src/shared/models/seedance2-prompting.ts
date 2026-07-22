@@ -42,6 +42,10 @@ MODEL TIERS (same syntax — pick by job):
     character sheet as a separate @Image1; on multi-shot scenes, tell each shot which panels it
     covers, e.g. "this shot covers panels 4-6"). The storyboard already encodes composition and
     framing — spend the video prompt on MOTION: camera direction, rhythm, transition logic.
+    MANDATORY anti-grid guard: without it the model may render the grid ITSELF in the video.
+    State in the role that the storyboard is "a staging plan only, it must NEVER appear on screen",
+    and append the constraint "render one single full-frame shot: no 3x3 grid, no panel borders,
+    no panel numbers, no split-screen or comic-panel layout" to every storyboard-driven prompt.
 
 FRAME ANCHORS (First/Last frame handles — these images APPEAR on screen literally):
   - The First frame / Last frame inputs pin the clip's exact opening/closing image (scene stills,

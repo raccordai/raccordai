@@ -88,7 +88,9 @@ Recipes:
     and keep a strong style keyword in Seedance 2 prompts (prevents photoreal drift).
   - Pre-visualization (Seedance 2): storyboard each scene BEFORE running video — a 9-panel grid built
     from the design sheets (docs "designs", recipe "storyboard"), reviewed by the user, then wired as
-    a reference with "follow its panels in order, left to right, top to bottom"; the video prompt then
+    a reference with "follow its panels in order, left to right, top to bottom" PLUS the anti-grid
+    guard ("a staging plan only, it must NEVER appear on screen — render one single full-frame shot:
+    no 3x3 grid, no panel borders, no panel numbers, no split-screen"); the video prompt then
     describes motion (camera, rhythm, transitions), not the visuals the storyboard already encodes.`
 }
 
@@ -172,10 +174,12 @@ The pipeline: design sheets (character/decor/prop) → storyboard → video shot
 the pre-visualization gate: build it FROM the sheets (gpt-image-2-image-to-image, sheets wired to
 "input_urls" — use the recipe's per-model prompt), let the user review the staging on the 9-panel
 grid before any video credits are spent, then wire it on each Seedance 2 shot with the role
-"@ImageN is the 9-panel storyboard of this scene — follow its panels in order, left to right,
-top to bottom" (on multi-shot scenes, say which panels each shot covers). The video prompt then
-describes motion, not the visuals the storyboard already encodes. Match the storyboard's
-aspect_ratio to the video's.
+"@ImageN is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on
+screen: follow its panels in order, left to right, top to bottom" (on multi-shot scenes, say which
+panels each shot covers) AND the anti-grid constraint "render one single full-frame shot: no 3x3
+grid, no panel borders, no panel numbers, no split-screen or comic-panel layout" — without both,
+the model may render the grid itself in the video. The video prompt then describes motion, not
+the visuals the storyboard already encodes. Match the storyboard's aspect_ratio to the video's.
 
 The project library: BEFORE generating a new sheet, check list_assets/search_assets for a published
 design sheet of the same subject (designId/designSubject are set on those) and reuse it via an
