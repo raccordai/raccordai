@@ -25,9 +25,11 @@ Typical session:
      read docs "prompting:<id>" BEFORE writing any prompt for that model.
      CRITICAL: image inputs are either frame ANCHORS (they appear on screen) or
      REFERENCES (they guide without appearing) — docs "models" explains which is which
-  3. pick an art direction: docs "styles" — append the chosen style bible to every
-     visual prompt of the video (cross-shot consistency), or start from a full
-     blueprint: docs "templates" then docs "template:<id>" → import_workflow.
+  3. pick an art direction: docs "styles" → set_video_style. The style bible is
+     appended to prompts AT RUN TIME for visual nodes whose params carry
+     "applyVideoStyle": true (set it on the visual nodes you create; never paste
+     the bible into prompts). Or start from a full blueprint:
+     docs "templates" then docs "template:<id>" → import_workflow.
      Need a character/décor/prop sheet or a scene storyboard? docs "designs" has
      ready prompt recipes (wire the resulting node as a REFERENCE, never a frame
      anchor; the storyboard is the review gate before spending video credits)
@@ -57,6 +59,8 @@ const WORKFLOW_JSON = `Workflow JSON (version 1) — the bulk import/export form
      "intent": "expected result",    // optional
      "position": { "x": 0, "y": 0 },
      "params": { ... }               // model params; asset nodes: {"assetKey": "<key>"}
+                                     // visual nodes: add "applyVideoStyle": true so the video's
+                                     // style bible is appended to the prompt at run time
   }],
   "edges": [{ "from": "kf01", "to": "clip01", "input": "<target input field>", "output": "output" | "lastFrame" }]
 }
@@ -84,8 +88,9 @@ Recipes:
     first frame; on Seedance 2 also write "@ImageN as the first frame" in the prompt.
   - Character consistency across shots: key visual → EVERY shot's reference_image_urls on Seedance 2
     ("[character] matches the design @Image1, reference only"); impossible on 1.5 (prompt-only).
-  - Style consistency: append the video's style bible (docs "styles") verbatim to every visual prompt,
-    and keep a strong style keyword in Seedance 2 prompts (prevents photoreal drift).
+  - Style consistency: set_video_style + "applyVideoStyle": true in every visual node's params — the
+    app appends the video's style bible (docs "styles") to the prompt at run time; never paste it
+    yourself. Keep a strong style keyword in Seedance 2 prompts (prevents photoreal drift).
   - Pre-visualization (Seedance 2): storyboard each scene BEFORE running video — a 9-panel grid built
     from the design sheets (docs "designs", recipe "storyboard"), reviewed by the user, then wired as
     a reference with "follow its panels in order, left to right, top to bottom" PLUS the anti-grid
@@ -136,7 +141,7 @@ function stylesIndex(): string {
   const entries = STYLES.map(
     (s) => `── ${s.id} — ${s.label}
 ${s.description}
-Style bible (append to EVERY visual prompt of the video):
+Style bible (appended automatically at run time to flagged nodes):
 ${s.styleBible}
 Image prompts add: ${s.imageFragment}
 Video prompts add: ${s.videoFragment}
@@ -146,7 +151,10 @@ Recommended params: ${JSON.stringify(s.recommendedParams)}`
   )
   return `Style templates — reusable art directions. Attach one to a video with set_video_style;
 the video's style is returned by get_workflow. The style bible is THE cross-shot consistency
-lever: append it verbatim to every image/video prompt of the video.
+lever: the app appends it to the prompt AT RUN TIME for every visual node whose params carry
+"applyVideoStyle": true (the default for template/design/plain-created nodes). Set that flag on
+the visual nodes you create; NEVER paste the bible into a prompt — it would be duplicated at run
+and a style switch would no longer propagate.
 
 ${entries.join('\n\n')}`
 }
@@ -161,7 +169,7 @@ function designsIndex(): string {
 ${r.description}
 Model: ${r.defaultModelId}${r.params ? ` · params: ${JSON.stringify(r.params)}` : ''}
 Node intent: ${designIntent(r)}
-Prompt (replace ${r.slot} with the subject; keep the video's style bible appended when one is set):
+Prompt (replace ${r.slot} with the subject; set "applyVideoStyle": true in the node params — the video's style bible is appended at run time):
 ${prompt}${overrides.join('')}`
   })
   return `Design recipes — ready prompts for reusable design sheets (add_node with the recipe's model,
@@ -196,8 +204,9 @@ function templatesIndex(): string {
       `${t.id} — ${t.label}\n  ${t.description}\n  style: ${t.styleId} · slots to fill: ${t.slots.map((s) => s.token).join(', ')}`
   )
   return `Workflow templates — ready-to-import graph blueprints (get the JSON with docs "template:<id>",
-fill the [SLOTS] with the user's subject, then import_workflow). Each blueprint's prompts already
-carry the matching style bible.\n\n${lines.join('\n\n')}`
+fill the [SLOTS] with the user's subject, then import_workflow). Every visual node carries
+"applyVideoStyle": true, so set the video's style to the template's styleId (set_video_style) and
+the matching style bible is appended to each prompt at run time.\n\n${lines.join('\n\n')}`
 }
 
 function templateDetail(id: string): string {
@@ -210,7 +219,8 @@ ${t.description}
 Slots to replace with the user's subject before running: ${t.slots
     .map((s) => `${s.token} (e.g. "${s.example}")`)
     .join(', ')}
-Also set the video's style with set_video_style("${t.styleId}") so later shots stay coherent.
+REQUIRED: set the video's style with set_video_style("${t.styleId}") — the blueprint's visual nodes
+carry "applyVideoStyle": true, so the bible only reaches the prompts once the style is attached.
 
 Workflow JSON (pass as-is to import_workflow after filling the slots):
 ${JSON.stringify(t.workflow, null, 2)}`

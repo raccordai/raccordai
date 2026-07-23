@@ -71,12 +71,23 @@ export const projectSchema = z.object({
 })
 export type Project = z.infer<typeof projectSchema>
 
+/** Video-level default aspect ratio — applied to node params only when the model supports the value. */
+export const videoAspectRatioSchema = z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'])
+export type VideoAspectRatio = z.infer<typeof videoAspectRatioSchema>
+
+/** Video-level default resolution (video models use Np, image models use NK). */
+export const videoResolutionSchema = z.enum(['480p', '720p', '1080p', '1K', '2K', '4K'])
+export type VideoResolution = z.infer<typeof videoResolutionSchema>
+
 export const videoSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   name: z.string(),
   /** Active style template id (src/shared/styles/registry.ts), null = no style. */
   styleId: z.string().nullable(),
+  /** Video-level generation defaults — pre-fill new nodes, never silently rewrite existing ones. */
+  defaultAspectRatio: z.string().nullable(),
+  defaultResolution: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -287,6 +298,20 @@ export const ipcContracts = {
   'videos:setStyle': {
     input: z.object({ videoId: z.string(), styleId: z.string().nullable() }),
     output: z.void()
+  },
+  /** Video-level generation defaults (null clears; omitted fields are untouched). */
+  'videos:setDefaults': {
+    input: z.object({
+      videoId: z.string(),
+      defaultAspectRatio: videoAspectRatioSchema.nullable().optional(),
+      defaultResolution: videoResolutionSchema.nullable().optional()
+    }),
+    output: z.void()
+  },
+  /** Bulk-apply the video defaults to every compatible existing node — one undoable step. */
+  'nodes:applyVideoDefaults': {
+    input: z.object({ videoId: z.string() }),
+    output: z.object({ updated: z.number() })
   },
 
   'assets:listByProject': {

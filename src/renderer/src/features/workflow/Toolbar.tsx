@@ -25,8 +25,15 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import type { AssetWithUrl, GraphEdge, GraphNode } from '@shared/ipc/contracts'
-import { MODELS, defaultParamsFor } from '@shared/models'
+import type {
+  AssetWithUrl,
+  GraphEdge,
+  GraphNode,
+  Video,
+  VideoAspectRatio,
+  VideoResolution
+} from '@shared/ipc/contracts'
+import { MODELS, videoDefaultParams } from '@shared/models'
 import { STYLES, getStyle } from '@shared/styles/registry'
 import {
   DESIGN_RECIPES,
@@ -37,6 +44,7 @@ import {
 } from '@shared/designs/registry'
 import { invoke } from '@renderer/lib/ipc'
 import { Button } from '@renderer/components/ui/Button'
+import { useToast } from '@renderer/components/feedback/Feedback'
 import { Logo } from '@renderer/components/Logo'
 import { graphKeys, useIpcMutation, useProject, useProjectAssets, useVideo } from './data'
 import type { LayoutDirection } from './autoLayout'
@@ -76,6 +84,12 @@ export function WorkflowToolbar({
   const video = useVideo(videoId).data
   const project = useProject(projectId).data
   const { mutate: setStyle } = useIpcMutation('videos:setStyle', [['videos']])
+  const { mutate: setDefaults } = useIpcMutation('videos:setDefaults', [['videos']])
+  const { mutateAsync: applyDefaults } = useIpcMutation('nodes:applyVideoDefaults', [
+    graphKeys.graph(videoId),
+    ['history']
+  ])
+  const toast = useToast()
 
   // Undo/redo — state is refreshed by the ['history'] invalidation that every
   // graph mutation triggers (event:workflowChanged from the main process).
@@ -110,13 +124,10 @@ export function WorkflowToolbar({
     }
   }
 
+  // No explicit params: the graph service seeds model defaults + the video's
+  // default aspect/resolution + the applyVideoStyle flag on visual nodes.
   async function addNode(modelId: string) {
-    await createNode({
-      videoId,
-      modelId,
-      position: spawnPosition(),
-      params: modelId === 'studio/asset' ? {} : defaultParamsFor(modelId)
-    })
+    await createNode({ videoId, modelId, position: spawnPosition() })
   }
 
   // Published design sheets of the project — offered as "from library" entries
@@ -197,8 +208,15 @@ export function WorkflowToolbar({
       />
 
       <StyleMenu
-        current={video?.styleId ?? null}
+        video={video}
+        graph={graph}
         onSelect={(styleId) => setStyle({ videoId, styleId })}
+        onSetDefaults={(defaults) => setDefaults({ videoId, ...defaults })}
+        onApplyDefaults={() => {
+          void applyDefaults({ videoId }).then(({ updated }) =>
+            toast.success(t('editor.videoDefaults.applied', { count: updated }))
+          )
+        }}
       />
 
       <div className="mx-1.5 h-5 w-px bg-neutral-800" />
@@ -694,41 +712,79 @@ function AddNodeMenu({
   )
 }
 
-/** Style-template picker — the video's art direction, shared by every shot's prompts. */
+/** Selectable values for the video-level defaults ('' = leave the model default). */
+const DEFAULT_ASPECT_OPTIONS: VideoAspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+const DEFAULT_RESOLUTION_OPTIONS: VideoResolution[] = ['480p', '720p', '1080p', '1K', '2K', '4K']
+
+/**
+ * Style-template picker + video-level generation defaults (§4.5): the video's
+ * art direction, and the default aspect/resolution pre-filled on new nodes,
+ * with an explicit journaled "apply to N existing nodes" sweep.
+ */
 function StyleMenu({
-  current,
-  onSelect
+  video,
+  graph,
+  onSelect,
+  onSetDefaults,
+  onApplyDefaults
 }: {
-  current: string | null
+  video: Video | null | undefined
+  graph: { nodes: GraphNode[] }
   onSelect: (styleId: string | null) => void
+  onSetDefaults: (defaults: {
+    defaultAspectRatio?: VideoAspectRatio | null
+    defaultResolution?: VideoResolution | null
+  }) => void
+  onApplyDefaults: () => void
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const current = video?.styleId ?? null
+
+  // Close on outside click (an onBlur close would swallow the selects inside).
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(e: PointerEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [open])
 
   function choose(styleId: string | null) {
     onSelect(styleId)
     setOpen(false)
   }
 
+  // Nodes whose params would actually change if the defaults were applied.
+  const applicableCount = useMemo(() => {
+    if (!video) return 0
+    return graph.nodes.filter((n) => {
+      const patch = videoDefaultParams(n.modelId, video)
+      const params = (n.params ?? {}) as Record<string, unknown>
+      return Object.entries(patch).some(([k, v]) => params[k] !== v)
+    }).length
+  }, [graph.nodes, video])
+
+  const selectClass =
+    'w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 focus:border-accent focus:outline-none'
+
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <Button
         variant={current ? 'secondary' : 'ghost'}
         size="sm"
         onClick={() => setOpen((v) => !v)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
         title={t('editor.styleTitle')}
       >
         <Palette className="h-3.5 w-3.5" />{' '}
         {current ? t(`styles.${current}.name` as never) : t('editor.style')}
       </Button>
       {open && (
-        <div className="absolute left-0 z-20 mt-1 min-w-56 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">
+        <div className="absolute left-0 z-20 mt-1 w-64 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">
           <button
-            onMouseDown={(e) => {
-              e.preventDefault()
-              choose(null)
-            }}
+            onClick={() => choose(null)}
             className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-neutral-800 ${
               current === null ? 'text-accent' : 'text-neutral-400'
             }`}
@@ -738,10 +794,7 @@ function StyleMenu({
           {STYLES.map((style) => (
             <button
               key={style.id}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                choose(style.id)
-              }}
+              onClick={() => choose(style.id)}
               className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-neutral-800 ${
                 current === style.id ? 'text-accent' : 'text-neutral-200'
               }`}
@@ -752,6 +805,68 @@ function StyleMenu({
               </span>
             </button>
           ))}
+
+          <div className="border-t border-neutral-800 p-3">
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              {t('editor.videoDefaults.title')}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="mb-1 block text-[10px] text-neutral-400">
+                  {t('editor.videoDefaults.aspect')}
+                </span>
+                <select
+                  className={selectClass}
+                  value={video?.defaultAspectRatio ?? ''}
+                  onChange={(e) =>
+                    onSetDefaults({
+                      defaultAspectRatio: (e.target.value || null) as VideoAspectRatio | null
+                    })
+                  }
+                >
+                  <option value="">{t('editor.videoDefaults.none')}</option>
+                  {DEFAULT_ASPECT_OPTIONS.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[10px] text-neutral-400">
+                  {t('editor.videoDefaults.resolution')}
+                </span>
+                <select
+                  className={selectClass}
+                  value={video?.defaultResolution ?? ''}
+                  onChange={(e) =>
+                    onSetDefaults({
+                      defaultResolution: (e.target.value || null) as VideoResolution | null
+                    })
+                  }
+                >
+                  <option value="">{t('editor.videoDefaults.none')}</option>
+                  {DEFAULT_RESOLUTION_OPTIONS.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="mt-1.5 text-[10px] leading-snug text-neutral-500">
+              {t('editor.videoDefaults.hint')}
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-2 w-full justify-center"
+              disabled={applicableCount === 0}
+              onClick={onApplyDefaults}
+            >
+              {t('editor.videoDefaults.apply', { count: applicableCount })}
+            </Button>
+          </div>
         </div>
       )}
     </div>

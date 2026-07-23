@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { MODELS, defaultParamsFor, estimateCreditsFor, getModel, getModelOrThrow } from './index'
+import {
+  MODELS,
+  defaultParamsFor,
+  estimateCreditsFor,
+  getModel,
+  getModelOrThrow,
+  videoDefaultParams
+} from './index'
 
 describe('model registry invariants', () => {
   it('has unique model ids', () => {
@@ -108,6 +115,47 @@ describe('defaultParamsFor', () => {
 
   it('throws on unknown model', () => {
     expect(() => defaultParamsFor('nope')).toThrow()
+  })
+})
+
+describe('videoDefaultParams', () => {
+  it('keeps only the defaults the model actually supports', () => {
+    // seedance-2-fast: 9:16 is a valid aspect option, 1080p is NOT a resolution option.
+    expect(
+      videoDefaultParams('bytedance/seedance-2-fast', {
+        defaultAspectRatio: '9:16',
+        defaultResolution: '1080p'
+      })
+    ).toEqual({ aspect_ratio: '9:16' })
+    // gpt-image: NK resolutions apply, Np ones don't.
+    expect(
+      videoDefaultParams('gpt-image-2-text-to-image', {
+        defaultAspectRatio: '9:16',
+        defaultResolution: '2K'
+      })
+    ).toEqual({ aspect_ratio: '9:16', resolution: '2K' })
+  })
+
+  it('is empty without defaults, for null values and for unknown models', () => {
+    expect(videoDefaultParams('bytedance/seedance-2-fast', null)).toEqual({})
+    expect(
+      videoDefaultParams('bytedance/seedance-2-fast', {
+        defaultAspectRatio: null,
+        defaultResolution: null
+      })
+    ).toEqual({})
+    expect(videoDefaultParams('studio/asset', { defaultAspectRatio: '16:9' })).toEqual({})
+  })
+
+  it('ignores values outside the model enum (never produces invalid params)', () => {
+    // suno has neither field; kling-3 has aspect_ratio but no resolution field.
+    expect(videoDefaultParams('suno/generate-music', { defaultAspectRatio: '16:9' })).toEqual({})
+    expect(
+      videoDefaultParams('kling-3.0/video', {
+        defaultAspectRatio: '16:9',
+        defaultResolution: '1080p'
+      })
+    ).toEqual({ aspect_ratio: '16:9' })
   })
 })
 

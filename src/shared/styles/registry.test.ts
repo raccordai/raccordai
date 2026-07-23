@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { STYLES, getStyle, isStyleId, styleIds } from './registry'
+import {
+  STYLES,
+  appendStyleBible,
+  getStyle,
+  isStyleId,
+  nodeAppliesVideoStyle,
+  styleIds
+} from './registry'
 
 describe('style registry', () => {
   it('has unique ids', () => {
@@ -39,5 +46,26 @@ describe('style registry', () => {
       ].join(' ')
       expect(all).toMatch(/^[\x20-\x7EÀ-ſ’‘“”—–…]+$/)
     }
+  })
+})
+
+describe('style-at-payload helpers', () => {
+  it('nodeAppliesVideoStyle reads the params marker strictly', () => {
+    expect(nodeAppliesVideoStyle({ applyVideoStyle: true })).toBe(true)
+    expect(nodeAppliesVideoStyle({ applyVideoStyle: false })).toBe(false)
+    expect(nodeAppliesVideoStyle({ applyVideoStyle: 'true' })).toBe(false)
+    expect(nodeAppliesVideoStyle({})).toBe(false)
+    expect(nodeAppliesVideoStyle(null)).toBe(false)
+    expect(nodeAppliesVideoStyle(undefined)).toBe(false)
+  })
+
+  it('appendStyleBible suffixes the prompt with one blank line', () => {
+    expect(appendStyleBible('A cat runs.', 'BIBLE')).toBe('A cat runs.\n\nBIBLE')
+    expect(appendStyleBible('A cat runs.  \n', 'BIBLE')).toBe('A cat runs.\n\nBIBLE')
+  })
+
+  it('appendStyleBible on an empty prompt is just the bible', () => {
+    expect(appendStyleBible('', 'BIBLE')).toBe('BIBLE')
+    expect(appendStyleBible('   ', 'BIBLE')).toBe('BIBLE')
   })
 })

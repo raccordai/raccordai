@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
+import { appendStyleBible, getStyle, nodeAppliesVideoStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes, videos } from '../db/schema'
 import { emitGenerationSettled, onGenerationSettled } from '../bus'
@@ -275,6 +276,22 @@ async function prepareRun(nodeId: string): Promise<PreparedRun> {
     throw new Error(`Invalid params: ${err instanceof Error ? err.message : String(err)}`, {
       cause: err
     })
+  }
+
+  // Style-at-payload: nodes flagged `applyVideoStyle` get the video's CURRENT
+  // style bible appended to their prompt here — before the input snapshot is
+  // persisted, so retries and re-queues replay the exact same payload. Stored
+  // prompts stay business-only; a style change propagates on the next run.
+  if (model.kind !== 'audio' && nodeAppliesVideoStyle(node.params)) {
+    const video = db.select().from(videos).where(eq(videos.id, node.videoId)).get()
+    const style = video?.styleId ? getStyle(video.styleId) : undefined
+    const prompt = (validatedParams as { prompt?: unknown }).prompt
+    if (style && typeof prompt === 'string') {
+      validatedParams = {
+        ...(validatedParams as Record<string, unknown>),
+        prompt: appendStyleBible(prompt, style.styleBible)
+      }
+    }
   }
 
   const incomingForNode = db

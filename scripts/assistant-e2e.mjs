@@ -270,6 +270,12 @@ async function main() {
       .locator('button[title="Delete"], button[title="Supprimer"]')
       .first()
       .click({ force: true })
+    // The §4.4 feedback layer replaced the native confirm() with a styled
+    // modal — validate the destructive action through its confirm button.
+    await win
+      .locator('[role="dialog"]')
+      .getByRole('button', { name: /Delete|Supprimer/ })
+      .click()
     await win.waitForTimeout(800)
   }
   console.log('✓ projet(s) E2E supprimé(s)')

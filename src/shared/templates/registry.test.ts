@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import enCommon from '../i18n/locales/en/common.json'
 import frCommon from '../i18n/locales/fr/common.json'
 import { MODELS, getModel } from '../models'
-import { getStyle } from '../styles/registry'
+import { STYLES, getStyle } from '../styles/registry'
 import {
   WORKFLOW_TEMPLATES,
   fillTemplateSlots,
@@ -42,6 +42,8 @@ describe('workflow template registry', () => {
           const model = getModel(node.modelId)!
           const known = new Set(model.paramFields.map((f) => f.key))
           for (const key of Object.keys(node.params)) {
+            // The style-at-payload marker is deliberately not a model field.
+            if (key === 'applyVideoStyle') continue
             expect(known.has(key), `${node.key}: param "${key}" is not a ${model.id} field`).toBe(
               true
             )
@@ -101,15 +103,25 @@ describe('workflow template registry', () => {
         }
       })
 
-      it('visual prompts carry the style bible for cross-shot consistency', () => {
-        const bible = getStyle(t.styleId)!.styleBible
+      it('visual nodes opt into style-at-payload instead of baking the bible in', () => {
         for (const node of t.workflow.nodes) {
           const model = getModel(node.modelId)!
-          if (model.kind === 'audio') continue
-          expect(
-            String(node.params.prompt).includes(bible),
-            `${node.key}: prompt is missing the style bible`
-          ).toBe(true)
+          if (model.kind === 'audio') {
+            expect(
+              'applyVideoStyle' in node.params,
+              `${node.key}: audio nodes must not carry the style flag`
+            ).toBe(false)
+            continue
+          }
+          // The run engine appends the video's CURRENT bible at payload time —
+          // a baked-in copy would be duplicated and freeze the art direction.
+          expect(node.params.applyVideoStyle, `${node.key}: missing applyVideoStyle`).toBe(true)
+          for (const style of STYLES) {
+            expect(
+              String(node.params.prompt).includes(style.styleBible),
+              `${node.key}: prompt bakes in the "${style.id}" style bible`
+            ).toBe(false)
+          }
         }
       })
 

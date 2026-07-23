@@ -14,7 +14,8 @@
     "exportWorkflow": "Exporter le workflow (JSON)",
     "exportFcpxml": "Exporter la timeline (FCPXML + médias)…",
     "exportMediaZip": "Exporter les clips vidéo (ZIP)…",
-    "exportMp4": "Exporter la vidéo (MP4)…"
+    "exportMp4": "Exporter la vidéo (MP4)…",
+    "exportMp4Preset": "Exporter la vidéo en {{preset}} — {{dims}} (MP4)…"
   },
   "home": {
     "title": "Socle technique",
@@ -273,8 +274,18 @@
       "statusRunning": "En cours"
     },
     "style": "Style",
-    "styleTitle": "Direction artistique de la vidéo — sa bible de style guide chaque prompt",
+    "styleTitle": "Direction artistique et réglages par défaut de la vidéo",
     "styleNone": "Aucun style",
+    "styleAppliedAtRun": "Style : {{style}} — appliqué à la génération",
+    "videoDefaults": {
+      "title": "Réglages de la vidéo",
+      "aspect": "Format",
+      "resolution": "Résolution",
+      "none": "Défaut du modèle",
+      "hint": "Pré-remplis sur les nouveaux nœuds. Les nœuds existants ne changent qu'avec le bouton ci-dessous (une seule étape d'annulation).",
+      "apply": "Appliquer à {{count}} nœud(s) existant(s)",
+      "applied": "{{count}} nœud(s) mis à jour"
+    },
     "rendering": "Rendu MP4…",
     "renderCancel": "Annuler",
     "renderSkipped": "Plans sans média utilisable, ignorés au rendu : {{clips}}",

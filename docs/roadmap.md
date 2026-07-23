@@ -17,7 +17,7 @@ notifications, toasts/modals instead of native `alert()`s).
 The assistant currently exists to paper over manual-editor friction. The
 long-term differentiator is to invert that: make the conversational path the
 primary one (§4.7) on top of a manual editor that no longer needs papering
-over (§4.5–4.6).
+over (§4.6).
 
 ## Shipped
 
@@ -84,6 +84,25 @@ Landed in July 2026 (see CHANGELOG once releases start):
   the live kie.ai balance before spending, with "don't ask under X credits"
   remembered; failed generations get an explicit **Retry** button. The stale
   `TODO(phase-3)` comments went with it (§4.9).
+- **Video-level settings & style propagation** (§4.5, July 2026): additive
+  `videos.default_aspect_ratio`/`default_resolution` columns, edited from the
+  Style menu; new nodes pre-fill matching params (per-model enum check via the
+  shared `videoDefaultParams`), and an explicit **"Apply to N existing nodes"**
+  runs one journaled `nodes:applyVideoDefaults` sweep — undoable in a single
+  step, no silent behavior change. Style-at-payload: the `applyVideoStyle`
+  params marker (default on plainly-created/template/design visual nodes;
+  absent on pre-existing nodes = full back-compat, old prompts run
+  byte-identical) makes `prepareRun` append the video's CURRENT style bible to
+  the prompt before the input snapshot is persisted (deterministic retries) —
+  templates and design recipes no longer bake the bible into prompts, both
+  chat SYSTEM prompts and the docs topics teach the flag instead of verbatim
+  copying, and the params panel shows the suffix as a read-only collapsed
+  "Style: … — applied at run" section. Follow-up shipped with it: **MP4
+  export presets per destination** (16:9 / 9:16 / 1:1 fixed dims through the
+  render pipeline's existing resolution override, File menu). Verified
+  end-to-end against the kie mock (pre-fill, payload = business prompt +
+  bible with the marker stripped, clean stored prompt, one-step undo of the
+  bulk apply).
 
 ## 1. Open-source hygiene — before publishing
 
@@ -121,49 +140,6 @@ SQLite migrations are **additive only**; every user-visible string gets an
 i18next key in `fr/common.json` **and** `en/common.json`; graph mutations go
 through the graph service so `withGraphHistory` journals them; colors through
 the tokens in `styles.css`.
-
-### 4.5 Video-level settings & style propagation — effort M
-
-**Problem.** Aspect ratio and resolution are set per node with no
-video-level default — nothing guarantees a coherent sequence, and there is no
-"make the whole video 9:16" gesture. Separately, the style bible
-(`getStyle().styleBible`) is **copied verbatim into every prompt** by
-convention (templates via `bible(styleId)`, assistant by instruction): a
-style change propagates to nothing, and prompts are 80% boilerplate.
-
-**Spec.**
-
-- **Video defaults** — additive `videos` columns (or a JSON `settings`
-  column): `default_aspect_ratio`, `default_resolution`. Editable from a
-  small "Video settings" section (params panel when no node selected, or the
-  Style menu). Semantics chosen for predictability (no silent behavior change
-  at generation time): (a) node creation pre-fills matching params from the
-  defaults (`defaultParamsFor` merge point); (b) changing a default offers an
-  explicit **"Apply to N existing nodes"** action — a bulk
-  `nodes:updateParams` through the graph service, so it is journaled and
-  undoable in one step. No hidden fallback-at-runtime.
-- **Style bible at payload time** — stop baking the bible into stored
-  prompts. New node meta `applyVideoStyle: boolean` (default true for new
-  nodes created while a style is set; absent = false for pre-existing nodes,
-  whose prompts already contain the bible — this is the whole back-compat
-  story, no migration needed). `prepareRun` (runEngine.ts) appends the
-  current style bible to the prompt when the flag is set, **before** the
-  input snapshot is persisted — so retries and re-queues stay deterministic,
-  and `get_workflow` can show the effective prompt. Update: templates drop
-  `bible(...)` from their prompt strings (they set the flag instead), both
-  chat SYSTEM prompts and the `workflow-json`/`designs` docs topics stop
-  instructing verbatim copying, `registry.test.ts` invariants adjusted.
-  The params panel shows the business prompt in the textarea and the style
-  suffix as a read-only collapsed section ("Style: anime — applied at run").
-- **Follow-up unlocked by the defaults**: MP4 export presets per destination
-  (9:16, 1:1, 16:9) on top of the render pipeline's existing fps/resolution
-  overrides (`render:export` already accepts them; only the preset UI is
-  missing once the video-level aspect ratio exists).
-
-**Acceptance.** Switching a video's style then re-running a node uses the new
-bible with no prompt edit; changing the default ratio and applying updates
-all video nodes in one undo step; old workflows (bible embedded in prompts)
-run byte-identical payloads.
 
 ### 4.6 Graph ergonomics — effort S–M per sub-item
 
@@ -277,12 +253,9 @@ would remove the last constraint (a running window).
 
 ## Suggested order
 
-1. **Video-level settings + style-at-payload** (§4.5) — removes the two main
-   sources of sequence incoherence, and unlocks the §4.3 follow-up (export
-   presets per destination).
-2. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
+1. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
    long-term differentiation.
-3. **OSS hygiene items** (§1) remain the blockers for a good first
+2. **OSS hygiene items** (§1) remain the blockers for a good first
    impression at publication; the **versioned E2E suite** (§2) should land
    before contributors arrive — the §4.3 render E2E driver (session
    scratchpad) is ready to be promoted into it.

@@ -5,8 +5,10 @@ import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
 import type { Db } from '../db/client'
 import { assets } from '../db/schema'
 import { createProject } from './projects'
-import { createVideo, getVideo } from './videos'
+import { createVideo, getVideo, setVideoDefaults } from './videos'
+import { undoGraph } from './graphHistory'
 import {
+  applyVideoDefaultsToNodes,
   connectNodes,
   createNode,
   disconnectEdge,
@@ -334,5 +336,67 @@ describe('workflow export / import', () => {
     })
     expect(() => importWorkflow(videoId, json, false)).toThrow()
     expect(listGraph(videoId).nodes).toHaveLength(0)
+  })
+})
+
+describe('video defaults & style-at-payload markers (§4.5)', () => {
+  it('seeds new nodes with the video defaults and the applyVideoStyle flag', () => {
+    setVideoDefaults(videoId, { defaultAspectRatio: '9:16', defaultResolution: '480p' })
+    const node = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    expect(node.params).toMatchObject({
+      aspect_ratio: '9:16',
+      resolution: '480p',
+      applyVideoStyle: true
+    })
+  })
+
+  it('skips defaults outside the model enum and never flags audio nodes', () => {
+    // 1080p is not a seedance-2-fast resolution — the model default must survive.
+    setVideoDefaults(videoId, { defaultAspectRatio: '9:16', defaultResolution: '1080p' })
+    const node = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    expect(node.params).toMatchObject({ aspect_ratio: '9:16', resolution: '720p' })
+
+    const music = createNode({ videoId, modelId: 'suno/generate-music', position: { x: 0, y: 0 } })
+    expect('applyVideoStyle' in (music.params as Record<string, unknown>)).toBe(false)
+  })
+
+  it('takes caller-provided params verbatim (imports keep their exact payloads)', () => {
+    setVideoDefaults(videoId, { defaultAspectRatio: '9:16' })
+    const node = createNode({
+      videoId,
+      modelId: SEEDANCE,
+      position: { x: 0, y: 0 },
+      params: { prompt: 'x', aspect_ratio: '16:9' }
+    })
+    expect(node.params).toEqual({ prompt: 'x', aspect_ratio: '16:9' })
+  })
+
+  it('applyVideoDefaultsToNodes sweeps compatible nodes in ONE undoable step', () => {
+    const a = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    const b = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    createNode({ videoId, modelId: 'suno/generate-music', position: { x: 0, y: 0 } })
+
+    setVideoDefaults(videoId, { defaultAspectRatio: '9:16' })
+    expect(applyVideoDefaultsToNodes(videoId)).toEqual({ updated: 2 })
+    const params = (id: string) =>
+      listGraph(videoId).nodes.find((n) => n.id === id)!.params as Record<string, unknown>
+    expect(params(a.id).aspect_ratio).toBe('9:16')
+    expect(params(b.id).aspect_ratio).toBe('9:16')
+
+    // Second run is a no-op…
+    expect(applyVideoDefaultsToNodes(videoId)).toEqual({ updated: 0 })
+
+    // …and ONE undo restores every swept node at once.
+    undoGraph(videoId)
+    expect(params(a.id).aspect_ratio).toBe('16:9')
+    expect(params(b.id).aspect_ratio).toBe('16:9')
+  })
+
+  it('replaceNodeModel carries the applyVideoStyle marker to the new visual model', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    expect((node.params as Record<string, unknown>).applyVideoStyle).toBe(true)
+    replaceNodeModel(node.id, 'bytedance/seedance-2')
+    const swapped = listGraph(videoId).nodes.find((n) => n.id === node.id)!
+    expect((swapped.params as Record<string, unknown>).applyVideoStyle).toBe(true)
   })
 })

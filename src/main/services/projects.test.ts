@@ -7,6 +7,7 @@ import {
   getVideo,
   listVideos,
   renameVideo,
+  setVideoDefaults,
   setVideoStyle
 } from './videos'
 
@@ -68,5 +69,24 @@ describe('videos', () => {
     expect(getVideo(v.id)?.styleId).toBeNull()
 
     expect(() => setVideoStyle(v.id, 'not-a-style')).toThrow(/Unknown style/)
+  })
+
+  it('sets, keeps and clears the video-level generation defaults', () => {
+    const p = createProject('P')
+    const v = createVideo(p.id, 'V')
+    expect(v.defaultAspectRatio).toBeNull()
+    expect(v.defaultResolution).toBeNull()
+
+    setVideoDefaults(v.id, { defaultAspectRatio: '9:16' })
+    expect(getVideo(v.id)).toMatchObject({ defaultAspectRatio: '9:16', defaultResolution: null })
+
+    // Omitted field untouched, provided one updated.
+    setVideoDefaults(v.id, { defaultResolution: '1080p' })
+    expect(getVideo(v.id)).toMatchObject({ defaultAspectRatio: '9:16', defaultResolution: '1080p' })
+
+    // Explicit null clears; empty patch is a no-op.
+    setVideoDefaults(v.id, { defaultAspectRatio: null })
+    setVideoDefaults(v.id, {})
+    expect(getVideo(v.id)).toMatchObject({ defaultAspectRatio: null, defaultResolution: '1080p' })
   })
 })

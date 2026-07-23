@@ -120,6 +120,29 @@ export const STYLES: StyleTemplate[] = [
 
 const STYLE_MAP = new Map(STYLES.map((s) => [s.id, s]))
 
+/**
+ * Node-params marker (deliberately not a model field — run-time validation
+ * strips it): when true, the run engine appends the video's current style
+ * bible to the prompt at payload time. Stored prompts stay business-only, so
+ * a style change propagates to every flagged node with no prompt edit.
+ * Absent = false: pre-existing nodes keep their baked-in bible untouched.
+ */
+export const APPLY_VIDEO_STYLE_PARAM = 'applyVideoStyle'
+
+export function nodeAppliesVideoStyle(params: unknown): boolean {
+  return (
+    typeof params === 'object' &&
+    params !== null &&
+    (params as Record<string, unknown>)[APPLY_VIDEO_STYLE_PARAM] === true
+  )
+}
+
+/** The single prompt+bible composition rule (run engine and UI preview agree). */
+export function appendStyleBible(prompt: string, styleBible: string): string {
+  const base = prompt.trim()
+  return base === '' ? styleBible : `${base}\n\n${styleBible}`
+}
+
 export function getStyle(id: string): StyleTemplate | undefined {
   return STYLE_MAP.get(id)
 }

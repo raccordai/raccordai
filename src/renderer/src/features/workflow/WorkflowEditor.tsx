@@ -28,7 +28,7 @@ import { MessageSquare } from 'lucide-react'
 import { Button } from '@renderer/components/ui/Button'
 import { useAppMenus, useHeaderActions, type AppMenu } from '@renderer/components/menubar/MenuBar'
 import { WorkflowToolbar } from './Toolbar'
-import { useWorkflowIO } from './useWorkflowIO'
+import { RENDER_PRESETS, useWorkflowIO, type RenderPreset } from './useWorkflowIO'
 import { WorkflowGraphContext, type WorkflowGraph } from './workflowContext'
 import { autoLayoutPositions, resolveOverlaps, type LayoutDirection } from './autoLayout'
 import { useLastFrameExtractor } from './useLastFrameExtractor'
@@ -610,9 +610,20 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
               {
                 id: 'export-mp4',
                 label: io.renderingMp4 ? t('editor.rendering') : t('menu.exportMp4'),
-                onSelect: io.exportMp4,
+                onSelect: () => io.exportMp4(),
                 disabled: !io.canExportFcpxml || io.renderingMp4
-              }
+              },
+              // Per-destination presets — fixed output dims via the render
+              // pipeline's resolution override (§4.5 follow-up).
+              ...(Object.keys(RENDER_PRESETS) as RenderPreset[]).map((preset) => ({
+                id: `export-mp4-${preset.replace(':', '-')}`,
+                label: t('menu.exportMp4Preset', {
+                  preset,
+                  dims: `${RENDER_PRESETS[preset].width}×${RENDER_PRESETS[preset].height}`
+                }),
+                onSelect: () => io.exportMp4(preset),
+                disabled: !io.canExportFcpxml || io.renderingMp4
+              }))
             ]
           }
         ]

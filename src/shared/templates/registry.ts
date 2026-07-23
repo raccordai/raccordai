@@ -1,11 +1,11 @@
-import { getStyle } from '../styles/registry'
-
 /**
  * Workflow templates — ready-to-import graph blueprints (workflow JSON v1,
  * the exact format accepted by import_workflow). Prompts contain [SLOTS]
  * meant to be filled by the user or the assistant before running; every
- * prompt already carries the matching style template's style bible so the
- * imported graph is coherent out of the box.
+ * visual node carries `applyVideoStyle: true`, so the video's style bible is
+ * appended to its prompt at run time (set the video's style to the template's
+ * styleId — the new-video flow does) and a later style switch propagates
+ * without editing any prompt.
  */
 
 export interface WorkflowTemplateNode {
@@ -88,9 +88,6 @@ const SLOTS = {
   hook: { token: '[HOOK]', i18nKey: 'templates.slots.hook', example: 'Your feed stops here.' }
 } satisfies Record<string, WorkflowTemplateSlot>
 
-// Non-null: every template's styleId is validated against the style registry by the tests.
-const bible = (styleId: string): string => getStyle(styleId)!.styleBible
-
 /** Grid helpers so every template lays out the same way (left-to-right flow). */
 const col = (i: number): number => i * 420
 const row = (i: number): number => i * 350
@@ -115,9 +112,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Hero product photograph of [PRODUCT] on a seamless studio backdrop in [SETTING]. ' +
-              'Centered composition with generous negative space, soft key light with crisp speculars, subtle reflection under the product. ' +
-              bible('commercial'),
+              'Centered composition with generous negative space, soft key light with crisp speculars, subtle reflection under the product.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '1K'
           }
         },
@@ -130,9 +127,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Slow confident dolly-in on [PRODUCT] standing on a seamless studio backdrop, light sweeping across its surface, ' +
-              'fine dust particles glinting in the beam. ' +
-              bible('commercial'),
+              'fine dust particles glinting in the beam.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '1080p',
             duration: 8,
             fixed_lens: false,
@@ -149,9 +146,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Macro orbital shot circling [PRODUCT], extreme close-up on its textures and materials, ' +
-              'shallow depth of field, satisfying slow motion. ' +
-              bible('commercial'),
+              'shallow depth of field, satisfying slow motion.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '1080p',
             duration: 8,
             fixed_lens: false,
@@ -169,9 +166,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Slow pull-back from [PRODUCT] to a wide symmetrical composition with clean negative space on the right third, ' +
-              'lighting settling into an elegant final frame. ' +
-              bible('commercial'),
+              'lighting settling into an elegant final frame.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '1080p',
             duration: 8,
             fixed_lens: false,
@@ -224,9 +221,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           position: { x: col(0), y: row(0) },
           params: {
             prompt:
-              'Anime key visual of [CHARACTER] standing in [PLACE], full-body, three-quarter view, character design sheet quality. ' +
-              bible('anime'),
+              'Anime key visual of [CHARACTER] standing in [PLACE], full-body, three-quarter view, character design sheet quality.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '1K'
           }
         },
@@ -242,9 +239,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '[CHARACTER] matches the character design @Image1 (reference only — the design sheet itself must not appear on screen). ' +
               'Shot 1: wide establishing shot of [PLACE], painterly anime background, [CHARACTER] walks into frame from the left, ' +
               'wind moving through the scene, slow pan following the character. ' +
-              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
-              bible('anime'),
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '720p',
             duration: 8,
             generate_audio: true,
@@ -265,9 +262,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
               'Shot 1: dynamic medium shot, [CHARACTER] [ACTION], sakuga-quality fluid animation on the movement, ' +
               'speed lines and dramatic camera tilt at the peak of the action. ' +
-              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
-              bible('anime'),
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '720p',
             duration: 8,
             generate_audio: true,
@@ -288,9 +285,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
               "Shot 1: slow push-in close-up on [CHARACTER]'s face, hair moving in the breeze, golden-hour rim light, " +
               'a quiet emotional beat, eyes catching the light. ' +
-              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
-              bible('anime'),
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '720p',
             duration: 8,
             generate_audio: true,
@@ -348,9 +345,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Character design sheet of [CHARACTER]: full-body turnaround with three aligned views of the SAME character — front, three-quarter and profile — in a neutral standing pose. ' +
-              'Identical proportions, outfit, hairstyle and colors across all views. Plain light background, no scenery, no text labels, no watermarks. ' +
-              bible('anime'),
+              'Identical proportions, outfit, hairstyle and colors across all views. Plain light background, no scenery, no text labels, no watermarks.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '1K'
           }
         },
@@ -367,9 +364,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               'A single 3x3 grid of 9 sequential panels telling the scene beat by beat, read left to right, top to bottom, a small panel number in the corner of each panel: ' +
               'panels 1-3 establish [PLACE] and the character entering, panels 4-6 cover the action ([ACTION]), panels 7-9 land the emotional close-up finale. ' +
               'Keep the character exactly consistent with the connected design sheet (Image 1) across all panels. ' +
-              'Framing varies like a film — establishing wide, mediums, close-ups. Clear readable compositions, no speech bubbles, no captions, no other text, no watermarks. ' +
-              bible('anime'),
+              'Framing varies like a film — establishing wide, mediums, close-ups. Clear readable compositions, no speech bubbles, no captions, no other text, no watermarks.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '1K'
           }
         },
@@ -386,9 +383,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 1-3. ' +
               'Shot 1: wide establishing shot of [PLACE], [CHARACTER] walks into frame, slow pan following the character, wind moving through the scene. ' +
               'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
-              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
-              bible('anime'),
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '720p',
             duration: 8,
             generate_audio: true,
@@ -410,9 +407,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 4-6. ' +
               'Shot 1: dynamic medium shot, [CHARACTER] [ACTION], fluid animation on the movement, dramatic camera tilt at the peak of the action. ' +
               'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
-              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
-              bible('anime'),
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '720p',
             duration: 8,
             generate_audio: true,
@@ -434,9 +431,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 7-9. ' +
               "Shot 1: slow push-in close-up on [CHARACTER]'s face, a quiet emotional beat closing the scene, eyes catching the light. " +
               'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
-              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks. ' +
-              bible('anime'),
+              '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
+            applyVideoStyle: true,
             resolution: '720p',
             duration: 8,
             generate_audio: true,
@@ -497,9 +494,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Wide establishing shot of [LOCATION], [MOOD] atmosphere, atmospheric haze catching the light, ' +
-              '[SUBJECT] small in frame, very slow dolly forward. ' +
-              bible('cinematic-realism'),
+              '[SUBJECT] small in frame, very slow dolly forward.',
             aspect_ratio: '21:9',
+            applyVideoStyle: true,
             resolution: '1080p',
             duration: 8,
             fixed_lens: false,
@@ -516,9 +513,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Smooth lateral tracking shot following [SUBJECT] moving through [LOCATION], ' +
-              'foreground elements passing between camera and subject for depth, motivated natural light. ' +
-              bible('cinematic-realism'),
+              'foreground elements passing between camera and subject for depth, motivated natural light.',
             aspect_ratio: '21:9',
+            applyVideoStyle: true,
             resolution: '1080p',
             duration: 8,
             fixed_lens: false,
@@ -535,9 +532,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Slow push-in to a close-up on [SUBJECT], shallow depth of field, [MOOD] expression, ' +
-              'practical lights blooming softly in the bokeh background, long held final frame. ' +
-              bible('cinematic-realism'),
+              'practical lights blooming softly in the bokeh background, long held final frame.',
             aspect_ratio: '21:9',
+            applyVideoStyle: true,
             resolution: '1080p',
             duration: 8,
             fixed_lens: false,
@@ -589,9 +586,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Vertical (9:16) product photograph of [PRODUCT], bold centered composition, vibrant gradient backdrop, ' +
-              'punchy studio lighting, room at the top for a caption. ' +
-              bible('commercial'),
+              'punchy studio lighting, room at the top for a caption.',
             aspect_ratio: '9:16',
+            applyVideoStyle: true,
             resolution: '1K'
           }
         },
@@ -604,11 +601,11 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               '@Image1 as the first frame. Shot 1: the scene snaps alive, [PRODUCT] pops forward with a quick zoom burst and light sweep. ' +
-              'Shot 2: cut to a fast orbital move around [PRODUCT], energetic particles and speculars, camera settles on a bold centered frame. ' +
-              bible('commercial'),
+              'Shot 2: cut to a fast orbital move around [PRODUCT], energetic particles and speculars, camera settles on a bold centered frame.',
             generate_audio: true,
             resolution: '720p',
             aspect_ratio: '9:16',
+            applyVideoStyle: true,
             duration: 8,
             web_search: false,
             nsfw_checker: true
@@ -623,11 +620,11 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               '@Image1 as the first frame. Shot 1: quick whip-pan reveal of [PRODUCT] in a lifestyle context, hands reaching for it. ' +
-              'Shot 2: cut to a snap zoom out to a clean final frame, [PRODUCT] centered with negative space above for a call to action. ' +
-              bible('commercial'),
+              'Shot 2: cut to a snap zoom out to a clean final frame, [PRODUCT] centered with negative space above for a call to action.',
             generate_audio: true,
             resolution: '720p',
             aspect_ratio: '9:16',
+            applyVideoStyle: true,
             duration: 7,
             web_search: false,
             nsfw_checker: true

@@ -47,13 +47,26 @@ export interface RenderProgressState {
   step: RenderProgressPayload['step']
 }
 
+/**
+ * Per-destination MP4 export presets (§4.5 follow-up): fixed output dims fed
+ * to the render pipeline's existing resolution override (clips are
+ * scaled+padded by the normalize pass). No preset = probed from the clips.
+ */
+export const RENDER_PRESETS = {
+  '16:9': { width: 1920, height: 1080 },
+  '9:16': { width: 1080, height: 1920 },
+  '1:1': { width: 1080, height: 1080 }
+} as const
+export type RenderPreset = keyof typeof RENDER_PRESETS
+
 export interface WorkflowIO {
   importWorkflow: () => Promise<void>
   exportJson: () => Promise<void>
   exportFcpxmlZip: () => Promise<void>
   exportMediaZip: () => Promise<void>
-  /** Rendered MP4 export (ffmpeg in main; save dialog lives in the handler). */
-  exportMp4: () => Promise<void>
+  /** Rendered MP4 export (ffmpeg in main; save dialog lives in the handler).
+   *  Optional preset forces the output dims (default: probed from the clips). */
+  exportMp4: (preset?: RenderPreset) => Promise<void>
   cancelRenderMp4: () => void
   importing: boolean
   exporting: boolean
@@ -279,25 +292,31 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
    * Rendered MP4 of the timeline. The whole pipeline runs in main (ffmpeg);
    * the invoke resolves when the file is written (null = dialog cancelled).
    */
-  const exportMp4 = useCallback(async () => {
-    setRenderingMp4(true)
-    try {
-      const result = await invoke('render:export', { videoId })
-      if (result) {
-        toast.success(t('editor.renderDone', { path: result.path }))
-        if (result.skipped.length > 0) {
-          toast.warning(t('editor.renderSkipped', { clips: result.skipped.join(', ') }))
+  const exportMp4 = useCallback(
+    async (preset?: RenderPreset) => {
+      setRenderingMp4(true)
+      try {
+        const result = await invoke('render:export', {
+          videoId,
+          ...(preset ? { resolution: RENDER_PRESETS[preset] } : {})
+        })
+        if (result) {
+          toast.success(t('editor.renderDone', { path: result.path }))
+          if (result.skipped.length > 0) {
+            toast.warning(t('editor.renderSkipped', { clips: result.skipped.join(', ') }))
+          }
         }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        // User-initiated cancellation is not an error worth surfacing.
+        if (!message.includes('Render cancelled')) toast.error(message)
+      } finally {
+        setRenderingMp4(false)
+        setRenderProgress(null)
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      // User-initiated cancellation is not an error worth surfacing.
-      if (!message.includes('Render cancelled')) toast.error(message)
-    } finally {
-      setRenderingMp4(false)
-      setRenderProgress(null)
-    }
-  }, [t, toast, videoId])
+    },
+    [t, toast, videoId]
+  )
 
   const cancelRenderMp4 = useCallback(() => {
     void invoke('render:cancel', { videoId })

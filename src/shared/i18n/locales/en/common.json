@@ -14,7 +14,8 @@
     "exportWorkflow": "Export workflow (JSON)",
     "exportFcpxml": "Export timeline (FCPXML + media)…",
     "exportMediaZip": "Export video clips (ZIP)…",
-    "exportMp4": "Export video (MP4)…"
+    "exportMp4": "Export video (MP4)…",
+    "exportMp4Preset": "Export video as {{preset}} — {{dims}} (MP4)…"
   },
   "home": {
     "title": "Technical foundation",
@@ -273,8 +274,18 @@
       "statusRunning": "Running"
     },
     "style": "Style",
-    "styleTitle": "The video's art direction — its style bible guides every prompt",
+    "styleTitle": "The video's art direction and generation defaults",
     "styleNone": "No style",
+    "styleAppliedAtRun": "Style: {{style}} — applied at run",
+    "videoDefaults": {
+      "title": "Video defaults",
+      "aspect": "Aspect ratio",
+      "resolution": "Resolution",
+      "none": "Model default",
+      "hint": "Pre-filled on new nodes. Existing nodes only change with the button below (one undoable step).",
+      "apply": "Apply to {{count}} existing node(s)",
+      "applied": "{{count}} node(s) updated"
+    },
     "rendering": "Rendering MP4…",
     "renderCancel": "Cancel",
     "renderSkipped": "Slots without usable media were skipped: {{clips}}",

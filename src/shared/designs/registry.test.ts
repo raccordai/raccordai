@@ -39,15 +39,17 @@ describe('design recipe registry', () => {
         expect(prompt).toContain(recipe.slot)
       })
 
-      it('injects the description and the style fragments', () => {
+      it('injects the description and the image fragment, never the bible', () => {
         const prompt = buildDesignPrompt(recipe, recipe.defaultModelId, {
           description: 'Léa, pink hair',
           style: anime
         })
         expect(prompt).toContain('Léa, pink hair')
         expect(prompt).not.toContain(recipe.slot)
-        expect(prompt).toContain(anime.styleBible)
         expect(prompt).toContain(anime.imageFragment)
+        // The bible is appended at payload time via the applyVideoStyle marker,
+        // not baked into the stored prompt.
+        expect(prompt).not.toContain(anime.styleBible)
       })
 
       it('builds a valid prompt for every style (and none)', () => {
@@ -67,16 +69,17 @@ describe('design recipe registry', () => {
           style: anime
         })
         expect(params.designId).toBe(recipe.id)
+        expect(params.applyVideoStyle).toBe(true)
         const model = getModel(recipe.defaultModelId)!
         const parsed = model.paramsSchema.safeParse(params)
         expect(
           parsed.success,
           `invalid params — ${parsed.success ? '' : JSON.stringify(parsed.error.issues)}`
         ).toBe(true)
-        // Apart from the deliberate design markers, only declared model fields.
+        // Apart from the deliberate markers, only declared model fields.
         const known = new Set(model.paramFields.map((f) => f.key))
         for (const key of Object.keys(params)) {
-          if (key === 'designId' || key === 'designSubject') continue
+          if (key === 'designId' || key === 'designSubject' || key === 'applyVideoStyle') continue
           expect(known.has(key), `param "${key}" is not a ${model.id} field`).toBe(true)
         }
       })

@@ -71,6 +71,13 @@ export const videos = sqliteTable(
     name: text('name').notNull(),
     /** Active style template (src/shared/styles/registry.ts) — art direction shared by every shot. */
     styleId: text('style_id'),
+    /**
+     * Video-level generation defaults. New nodes pre-fill matching params from
+     * them; changing one never rewrites existing nodes silently (the UI offers
+     * an explicit, journaled "apply to N nodes" instead).
+     */
+    defaultAspectRatio: text('default_aspect_ratio'),
+    defaultResolution: text('default_resolution'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },

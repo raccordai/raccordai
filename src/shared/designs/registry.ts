@@ -41,9 +41,13 @@ export interface DesignRecipe {
 const join = (...fragments: Array<string | undefined | false>): string =>
   fragments.filter(Boolean).join(' ')
 
-/** The style fragments every visual design prompt should carry (bible = consistency lever). */
-const styled = (style?: StyleTemplate): string =>
-  style ? join(style.imageFragment, style.styleBible) : ''
+/**
+ * The image-specific style fragment baked into the prompt at creation. The
+ * style BIBLE is deliberately not baked in: design nodes carry
+ * `applyVideoStyle: true`, so the run engine appends the video's current
+ * bible at payload time (style switches propagate without prompt edits).
+ */
+const styled = (style?: StyleTemplate): string => (style ? style.imageFragment : '')
 
 export const DESIGN_RECIPES: DesignRecipe[] = [
   {
@@ -162,10 +166,12 @@ export function buildDesignPrompt(
 
 /**
  * Full node params for a design node: model defaults + recipe overrides + the
- * built prompt + the `designId`/`designSubject` markers. The markers are
- * deliberately not model fields — run-time validation strips them — but the
- * editor reads `designId` to warn when the node's output is wired to a
- * frame-anchor input, and library promotion copies both onto the asset.
+ * built prompt + the `designId`/`designSubject`/`applyVideoStyle` markers.
+ * The markers are deliberately not model fields — run-time validation strips
+ * them — but the editor reads `designId` to warn when the node's output is
+ * wired to a frame-anchor input, library promotion copies design markers onto
+ * the asset, and the run engine appends the video's style bible when
+ * `applyVideoStyle` is set.
  */
 export function designNodeParams(
   recipe: DesignRecipe,
@@ -179,6 +185,7 @@ export function designNodeParams(
     ...recipe.params,
     prompt: buildDesignPrompt(recipe, modelId, args),
     designId: recipe.id,
+    applyVideoStyle: true,
     ...(subject ? { designSubject: subject } : {})
   }
 }

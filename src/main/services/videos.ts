@@ -25,6 +25,8 @@ export function createVideo(projectId: string, name: string): Video {
     projectId,
     name,
     styleId: null,
+    defaultAspectRatio: null,
+    defaultResolution: null,
     createdAt: now,
     updatedAt: now
   }
@@ -36,6 +38,27 @@ export function createVideo(projectId: string, name: string): Video {
 export function setVideoStyle(id: string, styleId: string | null): void {
   if (styleId !== null && !isStyleId(styleId)) throw new Error(`Unknown style: ${styleId}`)
   getDb().update(videos).set({ styleId, updatedAt: Date.now() }).where(eq(videos.id, id)).run()
+}
+
+/**
+ * Video-level generation defaults (null clears, omitted leaves untouched).
+ * Only pre-fills future nodes — existing nodes change through the explicit
+ * graph-service bulk apply, never here.
+ */
+export function setVideoDefaults(
+  id: string,
+  defaults: { defaultAspectRatio?: string | null; defaultResolution?: string | null }
+): void {
+  const patch: Partial<typeof defaults> = {}
+  if (defaults.defaultAspectRatio !== undefined)
+    patch.defaultAspectRatio = defaults.defaultAspectRatio
+  if (defaults.defaultResolution !== undefined) patch.defaultResolution = defaults.defaultResolution
+  if (Object.keys(patch).length === 0) return
+  getDb()
+    .update(videos)
+    .set({ ...patch, updatedAt: Date.now() })
+    .where(eq(videos.id, id))
+    .run()
 }
 
 export function renameVideo(id: string, name: string): void {

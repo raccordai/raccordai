@@ -84,6 +84,34 @@ export function defaultParamsFor(modelId: string): Record<string, unknown> {
   return defaults
 }
 
+/** Video-level defaults, mapped onto the param keys every model shares. */
+const VIDEO_DEFAULT_PARAM_KEYS = [
+  ['aspect_ratio', 'defaultAspectRatio'],
+  ['resolution', 'defaultResolution']
+] as const
+
+/**
+ * The subset of a video's default params that `modelId` actually supports: a
+ * default is included only when the model declares the field AND lists the
+ * value among its options (each model has its own aspect/resolution enums).
+ * Unknown models (e.g. "studio/asset") get no defaults.
+ */
+export function videoDefaultParams(
+  modelId: string,
+  defaults: { defaultAspectRatio?: string | null; defaultResolution?: string | null } | null
+): Record<string, unknown> {
+  const m = getModel(modelId)
+  if (!m || !defaults) return {}
+  const params: Record<string, unknown> = {}
+  for (const [paramKey, defaultKey] of VIDEO_DEFAULT_PARAM_KEYS) {
+    const value = defaults[defaultKey]
+    if (!value) continue
+    const field = m.paramFields.find((f) => f.key === paramKey)
+    if (field?.options?.some((o) => o.value === value)) params[paramKey] = value
+  }
+  return params
+}
+
 export type {
   ModelDefinition,
   InputHandle,

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq } from 'drizzle-orm'
-import { defaultParamsFor, getModelOrThrow } from '@shared/models'
+import { defaultParamsFor, getModel, getModelOrThrow, videoDefaultParams } from '@shared/models'
+import { APPLY_VIDEO_STYLE_PARAM } from '@shared/styles/registry'
 import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes } from '../db/schema'
@@ -44,6 +45,17 @@ function randomKey(): string {
   return `node_${Math.random().toString(36).slice(2, 8)}`
 }
 
+/** Default params of a freshly created node: model defaults + video defaults + style flag. */
+function defaultCreationParams(videoId: string, modelId: string): Record<string, unknown> {
+  if (modelId === 'studio/asset') return {}
+  const model = getModelOrThrow(modelId)
+  return {
+    ...defaultParamsFor(modelId),
+    ...videoDefaultParams(modelId, getVideo(videoId)),
+    ...(model.kind !== 'audio' ? { [APPLY_VIDEO_STYLE_PARAM]: true } : {})
+  }
+}
+
 function keyExists(videoId: string, key: string): boolean {
   return (
     getDb()
@@ -70,8 +82,10 @@ export function createNode(args: {
   let resolvedKey = args.key ?? randomKey()
   while (keyExists(args.videoId, resolvedKey)) resolvedKey = randomKey()
 
-  const params =
-    args.params ?? (args.modelId === 'studio/asset' ? {} : defaultParamsFor(args.modelId))
+  // Caller-provided params are taken verbatim (templates, designs and agents
+  // manage their own markers); the plain-creation path pre-fills the video's
+  // defaults and opts visual nodes into style-at-payload.
+  const params = args.params ?? defaultCreationParams(args.videoId, args.modelId)
 
   const row: NodeRow = {
     id: randomUUID(),
@@ -204,6 +218,10 @@ export function replaceNodeModel(nodeId: string, modelId: string): void {
   for (const [k, val] of Object.entries(oldParams)) {
     if (newFieldKeys.has(k)) nextParams[k] = val
   }
+  // The style-at-payload marker survives a model swap between visual models.
+  if (newModel.kind !== 'audio' && oldParams[APPLY_VIDEO_STYLE_PARAM] === true) {
+    nextParams[APPLY_VIDEO_STYLE_PARAM] = true
+  }
 
   const videoEdges = db.select().from(edges).where(eq(edges.videoId, node.videoId)).all()
   const newInputKeys = new Set(newModel.inputs.map((i) => i.key))
@@ -276,6 +294,40 @@ export function disconnectEdge(edgeId: string): void {
   const edge = db.select().from(edges).where(eq(edges.id, edgeId)).get()
   if (!edge) return
   withGraphHistory(edge.videoId, () => db.delete(edges).where(eq(edges.id, edgeId)).run())
+}
+
+/**
+ * Bulk-apply the video's defaults (aspect ratio / resolution) to every
+ * existing node whose model supports the values — the explicit "apply to N
+ * nodes" gesture. One journaled step, so the whole sweep undoes at once.
+ */
+export function applyVideoDefaultsToNodes(videoId: string): { updated: number } {
+  const video = getVideo(videoId)
+  if (!video) throw new Error('Video not found')
+  const db = getDb()
+  const rows = db.select().from(nodes).where(eq(nodes.videoId, videoId)).all()
+
+  const updates: Array<{ id: string; params: Record<string, unknown> }> = []
+  for (const node of rows) {
+    if (!getModel(node.modelId)) continue
+    const patch = videoDefaultParams(node.modelId, video)
+    const params = (node.params ?? {}) as Record<string, unknown>
+    if (Object.entries(patch).some(([k, v]) => params[k] !== v)) {
+      updates.push({ id: node.id, params: { ...params, ...patch } })
+    }
+  }
+  if (updates.length === 0) return { updated: 0 }
+
+  withGraphHistory(videoId, () =>
+    db.transaction((tx) => {
+      const now = Date.now()
+      for (const u of updates) {
+        tx.update(nodes).set({ params: u.params, updatedAt: now }).where(eq(nodes.id, u.id)).run()
+      }
+    })
+  )
+  touchVideo(videoId)
+  return { updated: updates.length }
 }
 
 // ── JSON workflow import / export ────────────────────────────────────────────

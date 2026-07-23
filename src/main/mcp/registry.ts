@@ -94,7 +94,8 @@ export const AGENT_TOOLS: AgentTool[] = [
       const gens = generations.listGenerationsForVideo(String(videoId))
       const styleId = videos.getVideo(String(videoId))?.styleId ?? null
       return {
-        // Art direction of the video — docs "styles"; append its bible to every visual prompt.
+        // Art direction of the video — docs "styles"; applied at run time to
+        // nodes whose params carry applyVideoStyle: true (never baked into prompts).
         styleId,
         nodes: nodes.map((n) => ({
           id: n.id,
@@ -119,7 +120,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'set_video_style',
     description:
-      'Attach a style template (art direction — docs "styles") to a video; its style bible should then be appended to every visual prompt. Empty styleId clears it.',
+      'Attach a style template (art direction — docs "styles") to a video; its style bible is appended at run time to every visual node whose params carry "applyVideoStyle": true. Empty styleId clears it.',
     inputSchema: obj(
       { videoId: str(), styleId: str('Style id from docs "styles", or "" to clear') },
       ['videoId', 'styleId']

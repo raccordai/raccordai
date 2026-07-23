@@ -19,7 +19,8 @@ import { useTranslation } from 'react-i18next'
 import { DESIGN_RECIPES } from '@shared/designs/registry'
 import type { GraphNode } from '@shared/ipc/contracts'
 import type { ModelDefinition } from '@shared/models'
-import { defaultParamsFor, getModel } from '@shared/models'
+import { defaultParamsFor, getModel, videoDefaultParams } from '@shared/models'
+import { getStyle } from '@shared/styles/registry'
 import { Button } from '@renderer/components/ui/Button'
 import { Lightbox } from '@renderer/components/Lightbox'
 import { VideoThumb } from '@renderer/components/VideoThumb'
@@ -28,7 +29,7 @@ import { useConfirm } from '@renderer/components/feedback/Feedback'
 import { incomingConnectionsFor, useWorkflowGraph } from './workflowContext'
 import { downloadMedia } from '@renderer/lib/downloadMedia'
 import { invoke } from '@renderer/lib/ipc'
-import { graphKeys, useIpcMutation, useNodeGenerations, useProjectAssets } from './data'
+import { graphKeys, useIpcMutation, useNodeGenerations, useProjectAssets, useVideo } from './data'
 import { promoteGeneration, refineImagePrompt } from './generationRuntime'
 
 /** Sensible extension fallback per media kind when the URL/MIME doesn't reveal one. */
@@ -293,6 +294,7 @@ function ModelNodeEditor({
   const graph = useWorkflowGraph()
   const connections = useMemo(() => incomingConnectionsFor(node.id, graph), [node.id, graph])
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  const video = useVideo(node.videoId).data
 
   // local mutable params copy so the user can edit freely; commit on blur/change
   const [params, setParams] = useState<Record<string, unknown>>(
@@ -369,6 +371,12 @@ function ModelNodeEditor({
 
   // Show face-restriction notice for any model whose description/notes mention it.
   const showFaceWarning = (model.promptingNotes ?? '').toLowerCase().includes('human face')
+
+  // The style the run engine will append to the prompt (applyVideoStyle marker).
+  const appliedStyle =
+    model.kind !== 'audio' && params.applyVideoStyle === true && video?.styleId
+      ? getStyle(video.styleId)
+      : undefined
 
   const isRunning = !!generations?.some((g) => g.status === 'running' || g.status === 'pending')
 
@@ -563,6 +571,22 @@ function ModelNodeEditor({
         ))}
       </div>
 
+      {/* Style-at-payload preview: the business prompt stays in the textarea,
+          the bible suffix is appended by the run engine — shown here read-only. */}
+      {appliedStyle && (
+        <details className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+          <summary className="cursor-pointer select-none text-[11px] font-semibold text-neutral-300">
+            <Palette className="mr-1 inline h-3 w-3 text-accent-soft" />
+            {t('editor.styleAppliedAtRun', {
+              style: t(`styles.${appliedStyle.id}.name` as never)
+            })}
+          </summary>
+          <p className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-400">
+            {appliedStyle.styleBible}
+          </p>
+        </details>
+      )}
+
       {refinerImageUrl && (
         <PromptRefiner
           imageUrl={refinerImageUrl}
@@ -575,7 +599,12 @@ function ModelNodeEditor({
         <Button
           variant="ghost"
           onClick={() => {
-            const defs = defaultParamsFor(node.modelId)
+            // Same seed as node creation: model defaults + video defaults + style flag.
+            const defs = {
+              ...defaultParamsFor(node.modelId),
+              ...videoDefaultParams(node.modelId, video ?? null),
+              ...(model.kind !== 'audio' ? { applyVideoStyle: true } : {})
+            }
             setParams(defs)
             updateParams.mutate({ nodeId: node.id, params: defs })
           }}

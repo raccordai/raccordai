@@ -65,6 +65,9 @@ export function registerIpcHandlers(): void {
   handle('videos:rename', ({ videoId, name }) => videosService.renameVideo(videoId, name))
   handle('videos:remove', ({ videoId }) => videosService.deleteVideo(videoId))
   handle('videos:setStyle', ({ videoId, styleId }) => videosService.setVideoStyle(videoId, styleId))
+  handle('videos:setDefaults', ({ videoId, ...defaults }) =>
+    videosService.setVideoDefaults(videoId, defaults)
+  )
 
   handle('assets:listByProject', ({ projectId }) =>
     assetsService.listAssets(projectId).map(withAssetUrl)
@@ -121,6 +124,7 @@ export function registerIpcHandlers(): void {
   )
   handle('nodes:updatePositions', ({ updates }) => graph.updateNodePositions(updates))
   handle('nodes:replaceModel', ({ nodeId, modelId }) => graph.replaceNodeModel(nodeId, modelId))
+  handle('nodes:applyVideoDefaults', ({ videoId }) => graph.applyVideoDefaultsToNodes(videoId))
   handle('nodes:remove', ({ nodeId }) => graph.removeNode(nodeId))
   handle('edges:connect', (input) => graph.connectNodes(input))
   handle('edges:disconnect', ({ edgeId }) => graph.disconnectEdge(edgeId))
