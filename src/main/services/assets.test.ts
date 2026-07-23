@@ -15,6 +15,7 @@ import {
   deleteAsset,
   duplicateAssetGroups,
   getAsset,
+  importAssetFromBytes,
   importAssetFromFile,
   importAssetFromUrl,
   listAssets,
@@ -131,6 +132,59 @@ describe('update / delete', () => {
     expect(existsSync(asset.filePath!)).toBe(false)
     // Deleting a missing asset is a no-op.
     expect(() => deleteAsset(asset.id)).not.toThrow()
+  })
+})
+
+describe('importAssetFromBytes', () => {
+  it('registers raw bytes as a managed asset (chat attachments)', () => {
+    const asset = importAssetFromBytes({
+      projectId,
+      bytes: new TextEncoder().encode('png-bytes'),
+      mimeType: 'image/png',
+      name: 'Attachment',
+      description: 'A brief sketch'
+    })
+    expect(asset.kind).toBe('image')
+    expect(asset.description).toBe('A brief sketch')
+    expect(asset.filePath).toMatch(/\.png$/)
+    expect(existsSync(asset.filePath!)).toBe(true)
+    expect(getAsset(asset.id)?.name).toBe('Attachment')
+  })
+
+  it('validates design markers against the recipe registry', () => {
+    const sheet = importAssetFromBytes({
+      projectId,
+      bytes: new TextEncoder().encode('sheet'),
+      mimeType: 'image/png',
+      name: 'Léa',
+      designId: 'character',
+      designSubject: 'Léa, 20, pink hair'
+    })
+    expect(sheet.designId).toBe('character')
+    expect(sheet.designSubject).toBe('Léa, 20, pink hair')
+    expect(sheet.tags).toContain('character')
+
+    const plain = importAssetFromBytes({
+      projectId,
+      bytes: new TextEncoder().encode('other'),
+      mimeType: 'image/png',
+      name: 'Other',
+      designId: 'not-a-recipe',
+      designSubject: 'ignored'
+    })
+    expect(plain.designId).toBeNull()
+    expect(plain.designSubject).toBeNull()
+  })
+
+  it('rejects non-media MIME types', () => {
+    expect(() =>
+      importAssetFromBytes({
+        projectId,
+        bytes: new Uint8Array([1]),
+        mimeType: 'application/pdf',
+        name: 'Doc'
+      })
+    ).toThrow(/Unsupported media type/)
   })
 })
 

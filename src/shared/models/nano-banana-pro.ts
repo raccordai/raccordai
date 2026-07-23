@@ -32,6 +32,7 @@ export const nanoBananaPro: ModelDefinition<Params> = {
   description:
     'Google Gemini 3 Pro image — best-in-class text rendering, blends up to 8 input images, 1K/2K/4K output.',
   kind: 'image',
+  recommendedFor: ['text-rendering', 'high-resolution', 'multi-image-blend'],
   paramsSchema,
   // Indicative per-image rates by resolution — align with https://kie.ai/pricing
   // (18 credits for 1K/2K, 24 credits for 4K).

@@ -105,6 +105,17 @@ export function registerIpcHandlers(): void {
       withAssetUrl(assetsService.importAssetFromFile(projectId, p))
     )
   })
+  handle('assets:importFromPaths', ({ projectId, paths }) => {
+    const imported: ReturnType<typeof withAssetUrl>[] = []
+    for (const p of paths) {
+      try {
+        imported.push(withAssetUrl(assetsService.importAssetFromFile(projectId, p)))
+      } catch {
+        // Unsupported file type — the renderer reports the skipped count.
+      }
+    }
+    return imported
+  })
   handle('assets:update', ({ assetId, ...patch }) => assetsService.updateAsset(assetId, patch))
   handle('assets:remove', ({ assetId }) => assetsService.deleteAsset(assetId))
   handle('assets:references', ({ assetId }) => assetsService.assetReferences(assetId))
@@ -128,6 +139,7 @@ export function registerIpcHandlers(): void {
   handle('nodes:remove', ({ nodeId }) => graph.removeNode(nodeId))
   handle('edges:connect', (input) => graph.connectNodes(input))
   handle('edges:disconnect', ({ edgeId }) => graph.disconnectEdge(edgeId))
+  handle('edges:reorder', (input) => graph.reorderEdges(input))
 
   handle('history:state', ({ videoId }) => graphHistory.historyState(videoId))
   handle('history:undo', ({ videoId }) => {

@@ -29,6 +29,7 @@ export const gptImage2T2I: ModelDefinition<Params> = {
   label: 'GPT Image 2 — Text to Image',
   description: 'Generate an image from a text prompt — no source image required.',
   kind: 'image',
+  recommendedFor: ['text-to-image', 'style-frames'],
   paramsSchema,
   paramFields: [
     { key: 'prompt', label: 'Prompt', type: 'textarea', defaultValue: '' },

@@ -5,6 +5,7 @@ declare global {
     api: {
       invoke(channel: string, input?: unknown): Promise<unknown>
       on(channel: string, listener: (payload: unknown) => void): () => void
+      getPathForFile(file: File): string
     }
   }
 }

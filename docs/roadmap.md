@@ -14,10 +14,11 @@ onboarding + template slot form, and **trust while generating** by the
 generation feedback layer (queue/retry visibility, cost preview, OS
 notifications, toasts/modals instead of native `alert()`s).
 
-The assistant currently exists to paper over manual-editor friction. The
-long-term differentiator is to invert that: make the conversational path the
-primary one (§4.7) on top of a manual editor that no longer needs papering
-over (§4.6).
+The long-term differentiation — a manual editor that no longer needs papering
+over, and the conversational path as the primary one — has since shipped too:
+**graph ergonomics** (reference numbering, anchor/reference legibility, canvas
+affordances, A/B compare) and **assistant-first flows** (plan approval cards,
+asset-import autonomy, model recommendations). See "Shipped".
 
 ## Shipped
 
@@ -103,6 +104,58 @@ Landed in July 2026 (see CHANGELOG once releases start):
   end-to-end against the kie mock (pre-fill, payload = business prompt +
   bible with the marker stripped, clean stored prompt, one-step undo of the
   bulk apply).
+- **Graph ergonomics** (§4.6, July 2026):
+  - _Visible, reorderable reference numbering_: the computed `@ImageN` alias
+    is rendered on the canvas edges themselves (badge label, same
+    `incomingConnectionsFor` ordering as the chips and the run engine), and
+    the params panel reorders a multi-reference input's connections with
+    up/down arrows through the new journaled `edges:reorder` channel
+    (permutation-validated, timestamps redistributed strictly increasing so
+    ties can never make numbering ambiguous; `graphHistory` now diff-restores
+    changed edge rows so the reorder undoes cleanly).
+  - _Anchor/reference made legible_: the native `confirm()` guard became a
+    styled two-column modal (anchor "appears ON SCREEN" vs reference "guides
+    only") with a one-click **"wire as reference instead"** CTA when the
+    target model has a reference input; `frameAnchor: true` handles are
+    permanently distinguished (warning-token connector + anchor icon +
+    explanatory tooltip), so the distinction is learned, not just policed.
+  - _Canvas affordances_: pane right-click opens the add-node catalogue at
+    the cursor (the toolbar's combobox was split into a shared
+    `AddNodePanel` + `useNodeCreation` hook, nodes spawn at the click
+    point); node right-click offers Run / Duplicate / Replace model /
+    Delete; image/video/audio files dropped on the canvas are imported
+    (`assets:importFromPaths` + preload `getPathForFile`) and appear as
+    `studio/asset` nodes at the drop position; Cmd/Ctrl+C/V copies the
+    selected nodes (and the edges between them, in creation order) as a
+    workflow-JSON v1 fragment pasted through the `importWorkflow` validator
+    with fresh keys and an offset — repeat pastes and cross-video paste
+    within a project both work.
+  - _A/B generation compare_: pick two generations of a node (⫼ toggle on
+    the cards) → side-by-side modal with synced play/pause/scrub for videos
+    and synced zoom/pan for images, "Use this" (`generations:select`) on
+    each side.
+- **Assistant-first flows** (§4.7, July 2026):
+  - _Brief → plan → execute_: new `present_plan` tool — structured JSON
+    (`shots: [{label, description, modelId, estCredits, panels?}], style,
+totalCredits`) rendered by the ChatPanel as a persisted approval card
+    (per-shot model + cost, grand total) with **Approve** / **Request
+    changes** buttons posting back as user messages (only the transcript
+    tail is actionable). Both SYSTEM prompts mandate a plan before any
+    multi-shot `import_workflow` and before costly run batches — the
+    conversational sibling of the storyboard gate. Plan cards persist via
+    the extended `chatItemSchema` (`type: 'plan'`).
+  - _Asset import autonomy_: `save_attachment_as_asset` promotes a chat
+    image attachment into the project library (new
+    `assets.importAssetFromBytes`, optional designId/designSubject markers
+    validated against the recipe registry) and `import_asset_from_url`
+    mirrors the MCP `add_asset_from_url` — the assistant no longer has to
+    ask the user to use the Assets tab; both SYSTEM prompts teach the new
+    path, and both tools take an explicit `projectId` in the home toolset.
+  - _Model recommendation_: declarative `recommendedFor: string[]` tags on
+    every `ModelDefinition` (registry test enforces ≥1 kebab-case tag),
+    surfaced as badges + a recommended sort in `AddNodeMenu` (tag-matching
+    entries rank first, tags are searchable), in the assistant's
+    `list_models`, and in the MCP `models`/`model:<id>` docs topics.
 
 ## 1. Open-source hygiene — before publishing
 
@@ -141,86 +194,6 @@ i18next key in `fr/common.json` **and** `en/common.json`; graph mutations go
 through the graph service so `withGraphHistory` journals them; colors through
 the tokens in `styles.css`.
 
-### 4.6 Graph ergonomics — effort S–M per sub-item
-
-**Problem set** (all confirmed in code):
-
-- `@Image1/@Image2` numbering depends on **edge creation order** — invisible
-  and fragile (`importWorkflow` even has to validate strictly-increasing
-  numbering to protect templates).
-- The anchor-vs-reference distinction — the documented #1 pitfall — is
-  guarded only by a native `confirm()` in `onConnect`.
-- No right-click menus (pane or node), no media-file drop on the canvas, no
-  node copy/paste. The toolbar combobox is the sole creation path.
-- No side-by-side comparison of two generations of a node (stacked list +
-  one-at-a-time lightbox only).
-
-**Spec.**
-
-1. **Visible, reorderable reference numbering (M)** — render the computed
-   alias (`@Image2`) as a badge on the edge label and on the existing
-   reference chips in `ModelNode`. In `NodeParamsPanel`, list the
-   connections of a multi-reference input with up/down reorder → new
-   `edges:reorder` channel (graph service, journaled). The number the model
-   sees becomes the number the user sees.
-2. **Anchor/reference made legible (S/M)** — replace the `confirm()` guard
-   with a styled modal (two illustrated columns: "will appear on screen" vs
-   "guides only, never on screen", CTA "wire as reference instead" when the
-   target model has a reference input). Permanently distinguish
-   `frameAnchor: true` handles with a dedicated token color + icon so the
-   distinction is learned, not just policed. (Derives from `InputHandle.
-frameAnchor` — already the single source of truth for tests and the
-   guard.)
-3. **Canvas affordances (S each)** — pane right-click → add-node menu at
-   cursor position (reuse `AddNodeMenu`, spawn at click coords instead of
-   viewport center); node right-click → Run / Duplicate / Replace model /
-   Delete (same actions as the header icons); drop image/video files on the
-   canvas → import via the existing assets import path + create a
-   `studio/asset` node at the drop position; copy/paste of selected nodes
-   (serialize the subgraph as a workflow-JSON v1 fragment, paste through the
-   `importWorkflow` validator with fresh keys and an offset).
-4. **A/B generation compare (M)** — from a node's generation list, pick two
-   → side-by-side panel (synced play/pause/scrub for videos, synced zoom for
-   images) with "Use this" on each side (`generations:select`). This is the
-   core iteration gesture; today it requires memory and scrolling. (Note:
-   TimelineV2's "A/B player" is double-buffering for gapless playback, not
-   comparison — naming worth clarifying in code comments.)
-
-### 4.7 Assistant-first flows — effort M/L
-
-**Problem.** The assistant (per-video + home personas, `chat.ts`) can already
-deliver a full project — create project/video, set style, one-shot
-`import_workflow` of a multi-scene graph, run and self-resume on
-`generationSettled`. But it works as a repair layer over manual friction,
-its plans are only visible as prose, and it has exactly one autonomy gap:
-it cannot import assets (it must ask the user to use the Assets tab).
-
-**Spec.**
-
-1. **Brief → plan → execute (M/L)** — new tool `present_plan` whose input is
-   structured JSON (`shots: [{label, description, modelId, estCredits,
-panels?}], style, totalCredits`). The ChatPanel renders it as a card list
-   (per-shot model + cost, grand total vs balance) with **Approve** /
-   **Request changes** buttons that post back as user messages. Both SYSTEM
-   prompts instruct: always `present_plan` before `import_workflow` on any
-   multi-shot build, and before any run batch whose total exceeds the
-   §4.4 confirmation threshold. This is the conversational sibling of the
-   storyboard gate: a validation step before spending. Plan cards persist in
-   the transcript (chatStore) like tool chips do.
-2. **Asset import autonomy (S)** — chat image attachments already exist
-   (≤4, ≤5MB): add a `save_attachment_as_asset` tool that promotes an
-   attachment from the current turn into the project asset library (name,
-   description, optional designId markers), plus `import_asset_from_url`
-   for remote images the user pastes. Keep the MCP registry in sync (both
-   toolsets, per convention).
-3. **Model recommendation (S)** — no recommendation engine exists; users
-   choose among 13 models from descriptions. Add declarative
-   `recommendedFor: string[]` tags on `ModelDefinition` (e.g.
-   "character-consistency", "cheap-draft", "photorealism", "first-frame
-   animation") surfaced as badges + a "recommended" sort in `AddNodeMenu`,
-   in `list_models`, and in the `models` docs topic. Declarative data on the
-   registry keeps it test-covered and MCP-visible for free.
-
 ### 4.8 Catalogue & smaller product items
 
 | Proposal                                                                           | Effort  | Why                                                                                                                                      |
@@ -253,9 +226,7 @@ would remove the last constraint (a running window).
 
 ## Suggested order
 
-1. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
-   long-term differentiation.
-2. **OSS hygiene items** (§1) remain the blockers for a good first
+1. **OSS hygiene items** (§1) remain the blockers for a good first
    impression at publication; the **versioned E2E suite** (§2) should land
    before contributors arrive — the §4.3 render E2E driver (session
    scratchpad) is ready to be promoted into it.

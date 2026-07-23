@@ -23,6 +23,7 @@ export const seedance2Mini: ModelDefinition<Params> = {
   description:
     'The cheapest and fastest Seedance 2.0 tier — same @ reference system and prompt syntax as Fast, 480p/720p. Drafts, animatics and high-volume iteration.',
   kind: 'video',
+  recommendedFor: ['cheap-draft', 'animatics', 'character-consistency'],
   paramsSchema,
   paramFields: [
     { key: 'prompt', label: 'Prompt', type: 'textarea', defaultValue: '' },

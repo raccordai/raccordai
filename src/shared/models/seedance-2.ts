@@ -23,6 +23,7 @@ export const seedance2: ModelDefinition<Params> = {
   description:
     'The full Seedance 2.0 tier — same @ reference system as Fast/Mini, plus 1080p and 4k output. For live-action realism and final masters; for animation, Fast matches its quality at a fraction of the cost.',
   kind: 'video',
+  recommendedFor: ['photorealism', 'high-resolution', 'final-masters', 'character-consistency'],
   paramsSchema,
   paramFields: [
     { key: 'prompt', label: 'Prompt', type: 'textarea', defaultValue: '' },

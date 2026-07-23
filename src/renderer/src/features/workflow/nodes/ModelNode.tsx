@@ -3,6 +3,7 @@ import {
   Loader2,
   Play,
   AlertCircle,
+  Anchor,
   CheckCircle2,
   Clock,
   RefreshCw,
@@ -329,11 +330,27 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
                 type="target"
                 position={Position.Left}
                 id={input.key}
-                style={{ left: -7, top: 14 }}
-                title={`${input.label} (${input.key})`}
+                style={{
+                  left: -7,
+                  top: 14,
+                  // Frame anchors are permanently distinguished (§4.6): warning
+                  // token — the connected image literally appears on screen.
+                  ...(input.frameAnchor ? { background: '#ffd58a' } : {})
+                }}
+                title={
+                  input.frameAnchor
+                    ? `${input.label} (${input.key}) — ${t('editor.frameAnchorHandleTitle')}`
+                    : `${input.label} (${input.key})`
+                }
               />
               <div className="flex items-center justify-between">
-                <span className="truncate">
+                <span className="flex min-w-0 items-center gap-1 truncate">
+                  {input.frameAnchor && (
+                    <Anchor
+                      className="h-2.5 w-2.5 flex-shrink-0 text-warning"
+                      aria-label={t('editor.frameAnchorHandleTitle')}
+                    />
+                  )}
                   ◀ {input.label}
                   {input.required && <span className="text-danger"> *</span>}
                 </span>

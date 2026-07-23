@@ -34,19 +34,14 @@ import type {
   VideoResolution
 } from '@shared/ipc/contracts'
 import { MODELS, videoDefaultParams } from '@shared/models'
-import { STYLES, getStyle } from '@shared/styles/registry'
-import {
-  DESIGN_RECIPES,
-  designIntent,
-  designNodeParams,
-  getDesignRecipe,
-  type DesignRecipe
-} from '@shared/designs/registry'
+import { STYLES } from '@shared/styles/registry'
+import { DESIGN_RECIPES, type DesignRecipe } from '@shared/designs/registry'
 import { invoke } from '@renderer/lib/ipc'
 import { Button } from '@renderer/components/ui/Button'
 import { useToast } from '@renderer/components/feedback/Feedback'
 import { Logo } from '@renderer/components/Logo'
-import { graphKeys, useIpcMutation, useProject, useProjectAssets, useVideo } from './data'
+import { graphKeys, useIpcMutation, useProject, useVideo } from './data'
+import { useNodeCreation } from './useNodeCreation'
 import type { LayoutDirection } from './autoLayout'
 
 interface Props {
@@ -79,9 +74,9 @@ export function WorkflowToolbar({
   videoNodeCount
 }: Props) {
   const { t } = useTranslation()
-  const { mutateAsync: createNode } = useIpcMutation('nodes:create', [graphKeys.graph(videoId)])
   const { screenToFlowPosition } = useReactFlow()
   const video = useVideo(videoId).data
+  const nodeCreation = useNodeCreation(videoId, projectId)
   const project = useProject(projectId).data
   const { mutate: setStyle } = useIpcMutation('videos:setStyle', [['videos']])
   const { mutate: setDefaults } = useIpcMutation('videos:setDefaults', [['videos']])
@@ -124,56 +119,6 @@ export function WorkflowToolbar({
     }
   }
 
-  // No explicit params: the graph service seeds model defaults + the video's
-  // default aspect/resolution + the applyVideoStyle flag on visual nodes.
-  async function addNode(modelId: string) {
-    await createNode({ videoId, modelId, position: spawnPosition() })
-  }
-
-  // Published design sheets of the project — offered as "from library" entries
-  // in the add-node menu.
-  const projectAssets = useProjectAssets(projectId).data
-  const designAssets = useMemo(
-    () => (projectAssets ?? []).filter((a) => a.designId !== null),
-    [projectAssets]
-  )
-
-  /**
-   * Library design sheet → a studio/asset node wired to it, with the same
-   * reference-only intent convention as freshly created design nodes.
-   */
-  async function addLibraryDesignNode(asset: AssetWithUrl) {
-    await createNode({
-      videoId,
-      modelId: 'studio/asset',
-      position: spawnPosition(),
-      params: { assetId: asset.id },
-      label: asset.name,
-      intent: `Design sheet "${asset.name}"${asset.designSubject ? ` (${asset.designSubject})` : ''} from the project library — reference only; on a frame anchor it would appear on screen.`
-    })
-  }
-
-  /**
-   * Design recipe → a pre-configured image node: prompt built for the target
-   * model and the video's current style, reference-only intent, marker in
-   * params so the editor can warn about frame-anchor connections.
-   */
-  async function addDesignNode(recipeId: string, description: string) {
-    const recipe = getDesignRecipe(recipeId)
-    if (!recipe) return
-    const style = video?.styleId ? getStyle(video.styleId) : undefined
-    const name = t(`designs.${recipeId}.name` as never) as string
-    const subject = description.trim()
-    await createNode({
-      videoId,
-      modelId: recipe.defaultModelId,
-      position: spawnPosition(),
-      params: designNodeParams(recipe, recipe.defaultModelId, { description: subject, style }),
-      label: subject ? `${name} — ${subject.slice(0, 40)}` : name,
-      intent: designIntent(recipe)
-    })
-  }
-
   return (
     <div className="island flex items-center gap-1 px-2 py-1">
       {/* Left: brand + project / video breadcrumb */}
@@ -201,10 +146,12 @@ export function WorkflowToolbar({
 
       {/* Right: actions */}
       <AddNodeMenu
-        onAdd={addNode}
-        onAddDesign={addDesignNode}
-        libraryAssets={designAssets}
-        onAddFromLibrary={addLibraryDesignNode}
+        onAdd={(modelId) => void nodeCreation.addNode(modelId, spawnPosition())}
+        onAddDesign={(recipeId, description) =>
+          void nodeCreation.addDesignNode(recipeId, description, spawnPosition())
+        }
+        libraryAssets={nodeCreation.designAssets}
+        onAddFromLibrary={(asset) => void nodeCreation.addLibraryDesignNode(asset, spawnPosition())}
       />
 
       <StyleMenu
@@ -334,6 +281,8 @@ interface AddEntry {
   recipe?: DesignRecipe
   /** Set on the "from library" entry — choosing it opens the design-asset picker step. */
   library?: boolean
+  /** Use-case tags from ModelDefinition.recommendedFor — badges + recommended sort. */
+  tags?: string[]
 }
 
 const KIND_ICONS: Record<AddEntry['kind'], React.ReactNode> = {
@@ -354,21 +303,51 @@ function normalize(s: string): string {
     .toLowerCase()
 }
 
-function AddNodeMenu({
-  onAdd,
-  onAddDesign,
-  libraryAssets,
-  onAddFromLibrary
-}: {
+export interface AddNodeActions {
   onAdd: (modelId: string) => void
   /** Adds a design-recipe node to the canvas. */
   onAddDesign?: (recipeId: string, description: string) => void
   /** Published design sheets of the project. */
   libraryAssets?: AssetWithUrl[]
   onAddFromLibrary?: (asset: AssetWithUrl) => void
-}) {
+}
+
+/** Toolbar trigger around the shared panel (the pane right-click reuses AddNodePanel). */
+function AddNodeMenu(props: AddNodeActions) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        title={t('editor.addNodeTitle')}
+      >
+        <Plus className="h-3.5 w-3.5" /> {t('editor.addNode')}
+      </Button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1">
+          <AddNodePanel {...props} onClose={() => setOpen(false)} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Type-to-filter node catalogue (models, design recipes, library sheets,
+ * asset entry) — shared between the toolbar button and the canvas
+ * right-click menu (§4.6). Unmounting on close resets every step.
+ */
+export function AddNodePanel({
+  onAdd,
+  onAddDesign,
+  libraryAssets,
+  onAddFromLibrary,
+  onClose
+}: AddNodeActions & { onClose: () => void }) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   /** Non-null while the second step (design subject description) is showing. */
@@ -417,7 +396,8 @@ function AddNodeMenu({
         id: m.id,
         label: m.label,
         desc: `${m.description.split('.')[0]}.`,
-        kind: m.kind as AddEntry['kind']
+        kind: m.kind as AddEntry['kind'],
+        tags: m.recommendedFor
       })),
       {
         id: 'studio/asset',
@@ -431,11 +411,19 @@ function AddNodeMenu({
 
   const q = normalize(query.trim())
   const filtered = q
-    ? entries.filter((e) => normalize(`${e.label} ${e.desc} ${e.id} ${e.kind}`).includes(q))
+    ? entries.filter((e) =>
+        normalize(`${e.label} ${e.desc} ${e.id} ${e.kind} ${(e.tags ?? []).join(' ')}`).includes(q)
+      )
     : entries
+  // Recommended sort: entries whose use-case tags match the query rank first
+  // within their group ("character" surfaces the character-consistency models).
+  const tagMatches = (e: AddEntry): boolean =>
+    q !== '' && (e.tags ?? []).some((tag) => normalize(tag).includes(q))
   const groups = KIND_ORDER.map((kind) => ({
     kind,
-    items: filtered.filter((e) => e.kind === kind)
+    items: filtered
+      .filter((e) => e.kind === kind)
+      .sort((a, b) => Number(tagMatches(b)) - Number(tagMatches(a)))
   })).filter((g) => g.items.length > 0)
   // Flat list (in render order) for keyboard navigation across group boundaries.
   const flat = groups.flatMap((g) => g.items)
@@ -446,8 +434,8 @@ function AddNodeMenu({
   }, [query])
 
   useEffect(() => {
-    if (open && !pendingDesign && !libraryOpen) inputRef.current?.focus()
-  }, [open, pendingDesign, libraryOpen])
+    if (!pendingDesign && !libraryOpen) inputRef.current?.focus()
+  }, [pendingDesign, libraryOpen])
 
   useEffect(() => {
     if (pendingDesign) designInputRef.current?.focus()
@@ -458,12 +446,8 @@ function AddNodeMenu({
   }, [libraryOpen])
 
   function close() {
-    setOpen(false)
-    setQuery('')
-    setPendingDesign(null)
-    setDesignDesc('')
-    setLibraryOpen(false)
-    setLibraryQuery('')
+    // Unmounting resets the query/steps — the caller owns the visibility.
+    onClose()
   }
 
   function choose(entry: AddEntry | undefined) {
@@ -506,207 +490,207 @@ function AddNodeMenu({
   }
 
   return (
-    <div className="relative">
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() => setOpen((v) => !v)}
-        title={t('editor.addNodeTitle')}
-      >
-        <Plus className="h-3.5 w-3.5" /> {t('editor.addNode')}
-      </Button>
-      {open && (
-        <div className="absolute left-0 z-20 mt-1 w-80 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">
-          {pendingDesign ? (
-            <div className="p-2.5">
-              <div className="flex items-center gap-2">
-                <button
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    setPendingDesign(null)
-                  }}
-                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-                  title={t('editor.designBack')}
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                </button>
-                {KIND_ICONS.design}
-                <span className="text-sm font-medium text-neutral-100">
-                  {t(`designs.${pendingDesign.id}.name` as never)}
-                </span>
+    <div className="w-80 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">
+      {pendingDesign ? (
+        <div className="p-2.5">
+          <div className="flex items-center gap-2">
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault()
+                setPendingDesign(null)
+              }}
+              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+              title={t('editor.designBack')}
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </button>
+            {KIND_ICONS.design}
+            <span className="text-sm font-medium text-neutral-100">
+              {t(`designs.${pendingDesign.id}.name` as never)}
+            </span>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-snug text-neutral-500">
+            {t('editor.designHint')}
+          </p>
+          <input
+            ref={designInputRef}
+            value={designDesc}
+            onChange={(e) => setDesignDesc(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                confirmDesign()
+              } else if (e.key === 'Escape') {
+                e.stopPropagation()
+                setPendingDesign(null)
+              }
+            }}
+            onBlur={() => setTimeout(close, 150)}
+            placeholder={t(`designs.${pendingDesign.id}.placeholder` as never)}
+            className="mt-2 w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
+          />
+          <div className="mt-2 flex justify-end">
+            <Button
+              variant="primary"
+              size="sm"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                confirmDesign()
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" /> {t('editor.designAdd')}
+            </Button>
+          </div>
+        </div>
+      ) : libraryOpen ? (
+        <div className="p-2.5">
+          <div className="flex items-center gap-2">
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault()
+                setLibraryOpen(false)
+              }}
+              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+              title={t('editor.designBack')}
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </button>
+            {KIND_ICONS.design}
+            <span className="text-sm font-medium text-neutral-100">
+              {t('editor.designFromLibrary')}
+            </span>
+          </div>
+          <input
+            ref={libraryInputRef}
+            value={libraryQuery}
+            onChange={(e) => setLibraryQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                setLibraryOpen(false)
+              }
+            }}
+            onBlur={() => setTimeout(close, 150)}
+            placeholder={t('editor.designLibraryFilter')}
+            className="mt-2 w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
+          />
+          <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+            {(libraryAssets ?? [])
+              .filter((a) =>
+                normalize(
+                  `${a.name} ${a.designSubject ?? ''} ${a.designId ?? ''} ${a.tags.join(' ')}`
+                ).includes(normalize(libraryQuery.trim()))
+              )
+              .map((a) => (
+                <li key={a.id}>
+                  <button
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      onAddFromLibrary?.(a)
+                      close()
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-neutral-800"
+                  >
+                    {a.url ? (
+                      <img
+                        src={a.url}
+                        alt=""
+                        loading="lazy"
+                        className="h-9 w-9 flex-shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded bg-neutral-800">
+                        {KIND_ICONS.design}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm text-neutral-100">{a.name}</span>
+                      <span className="block truncate text-[11px] leading-snug text-neutral-500">
+                        {t(`designs.${a.designId}.name` as never)}
+                        {a.designSubject ? ` — ${a.designSubject}` : ''}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 border-b border-neutral-800 px-2.5 py-2">
+            <Search className="h-3.5 w-3.5 flex-shrink-0 text-neutral-500" />
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onKeyDown}
+              onBlur={() =>
+                setTimeout(() => {
+                  // Not when the blur is the hand-off to a second-step input.
+                  if (!pendingDesignRef.current && !libraryOpenRef.current) close()
+                }, 150)
+              }
+              placeholder={t('editor.filterPlaceholder')}
+              className="w-full bg-transparent text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
+            />
+          </div>
+          <div className="max-h-80 overflow-y-auto py-1">
+            {flat.length === 0 && (
+              <div className="px-3 py-2 text-xs italic text-neutral-500">
+                {t('editor.noModelMatch', { query })}
               </div>
-              <p className="mt-1.5 text-[11px] leading-snug text-neutral-500">
-                {t('editor.designHint')}
-              </p>
-              <input
-                ref={designInputRef}
-                value={designDesc}
-                onChange={(e) => setDesignDesc(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    confirmDesign()
-                  } else if (e.key === 'Escape') {
-                    e.stopPropagation()
-                    setPendingDesign(null)
-                  }
-                }}
-                onBlur={() => setTimeout(close, 150)}
-                placeholder={t(`designs.${pendingDesign.id}.placeholder` as never)}
-                className="mt-2 w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
-              />
-              <div className="mt-2 flex justify-end">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    confirmDesign()
-                  }}
-                >
-                  <Plus className="h-3.5 w-3.5" /> {t('editor.designAdd')}
-                </Button>
-              </div>
-            </div>
-          ) : libraryOpen ? (
-            <div className="p-2.5">
-              <div className="flex items-center gap-2">
-                <button
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    setLibraryOpen(false)
-                  }}
-                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-                  title={t('editor.designBack')}
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                </button>
-                {KIND_ICONS.design}
-                <span className="text-sm font-medium text-neutral-100">
-                  {t('editor.designFromLibrary')}
-                </span>
-              </div>
-              <input
-                ref={libraryInputRef}
-                value={libraryQuery}
-                onChange={(e) => setLibraryQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.stopPropagation()
-                    setLibraryOpen(false)
-                  }
-                }}
-                onBlur={() => setTimeout(close, 150)}
-                placeholder={t('editor.designLibraryFilter')}
-                className="mt-2 w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
-              />
-              <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
-                {(libraryAssets ?? [])
-                  .filter((a) =>
-                    normalize(
-                      `${a.name} ${a.designSubject ?? ''} ${a.designId ?? ''} ${a.tags.join(' ')}`
-                    ).includes(normalize(libraryQuery.trim()))
-                  )
-                  .map((a) => (
-                    <li key={a.id}>
-                      <button
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          onAddFromLibrary?.(a)
-                          close()
-                        }}
-                        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-neutral-800"
-                      >
-                        {a.url ? (
-                          <img
-                            src={a.url}
-                            alt=""
-                            loading="lazy"
-                            className="h-9 w-9 flex-shrink-0 rounded object-cover"
-                          />
-                        ) : (
-                          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded bg-neutral-800">
-                            {KIND_ICONS.design}
+            )}
+            {groups.map((group, gi) => (
+              <div
+                key={group.kind}
+                className={gi > 0 ? 'mt-1 border-t border-neutral-800/60 pt-1' : ''}
+              >
+                <div className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                  {t(`editor.kinds.${group.kind}`)}
+                </div>
+                {group.items.map((entry) => {
+                  const idx = flat.indexOf(entry)
+                  return (
+                    <button
+                      key={entry.id}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        choose(entry)
+                      }}
+                      onMouseEnter={() => setActive(idx)}
+                      title={entry.recipe ? undefined : entry.id}
+                      className={`flex w-full items-start gap-2.5 px-3 py-1.5 text-left ${
+                        idx === active ? 'bg-neutral-800' : ''
+                      }`}
+                    >
+                      <span className="mt-0.5 flex-shrink-0">{KIND_ICONS[entry.kind]}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm text-neutral-100">
+                          {entry.label}
+                        </span>
+                        <span className="block truncate text-[11px] leading-snug text-neutral-500">
+                          {entry.desc}
+                        </span>
+                        {entry.tags && entry.tags.length > 0 && (
+                          <span className="mt-0.5 flex flex-wrap gap-1">
+                            {entry.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-full bg-accent/10 px-1.5 py-px text-[9px] text-accent-soft"
+                              >
+                                {tag}
+                              </span>
+                            ))}
                           </span>
                         )}
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm text-neutral-100">{a.name}</span>
-                          <span className="block truncate text-[11px] leading-snug text-neutral-500">
-                            {t(`designs.${a.designId}.name` as never)}
-                            {a.designSubject ? ` — ${a.designSubject}` : ''}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 border-b border-neutral-800 px-2.5 py-2">
-                <Search className="h-3.5 w-3.5 flex-shrink-0 text-neutral-500" />
-                <input
-                  ref={inputRef}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={onKeyDown}
-                  onBlur={() =>
-                    setTimeout(() => {
-                      // Not when the blur is the hand-off to a second-step input.
-                      if (!pendingDesignRef.current && !libraryOpenRef.current) close()
-                    }, 150)
-                  }
-                  placeholder={t('editor.filterPlaceholder')}
-                  className="w-full bg-transparent text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
-                />
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
-              <div className="max-h-80 overflow-y-auto py-1">
-                {flat.length === 0 && (
-                  <div className="px-3 py-2 text-xs italic text-neutral-500">
-                    {t('editor.noModelMatch', { query })}
-                  </div>
-                )}
-                {groups.map((group, gi) => (
-                  <div
-                    key={group.kind}
-                    className={gi > 0 ? 'mt-1 border-t border-neutral-800/60 pt-1' : ''}
-                  >
-                    <div className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-                      {t(`editor.kinds.${group.kind}`)}
-                    </div>
-                    {group.items.map((entry) => {
-                      const idx = flat.indexOf(entry)
-                      return (
-                        <button
-                          key={entry.id}
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            choose(entry)
-                          }}
-                          onMouseEnter={() => setActive(idx)}
-                          title={entry.recipe ? undefined : entry.id}
-                          className={`flex w-full items-start gap-2.5 px-3 py-1.5 text-left ${
-                            idx === active ? 'bg-neutral-800' : ''
-                          }`}
-                        >
-                          <span className="mt-0.5 flex-shrink-0">{KIND_ICONS[entry.kind]}</span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm text-neutral-100">
-                              {entry.label}
-                            </span>
-                            <span className="block truncate text-[11px] leading-snug text-neutral-500">
-                              {entry.desc}
-                            </span>
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )

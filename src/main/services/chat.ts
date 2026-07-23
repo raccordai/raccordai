@@ -1,7 +1,13 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { MODELS, getModel } from '@shared/models'
 import { getStyle } from '@shared/styles/registry'
-import { HOME_CHAT_ID, type ChatImage, type ChatItem, type ChatState } from '@shared/ipc/contracts'
+import {
+  HOME_CHAT_ID,
+  type ChatImage,
+  type ChatItem,
+  type ChatPlan,
+  type ChatState
+} from '@shared/ipc/contracts'
 import { onGenerationSettled } from '../bus'
 import { broadcastChatUpdate, broadcastWorkflowChanged } from '../events'
 import { DOC_TOPICS, getDoc } from '../mcp/docs'
@@ -51,7 +57,8 @@ How to work:
 - Position nodes on a left-to-right flow (x: 0, 420, 840…; y spaced by ~350) so the graph stays readable.
 - import_workflow with replace=true erases the existing graph — only with explicit user consent.
 - When you launch run_node, the app automatically wakes you with a message once that generation finishes (success or failure) — you can tell the user you'll report back, then end your turn. Never poll get_generations to wait.
-- The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. They are NOT project assets — to use one as a workflow input, ask the user to import it via the project's Assets tab, then reference it with a studio/asset node.
+- The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a character/décor/prop sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through import_asset_from_url the same way.
+- Plan before building: on any multi-shot build, call present_plan (structured shots + models + estimated credits + total) BEFORE import_workflow, and before launching a batch of runs whose total cost is significant. The user gets an approval card with Approve / Request changes — WAIT for their reply before executing. This is the validation gate before spending credits (the conversational sibling of the storyboard review).
 
 You are also the film director. When the user asks for a video (an ad, an anime scene, a realistic sequence…), don't just wire nodes — direct:
 1. Establish the brief from the user's request: subject, intent, tone, duration, aspect ratio. Ask only what you truly cannot infer; propose tasteful defaults for the rest.
@@ -75,9 +82,9 @@ How to deliver a full project:
 3. read_docs "models" FIRST — the frame-anchor vs reference distinction decides your wiring: character sheets/storyboards go to Seedance 2 reference_image_urls (with an explicit role in the prompt, they never appear on screen); Seedance 1.5 / Grok image inputs literally BECOME frames. read_docs "styles" → set_video_style; the style bible is appended automatically at run time to every visual node whose params carry "applyVideoStyle": true — set that flag on the visual nodes you create and NEVER paste the bible into a prompt. For standard shapes, scale a template (read_docs "template:<id>") to the requested duration. On an existing project, search_assets first: published design sheets (designId/designSubject set) are reused via studio/asset nodes (reference inputs only) instead of regenerating them; publish_design a newly approved sheet so later videos can reuse it.
 4. Build the graph in ONE import_workflow call (nodes + edges, left-to-right positions x: 0, 420, 840…, y by scene ~350): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (read_docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); lastFrame chaining with "@Image3 as the first frame" (seamless cuts); one Suno music node per video matching the style's music hint.
 5. read_docs "prompting:<model id>" before writing ANY prompt. English prompts: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
-6. Report the plan and the estimated credit cost; ASK before running anything (run_node costs money — when you do launch it, the app wakes you automatically on completion, never poll).
+6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. Same gate before launching any significant batch of runs (run_node costs money — when you do launch one, the app wakes you automatically on completion, never poll).
 
-The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. They are NOT project assets — to use one as a workflow input, ask the user to import it via the project's Assets tab, then reference it with a studio/asset node.`
+The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a design sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through import_asset_from_url the same way.`
 
 // ── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -225,6 +232,66 @@ const TOOLS: Anthropic.Tool[] = [
       },
       required: ['generationId', 'name']
     }
+  },
+  {
+    name: 'present_plan',
+    description:
+      'Present a structured production plan for user approval BEFORE building a multi-shot graph (import_workflow) or launching a costly run batch: per-shot label/description/model/estimated credits + total. Rendered as an approval card with Approve / Request changes buttons — end your turn and WAIT for the user’s reply.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        shots: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: 'e.g. "Shot 01 — The harbor"' },
+              description: { type: 'string', description: 'What happens in this shot' },
+              modelId: { type: 'string' },
+              estCredits: { type: 'number', description: 'Estimated kie.ai credits for this shot' },
+              panels: { type: 'string', description: 'Storyboard panels covered, e.g. "1-3"' }
+            },
+            required: ['label', 'description', 'modelId']
+          }
+        },
+        style: { type: 'string', description: 'Style template id/label the plan commits to' },
+        totalCredits: { type: 'number', description: 'Estimated grand total in kie.ai credits' }
+      },
+      required: ['shots']
+    }
+  },
+  {
+    name: 'save_attachment_as_asset',
+    description:
+      'Save an image the user attached to their message into the project’s asset library (index 0 = first image of the most recent message with attachments). Optional designId/designSubject markers publish it as a reusable design sheet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        index: { type: 'number', description: '0-based attachment index (default 0)' },
+        name: { type: 'string', description: 'Library display name' },
+        description: { type: 'string', description: 'What the media depicts — shown to AIs' },
+        designId: {
+          type: 'string',
+          description: 'Design category (character/decor/prop/styleframe/storyboard) when relevant'
+        },
+        designSubject: { type: 'string', description: 'The subject the sheet depicts' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'import_asset_from_url',
+    description:
+      'Download a remote media URL (image/video/audio) into the project’s asset library, so it can be wired via a studio/asset node. Give it a descriptive name and an AI-facing description.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Public URL of the media to download' },
+        name: { type: 'string', description: 'Display name (default: URL filename)' },
+        description: { type: 'string', description: 'What the media depicts — shown to AIs' }
+      },
+      required: ['url']
+    }
   }
 ]
 
@@ -277,7 +344,11 @@ const VIDEO_SCOPED_TOOLS = new Set([
 ])
 
 /** Tools whose scope is a whole project: the home variant requires a projectId param. */
-const PROJECT_SCOPED_TOOLS = new Set(['search_assets'])
+const PROJECT_SCOPED_TOOLS = new Set([
+  'search_assets',
+  'save_attachment_as_asset',
+  'import_asset_from_url'
+])
 
 function withProjectIdParam(tool: Anthropic.Tool): Anthropic.Tool {
   const schema = tool.input_schema as { properties?: Record<string, unknown>; required?: string[] }
@@ -329,6 +400,22 @@ interface ToolCtx {
   videoId: string | null
 }
 
+/** Explicit projectId param (home session), the session's project, or via the bound video. */
+function resolveProjectId(input: Record<string, unknown>, ctx: ToolCtx): string {
+  const explicit =
+    typeof input['projectId'] === 'string' && input['projectId'] !== ''
+      ? (input['projectId'] as string)
+      : null
+  if (explicit) return explicit
+  const session = sessions.get(ctx.sessionKey)
+  if (session?.projectId) return session.projectId
+  if (ctx.videoId) {
+    const projectId = videos.getVideo(ctx.videoId)?.projectId
+    if (projectId) return projectId
+  }
+  throw new Error('This tool needs a "projectId".')
+}
+
 /** Explicit videoId param (home session) or the session's bound video. */
 function resolveVideoId(input: Record<string, unknown>, ctx: ToolCtx): string {
   const explicit =
@@ -347,7 +434,13 @@ async function executeTool(
   name: string,
   input: Record<string, unknown>,
   ctx: ToolCtx
-): Promise<{ result: string; mutatedVideoId: string | null; label: string }> {
+): Promise<{
+  result: string
+  mutatedVideoId: string | null
+  label: string
+  /** Rich transcript entry replacing the default tool chip (e.g. plan cards). */
+  item?: ChatItem
+}> {
   switch (name) {
     case 'list_projects': {
       const rows = projects.listProjects().map((p) => ({ id: p.id, name: p.name }))
@@ -434,6 +527,8 @@ async function executeTool(
         kind: m.kind,
         label: m.label,
         description: m.description,
+        // Declarative use-case tags — match them against the user's brief.
+        recommendedFor: m.recommendedFor,
         inputs: m.inputs.map((h) => ({
           key: h.key,
           accepts: h.accepts,
@@ -570,6 +665,95 @@ async function executeTool(
         }),
         mutatedVideoId: ctx.videoId ?? '',
         label: `Design published · ${asset.name}`
+      }
+    }
+    case 'present_plan': {
+      const rawShots = Array.isArray(input['shots']) ? input['shots'] : []
+      const plan: ChatPlan = {
+        shots: rawShots.map((raw) => {
+          const shot = (raw ?? {}) as Record<string, unknown>
+          return {
+            label: String(shot['label'] ?? ''),
+            description: String(shot['description'] ?? ''),
+            modelId: String(shot['modelId'] ?? ''),
+            estCredits: typeof shot['estCredits'] === 'number' ? shot['estCredits'] : null,
+            ...(shot['panels'] ? { panels: String(shot['panels']) } : {})
+          }
+        }),
+        style: input['style'] ? String(input['style']) : null,
+        totalCredits: typeof input['totalCredits'] === 'number' ? input['totalCredits'] : null
+      }
+      if (plan.shots.length === 0) throw new Error('A plan needs at least one shot.')
+      return {
+        result:
+          'Plan presented to the user as an approval card. End your turn and WAIT for their Approve / Request changes reply before building or running anything.',
+        mutatedVideoId: null,
+        label: `Plan presented · ${plan.shots.length} shots`,
+        item: { type: 'plan', plan }
+      }
+    }
+    case 'save_attachment_as_asset': {
+      const projectId = resolveProjectId(input, ctx)
+      const session = sessionFor(ctx.sessionKey)
+      // The most recent user message that carries image blocks — attachments
+      // ride in the Anthropic history as base64 image blocks.
+      let images: Anthropic.ImageBlockParam[] = []
+      for (let i = session.history.length - 1; i >= 0; i--) {
+        const msg = session.history[i]
+        if (!msg || msg.role !== 'user' || !Array.isArray(msg.content)) continue
+        const found = msg.content.filter(
+          (b): b is Anthropic.ImageBlockParam => (b as { type?: string }).type === 'image'
+        )
+        if (found.length > 0) {
+          images = found
+          break
+        }
+      }
+      if (images.length === 0) {
+        throw new Error('No image attachment found in the conversation.')
+      }
+      const index = Number(input['index'] ?? 0)
+      const image = images[index]
+      if (!image) {
+        throw new Error(
+          `No attachment at index ${index} — the last message with images has ${images.length}.`
+        )
+      }
+      if (image.source.type !== 'base64') {
+        throw new Error('Only base64 image attachments can be saved.')
+      }
+      const asset = assets.importAssetFromBytes({
+        projectId,
+        bytes: Buffer.from(image.source.data, 'base64'),
+        mimeType: image.source.media_type,
+        name: String(input['name']),
+        description: input['description'] ? String(input['description']) : undefined,
+        designId: input['designId'] ? String(input['designId']) : undefined,
+        designSubject: input['designSubject'] ? String(input['designSubject']) : undefined
+      })
+      return {
+        result: JSON.stringify({
+          assetId: asset.id,
+          key: asset.key,
+          kind: asset.kind,
+          designId: asset.designId
+        }),
+        mutatedVideoId: ctx.videoId ?? '',
+        label: `Asset saved · ${asset.name}`
+      }
+    }
+    case 'import_asset_from_url': {
+      const projectId = resolveProjectId(input, ctx)
+      const asset = await assets.importAssetFromUrl(
+        projectId,
+        String(input['url']),
+        input['name'] ? String(input['name']) : undefined,
+        input['description'] ? String(input['description']) : undefined
+      )
+      return {
+        result: JSON.stringify({ assetId: asset.id, key: asset.key, kind: asset.kind }),
+        mutatedVideoId: ctx.videoId ?? '',
+        label: `Asset imported · ${asset.name}`
       }
     }
     default:
@@ -780,12 +964,12 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
       const results: Anthropic.ToolResultBlockParam[] = []
       for (const toolUse of toolUses) {
         try {
-          const { result, mutatedVideoId, label } = await executeTool(
+          const { result, mutatedVideoId, label, item } = await executeTool(
             toolUse.name,
             (toolUse.input ?? {}) as Record<string, unknown>,
             { sessionKey, videoId: isHome ? null : sessionKey }
           )
-          session.items.push({ type: 'tool', name: toolUse.name, label, ok: true })
+          session.items.push(item ?? { type: 'tool', name: toolUse.name, label, ok: true })
           results.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result })
           if (mutatedVideoId !== null) {
             lastMutatedVideoId = mutatedVideoId

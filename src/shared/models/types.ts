@@ -86,6 +86,14 @@ export interface ModelDefinition<TParams = any> {
    * authority. Omit when no reliable rate is known (the UI then shows nothing).
    */
   estimateCredits?(params: TParams): number
+  /**
+   * Declarative use-case tags (kebab-case, e.g. "character-consistency",
+   * "cheap-draft", "photorealism", "first-frame-animation"): surfaced as
+   * badges + recommended sort in the add-node menu, in the assistant's
+   * list_models and in the MCP models docs — the model-recommendation layer
+   * (§4.7). Every model must declare at least one (registry test).
+   */
+  recommendedFor: string[]
   /** Free-form guidance shown in the node params panel and the LLM doc. */
   promptingNotes?: string
   /**

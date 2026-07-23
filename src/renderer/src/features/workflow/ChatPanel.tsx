@@ -1,8 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Eraser, MessageSquare, Paperclip, Send, Wrench, X } from 'lucide-react'
+import {
+  Check,
+  ClipboardList,
+  Eraser,
+  MessageSquare,
+  Paperclip,
+  Send,
+  Wrench,
+  X
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ChatImage, ChatItem } from '@shared/ipc/contracts'
+import type { ChatImage, ChatItem, ChatPlan } from '@shared/ipc/contracts'
+import { Button } from '@renderer/components/ui/Button'
 import { useToast } from '@renderer/components/feedback/Feedback'
 import { ASSISTANT_MODEL_SHORT } from '@renderer/features/settings/AssistantModelSwitcher'
 import { invoke } from '@renderer/lib/ipc'
@@ -163,7 +173,18 @@ export function ChatPanel({
           </p>
         )}
         {chat.data?.items.map((item, i) => (
-          <ChatItemView key={i} item={item} />
+          <ChatItemView
+            key={i}
+            item={item}
+            // Only the latest plan card is actionable — approving a stale plan
+            // out of order would desync the conversation.
+            planActive={i === (chat.data?.items.length ?? 0) - 1 && !busy}
+            onApprovePlan={() => {
+              if (busy || !hasKey) return
+              send.mutate({ text: t('chat.planApproveMessage'), images: [] })
+            }}
+            onRequestPlanChanges={() => setDraft(t('chat.planChangesPrefill'))}
+          />
         ))}
         {busy && (
           <div className="flex items-center gap-2 px-1 text-xs text-neutral-500">
@@ -255,7 +276,28 @@ export function ChatPanel({
   )
 }
 
-function ChatItemView({ item }: { item: ChatItem }): React.JSX.Element {
+function ChatItemView({
+  item,
+  planActive,
+  onApprovePlan,
+  onRequestPlanChanges
+}: {
+  item: ChatItem
+  /** True when this item is the transcript tail — plan buttons enabled. */
+  planActive?: boolean
+  onApprovePlan?: () => void
+  onRequestPlanChanges?: () => void
+}): React.JSX.Element {
+  if (item.type === 'plan') {
+    return (
+      <PlanCard
+        plan={item.plan}
+        active={planActive ?? false}
+        onApprove={onApprovePlan}
+        onRequestChanges={onRequestPlanChanges}
+      />
+    )
+  }
   if (item.type === 'user') {
     return (
       <div className="ml-6 flex flex-col items-end gap-1.5 self-end">
@@ -294,6 +336,80 @@ function ChatItemView({ item }: { item: ChatItem }): React.JSX.Element {
     >
       {item.ok ? <Check className="h-3 w-3" /> : <Wrench className="h-3 w-3" />}
       <span className="truncate">{item.label}</span>
+    </div>
+  )
+}
+
+/**
+ * Structured plan presented by the assistant (§4.7): per-shot model + cost,
+ * grand total, Approve / Request changes posting back as user messages. The
+ * card persists in the transcript like tool chips do; only the latest one is
+ * actionable.
+ */
+function PlanCard({
+  plan,
+  active,
+  onApprove,
+  onRequestChanges
+}: {
+  plan: ChatPlan
+  active: boolean
+  onApprove?: () => void
+  onRequestChanges?: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-accent-soft">
+        <ClipboardList className="h-3.5 w-3.5" />
+        {t('chat.plan.title', { count: plan.shots.length })}
+        {plan.style && (
+          <span className="ml-auto rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-medium">
+            {plan.style}
+          </span>
+        )}
+      </div>
+      <ul className="mt-2 space-y-1.5">
+        {plan.shots.map((shot, i) => (
+          <li key={i} className="rounded-md bg-neutral-900/60 px-2 py-1.5">
+            <div className="flex items-baseline justify-between gap-2 text-[11px]">
+              <span className="min-w-0 flex-1 truncate font-medium text-neutral-100">
+                {shot.label}
+              </span>
+              <span className="flex-shrink-0 font-mono text-[10px] text-neutral-400">
+                {shot.estCredits !== null
+                  ? t('chat.plan.credits', { credits: shot.estCredits })
+                  : '—'}
+              </span>
+            </div>
+            <div className="mt-0.5 text-[10px] leading-snug text-neutral-400">
+              {shot.description}
+            </div>
+            <div className="mt-0.5 flex items-center gap-2 font-mono text-[9px] text-neutral-600">
+              {shot.modelId}
+              {shot.panels && <span>· {t('chat.plan.panels', { panels: shot.panels })}</span>}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {plan.totalCredits !== null && (
+        <div className="mt-2 flex items-baseline justify-between border-t border-neutral-800 pt-1.5 text-[11px]">
+          <span className="font-semibold text-neutral-200">{t('chat.plan.total')}</span>
+          <span className="font-mono font-semibold text-neutral-100">
+            {t('chat.plan.credits', { credits: plan.totalCredits })}
+          </span>
+        </div>
+      )}
+      {active && (
+        <div className="mt-2.5 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onRequestChanges}>
+            {t('chat.plan.requestChanges')}
+          </Button>
+          <Button variant="primary" size="sm" onClick={onApprove}>
+            <Check className="h-3.5 w-3.5" /> {t('chat.plan.approve')}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

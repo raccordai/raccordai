@@ -29,6 +29,7 @@ export const gptImage2I2I: ModelDefinition<Params> = {
   label: 'GPT Image 2 — Image to Image',
   description: 'Edit or transform an input image with a text prompt.',
   kind: 'image',
+  recommendedFor: ['image-editing', 'storyboards'],
   paramsSchema,
   // Indicative per-image rates by resolution — align with https://kie.ai/pricing.
   estimateCredits: (params) => ({ '1K': 10, '2K': 15, '4K': 30 })[params.resolution],

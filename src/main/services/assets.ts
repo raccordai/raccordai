@@ -207,6 +207,61 @@ export async function importAssetFromUrl(
 }
 
 /**
+ * Register raw media bytes as an asset — the path for chat attachments
+ * promoted into the library (§4.7). Optional design markers publish the
+ * asset as a reusable design sheet (validated against the recipe registry,
+ * same rule as promoteGeneration).
+ */
+export function importAssetFromBytes(args: {
+  projectId: string
+  bytes: Uint8Array
+  mimeType: string
+  name: string
+  description?: string
+  designId?: string
+  designSubject?: string
+}): Asset {
+  const kind: Asset['kind'] | null = args.mimeType.startsWith('image/')
+    ? 'image'
+    : args.mimeType.startsWith('video/')
+      ? 'video'
+      : args.mimeType.startsWith('audio/')
+        ? 'audio'
+        : null
+  if (!kind) throw new Error(`Unsupported media type "${args.mimeType}"`)
+
+  const id = randomUUID()
+  const filePath = join(mediaDirFor(args.projectId), `${id}${EXT_BY_MIME[args.mimeType] ?? ''}`)
+  writeFileSync(filePath, args.bytes)
+
+  const designId = args.designId && getDesignRecipe(args.designId) ? args.designId : null
+  const designSubject = designId && args.designSubject?.trim() ? args.designSubject.trim() : null
+  const name = args.name.trim() || 'asset'
+  const row: AssetRow = {
+    id,
+    projectId: args.projectId,
+    key: uniqueKeyFor(args.projectId, name),
+    name,
+    description: args.description?.trim() || null,
+    kind,
+    filePath,
+    sourceUrl: null,
+    mimeType: args.mimeType,
+    size: args.bytes.byteLength,
+    uploadedUrl: null,
+    uploadedAt: null,
+    tags: designId ? normalizeTags([designId]) : [],
+    designId,
+    designSubject,
+    contentHash: createHash('sha256').update(args.bytes).digest('hex'),
+    createdAt: Date.now(),
+    updatedAt: null
+  }
+  getDb().insert(assets).values(row).run()
+  return toAsset(row)
+}
+
+/**
  * Copy a successful generation's media into the asset library as an
  * independent file (so deleting either side never breaks the other).
  * Design nodes carry `params.designId`/`designSubject` markers — promotion

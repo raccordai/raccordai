@@ -72,7 +72,8 @@ Rules:
 
 function modelsIndex(): string {
   const lines = MODELS.map(
-    (m) => `${m.id}  [${m.kind}]  ${m.label} — ${m.description.split('.')[0]}.`
+    (m) =>
+      `${m.id}  [${m.kind}]  ${m.label} — ${m.description.split('.')[0]}. (recommended for: ${m.recommendedFor.join(', ')})`
   )
   return `Available models (details: docs "model:<id>"):\n${lines.join('\n')}\nPlus "studio/asset" — a node that outputs a project asset (params: {"assetId"}).
 
@@ -120,6 +121,7 @@ function modelDetail(id: string): string {
     .join('\n')
   return `${m.label} — id "${m.id}" [${m.kind}]
 ${m.description}
+Recommended for: ${m.recommendedFor.join(', ')}
 
 Edge inputs (edge "input" values targeting this model):
 ${inputs}

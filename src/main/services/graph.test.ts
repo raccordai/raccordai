@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { graphNodeSchema } from '@shared/ipc/contracts'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
 import type { Db } from '../db/client'
-import { assets } from '../db/schema'
+import { inArray } from 'drizzle-orm'
+import { assets, edges } from '../db/schema'
 import { createProject } from './projects'
 import { createVideo, getVideo, setVideoDefaults } from './videos'
 import { undoGraph } from './graphHistory'
@@ -12,6 +13,7 @@ import {
   connectNodes,
   createNode,
   disconnectEdge,
+  reorderEdges,
   exportWorkflow,
   importWorkflow,
   listGraph,
@@ -113,6 +115,98 @@ describe('edges', () => {
     })
     disconnectEdge(edge.id)
     expect(listGraph(videoId).edges).toHaveLength(0)
+  })
+
+  it('reorderEdges changes the createdAt sort order of one handle, undoable in one step', () => {
+    const a = createNode({ videoId, modelId: 'studio/asset', position: { x: 0, y: 0 } })
+    const b = createNode({ videoId, modelId: 'studio/asset', position: { x: 0, y: 0 } })
+    const dst = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    const wire = (sourceNodeId: string) =>
+      connectNodes({
+        videoId,
+        sourceNodeId,
+        sourceHandle: 'output',
+        targetNodeId: dst.id,
+        targetHandle: 'reference_image_urls'
+      })
+    const e1 = wire(a.id)
+    const e2 = wire(b.id)
+
+    const order = () =>
+      listGraph(videoId)
+        .edges.filter((e) => e.targetHandle === 'reference_image_urls')
+        .sort((x, y) => x.createdAt - y.createdAt)
+        .map((e) => e.id)
+    expect(order()).toEqual([e1.id, e2.id])
+
+    reorderEdges({
+      videoId,
+      targetNodeId: dst.id,
+      targetHandle: 'reference_image_urls',
+      edgeIds: [e2.id, e1.id]
+    })
+    expect(order()).toEqual([e2.id, e1.id])
+
+    undoGraph(videoId)
+    expect(order()).toEqual([e1.id, e2.id])
+  })
+
+  it('reorderEdges keeps numbering unambiguous even when edges share a timestamp', () => {
+    const a = createNode({ videoId, modelId: 'studio/asset', position: { x: 0, y: 0 } })
+    const b = createNode({ videoId, modelId: 'studio/asset', position: { x: 0, y: 0 } })
+    const dst = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    const e1 = connectNodes({
+      videoId,
+      sourceNodeId: a.id,
+      sourceHandle: 'output',
+      targetNodeId: dst.id,
+      targetHandle: 'reference_image_urls'
+    })
+    const e2 = connectNodes({
+      videoId,
+      sourceNodeId: b.id,
+      sourceHandle: 'output',
+      targetNodeId: dst.id,
+      targetHandle: 'reference_image_urls'
+    })
+    // Force a tie (both edges can land in the same millisecond in real use).
+    db.update(edges)
+      .set({ createdAt: 1000 })
+      .where(inArray(edges.id, [e1.id, e2.id]))
+      .run()
+
+    reorderEdges({
+      videoId,
+      targetNodeId: dst.id,
+      targetHandle: 'reference_image_urls',
+      edgeIds: [e2.id, e1.id]
+    })
+    const reordered = listGraph(videoId)
+      .edges.sort((x, y) => x.createdAt - y.createdAt)
+      .map((e) => e.id)
+    expect(reordered).toEqual([e2.id, e1.id])
+    const stamps = listGraph(videoId).edges.map((e) => e.createdAt)
+    expect(new Set(stamps).size).toBe(stamps.length)
+  })
+
+  it('reorderEdges rejects an edge list that is not a permutation of the handle', () => {
+    const a = createNode({ videoId, modelId: 'studio/asset', position: { x: 0, y: 0 } })
+    const dst = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    const e1 = connectNodes({
+      videoId,
+      sourceNodeId: a.id,
+      sourceHandle: 'output',
+      targetNodeId: dst.id,
+      targetHandle: 'reference_image_urls'
+    })
+    expect(() =>
+      reorderEdges({
+        videoId,
+        targetNodeId: dst.id,
+        targetHandle: 'reference_image_urls',
+        edgeIds: [e1.id, 'ghost-edge']
+      })
+    ).toThrow(/permutation/)
   })
 
   it('removeNode cascades its edges', () => {

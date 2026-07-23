@@ -32,6 +32,7 @@ export const nanoBanana2Lite: ModelDefinition<Params> = {
   description:
     'Fastest and cheapest Nano Banana — ~4 s generations at 1K, up to 10 input images. Ideal for drafts and quick iterations.',
   kind: 'image',
+  recommendedFor: ['cheap-draft', 'fast-iteration'],
   paramsSchema,
   // Indicative flat per-image rate (1K only) — align with https://kie.ai/pricing (4 credits).
   estimateCredits: () => 4,

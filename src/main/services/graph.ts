@@ -289,6 +289,59 @@ export function connectNodes(args: {
   return edge
 }
 
+/**
+ * Reorder the connections of one input handle (§4.6). Reference numbering
+ * (@Image1, @Image2…) sorts by edge createdAt, so reordering = redistributing
+ * the handle's existing timestamps over the requested order (kept strictly
+ * increasing so ties can never make the numbering ambiguous). One journaled
+ * step — the whole reorder undoes at once.
+ */
+export function reorderEdges(args: {
+  videoId: string
+  targetNodeId: string
+  targetHandle: string
+  edgeIds: string[]
+}): void {
+  const db = getDb()
+  const current = db
+    .select()
+    .from(edges)
+    .where(
+      and(
+        eq(edges.videoId, args.videoId),
+        eq(edges.targetNodeId, args.targetNodeId),
+        eq(edges.targetHandle, args.targetHandle)
+      )
+    )
+    .all()
+    .sort((a, b) => a.createdAt - b.createdAt)
+
+  const currentIds = new Set(current.map((e) => e.id))
+  const requested = new Set(args.edgeIds)
+  if (
+    requested.size !== args.edgeIds.length ||
+    currentIds.size !== requested.size ||
+    ![...requested].every((id) => currentIds.has(id))
+  ) {
+    throw new Error('edgeIds must be a permutation of the handle’s current connections')
+  }
+
+  const timestamps: number[] = []
+  for (const e of current) {
+    const prev = timestamps[timestamps.length - 1]
+    timestamps.push(prev !== undefined && e.createdAt <= prev ? prev + 1 : e.createdAt)
+  }
+
+  withGraphHistory(args.videoId, () =>
+    db.transaction((tx) => {
+      args.edgeIds.forEach((id, i) => {
+        tx.update(edges).set({ createdAt: timestamps[i] }).where(eq(edges.id, id)).run()
+      })
+    })
+  )
+  touchVideo(args.videoId)
+}
+
 export function disconnectEdge(edgeId: string): void {
   const db = getDb()
   const edge = db.select().from(edges).where(eq(edges.id, edgeId)).get()

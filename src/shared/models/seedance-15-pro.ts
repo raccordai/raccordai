@@ -25,6 +25,7 @@ export const seedance15Pro: ModelDefinition<Params> = {
   description:
     'Cinematic video generation (text-to-video or image-to-video with up to 2 frames), up to 1080p with native audio and dialogue.',
   kind: 'video',
+  recommendedFor: ['first-frame-animation', 'dialogue-audio', 'cinematic'],
   paramsSchema,
   // Indicative per-second rates by resolution — align with https://kie.ai/pricing.
   estimateCredits: (params) =>

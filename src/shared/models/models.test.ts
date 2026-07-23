@@ -34,6 +34,13 @@ describe('model registry invariants', () => {
         expect(model.outputs.length).toBeGreaterThan(0)
       })
 
+      it('declares at least one kebab-case recommendedFor tag (§4.7 recommendation layer)', () => {
+        expect(model.recommendedFor.length).toBeGreaterThan(0)
+        for (const tag of model.recommendedFor) {
+          expect(tag).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+        }
+      })
+
       it('estimates a positive, finite credit cost when rates are declared', () => {
         if (!model.estimateCredits) return
         const credits = estimateCreditsFor(model.id, {

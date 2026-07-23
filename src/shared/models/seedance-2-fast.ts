@@ -23,6 +23,7 @@ export const seedance2Fast: ModelDefinition<Params> = {
   description:
     'Video generation driven by @ references: connected images/videos/audio GUIDE identity, style and motion without appearing on screen (unless given a frame role). The model for character sheets, storyboards and style boards.',
   kind: 'video',
+  recommendedFor: ['character-consistency', 'storyboard-driven', 'animation'],
   paramsSchema,
   paramFields: [
     { key: 'prompt', label: 'Prompt', type: 'textarea', defaultValue: '' },

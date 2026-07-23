@@ -50,6 +50,7 @@ export const sunoMusic: ModelDefinition<Params> = {
   description:
     'Generate a music track (with or without vocals) from a text prompt or custom lyrics.',
   kind: 'audio',
+  recommendedFor: ['music', 'soundtrack'],
   provider: 'suno',
   paramsSchema,
   paramFields: [

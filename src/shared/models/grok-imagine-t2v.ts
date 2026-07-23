@@ -22,6 +22,7 @@ export const grokImagineT2V: ModelDefinition<Params> = {
   description:
     'Generate a video from a text prompt alone (Grok Imagine). Native audio, 6-30s clips.',
   kind: 'video',
+  recommendedFor: ['text-to-video', 'native-audio'],
   paramsSchema,
   paramFields: [
     {

@@ -29,6 +29,7 @@ export const grokImagineI2V: ModelDefinition<Params> = {
   description:
     'Animate up to 7 source images with a motion prompt (Grok Imagine). Native audio, 6-30s clips.',
   kind: 'video',
+  recommendedFor: ['first-frame-animation', 'native-audio'],
   paramsSchema,
   paramFields: [
     {

@@ -30,6 +30,21 @@ export interface IncomingConnection {
  * @-aliases (edges are sorted by createdAt), so `@Image2` in the prompt always maps
  * to the same source as the badge shown in the UI.
  */
+/**
+ * Alias per edge id across the whole graph — drives the @ImageN badges on the
+ * canvas edges, guaranteed to match the chips and the prompt numbering (same
+ * incomingConnectionsFor ordering).
+ */
+export function edgeAliases(graph: WorkflowGraph): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const node of graph.nodes) {
+    for (const c of incomingConnectionsFor(node.id, graph)) {
+      if (c.alias) map.set(c.edge.id, c.alias)
+    }
+  }
+  return map
+}
+
 export function incomingConnectionsFor(nodeId: string, graph: WorkflowGraph): IncomingConnection[] {
   const sortedEdges = graph.edges
     .filter((e) => e.targetNodeId === nodeId)

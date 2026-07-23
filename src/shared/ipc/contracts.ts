@@ -201,6 +201,28 @@ export const workflowExportSchema = z.object({
 })
 export type WorkflowExport = z.infer<typeof workflowExportSchema>
 
+/**
+ * A structured production plan presented by the assistant before building or
+ * running (§4.7): per-shot model + estimated cost, rendered as an approval
+ * card in the chat panel.
+ */
+export const chatPlanSchema = z.object({
+  shots: z.array(
+    z.object({
+      label: z.string(),
+      description: z.string(),
+      modelId: z.string(),
+      estCredits: z.number().nullable(),
+      /** Storyboard panels this shot covers (e.g. "1-3"), when relevant. */
+      panels: z.string().optional()
+    })
+  ),
+  /** Style template id or label the plan commits to, when one was chosen. */
+  style: z.string().nullable(),
+  totalCredits: z.number().nullable()
+})
+export type ChatPlan = z.infer<typeof chatPlanSchema>
+
 /** An image attached to a chat message (base64, no data: prefix). */
 export const chatImageSchema = z.object({
   mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
@@ -222,7 +244,8 @@ export const chatItemSchema = z.discriminatedUnion('type', [
     name: z.string(),
     label: z.string(),
     ok: z.boolean()
-  })
+  }),
+  z.object({ type: z.literal('plan'), plan: chatPlanSchema })
 ])
 export type ChatItem = z.infer<typeof chatItemSchema>
 
@@ -327,6 +350,15 @@ export const ipcContracts = {
     input: z.object({ projectId: z.string() }),
     output: z.array(assetWithUrlSchema)
   },
+  /**
+   * Import local media files by absolute path (canvas drag-and-drop — paths
+   * come from the preload's getPathForFile). Unsupported files are skipped;
+   * only the imported assets are returned.
+   */
+  'assets:importFromPaths': {
+    input: z.object({ projectId: z.string(), paths: z.array(z.string()).min(1) }),
+    output: z.array(assetWithUrlSchema)
+  },
   'assets:update': {
     input: z.object({
       assetId: z.string(),
@@ -410,6 +442,21 @@ export const ipcContracts = {
     output: graphEdgeSchema
   },
   'edges:disconnect': { input: z.object({ edgeId: z.string() }), output: z.void() },
+  /**
+   * Reorder the connections of one input handle (§4.6): reference numbering
+   * (@Image1, @Image2…) follows edge creation order, so `edgeIds` — a
+   * permutation of the handle's current connections — becomes the new order.
+   * One journaled (undoable) step.
+   */
+  'edges:reorder': {
+    input: z.object({
+      videoId: z.string(),
+      targetNodeId: z.string(),
+      targetHandle: z.string(),
+      edgeIds: z.array(z.string()).min(1)
+    }),
+    output: z.void()
+  },
 
   'history:state': {
     input: z.object({ videoId: z.string() }),

@@ -36,6 +36,7 @@ export const nanoBanana2: ModelDefinition<Params> = {
   description:
     'Google Gemini 3.1 Flash image — fast generation/editing, up to 14 input images, extreme banner ratios, 1K/2K/4K.',
   kind: 'image',
+  recommendedFor: ['image-editing', 'high-resolution', 'banner-ratios'],
   paramsSchema,
   // Indicative per-image rates by resolution — align with https://kie.ai/pricing
   // (8 credits for 1K, 12 for 2K, 18 for 4K).

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { ipcEvents, isIpcChannel } from '@shared/ipc/contracts'
 
 /**
@@ -21,6 +21,10 @@ const api = {
     const wrapped = (_event: IpcRendererEvent, payload: unknown): void => listener(payload)
     ipcRenderer.on(channel, wrapped)
     return () => ipcRenderer.removeListener(channel, wrapped)
+  },
+  /** Absolute filesystem path of a dropped/picked File (canvas media drop). */
+  getPathForFile(file: File): string {
+    return webUtils.getPathForFile(file)
   }
 }
 

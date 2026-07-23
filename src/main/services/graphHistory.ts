@@ -97,12 +97,18 @@ function restoreSnapshot(videoId: string, snapshot: GraphSnapshot): void {
       }
     }
 
-    // Edges: delete extras, insert missing (edges are immutable rows).
+    // Edges: delete extras, insert missing, update changed rows (reordering a
+    // handle's connections rewrites createdAt — see graph.reorderEdges).
     const extraEdgeIds = currentEdges.filter((e) => !wantEdges.has(e.id)).map((e) => e.id)
     if (extraEdgeIds.length > 0) tx.delete(edges).where(inArray(edges.id, extraEdgeIds)).run()
-    const currentEdgeIds = new Set(currentEdges.map((e) => e.id))
+    const currentEdgeById = new Map(currentEdges.map((e) => [e.id, e]))
     for (const row of snapshot.edges) {
-      if (!currentEdgeIds.has(row.id)) tx.insert(edges).values(row).run()
+      const existing = currentEdgeById.get(row.id)
+      if (!existing) {
+        tx.insert(edges).values(row).run()
+      } else if (JSON.stringify(existing) !== JSON.stringify(row)) {
+        tx.update(edges).set(row).where(eq(edges.id, row.id)).run()
+      }
     }
   })
 }
