@@ -17,6 +17,7 @@ import * as graph from '../services/graph'
 import * as library from '../services/library'
 import * as projects from '../services/projects'
 import { kieGetCredits, kieTestApiKey } from '../services/kie'
+import * as notificationsService from '../services/notifications'
 import * as renderService from '../services/render'
 import * as runEngine from '../services/runEngine'
 import * as settingsService from '../services/settings'
@@ -172,6 +173,10 @@ export function registerIpcHandlers(): void {
   handle('generations:setLastFrame', ({ generationId, jpegBase64 }) =>
     runEngine.setLastFrame(generationId, jpegBase64)
   )
+  handle('generations:queueState', () => runEngine.queueState())
+  handle('notifications:batchSummary', ({ succeeded, failed }) =>
+    notificationsService.notifyBatchSummary(succeeded, failed)
+  )
   handle('generations:estimateCost', ({ nodeId }) => ({
     credits: generationsService.estimateNodeRunCredits(nodeId)
   }))
@@ -196,6 +201,10 @@ export function registerIpcHandlers(): void {
   handle('settings:testKieApiKey', async () => ({ status: await kieTestApiKey() }))
   handle('settings:getOnboardingCompleted', () => settingsService.getOnboardingCompleted())
   handle('settings:setOnboardingCompleted', () => settingsService.setOnboardingCompleted())
+  handle('settings:getNotifyOnCompletion', () => settingsService.getNotifyOnCompletion())
+  handle('settings:setNotifyOnCompletion', ({ enabled }) =>
+    settingsService.setNotifyOnCompletion(enabled)
+  )
   handle('settings:getGenerationConcurrency', () => settingsService.getMaxConcurrentGenerations())
   handle('settings:setGenerationConcurrency', ({ value }) =>
     settingsService.setMaxConcurrentGenerations(value)

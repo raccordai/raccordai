@@ -6,7 +6,11 @@ import { estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes, videos } from '../db/schema'
 import { emitGenerationSettled, onGenerationSettled } from '../bus'
-import { broadcastCreditsChanged, broadcastGenerationsChanged } from '../events'
+import {
+  broadcastCreditsChanged,
+  broadcastGenerationsChanged,
+  broadcastQueueChanged
+} from '../events'
 import { mediaDirFor, mimeTypeFor } from '../media/files'
 import { GenerationQueue, isRetryableGenerationError, withRetry } from './genQueue'
 import {
@@ -38,12 +42,27 @@ const UPLOAD_TTL_MS = 48 * 60 * 60 * 1000
  * In-flight budget control: a slot is held from task submission until the
  * generation settles. The limit is a user setting (default 2).
  */
-const queue = new GenerationQueue(getMaxConcurrentGenerations)
+const queue = new GenerationQueue(getMaxConcurrentGenerations, broadcastQueueChanged)
 onGenerationSettled((event) => {
   queue.release(event.generationId)
   retryCounts.delete(event.generationId)
+  broadcastQueueChanged()
   broadcastCreditsChanged()
 })
+
+/** Queue + retry visibility for the renderer (generations:queueState). */
+export function queueState(): {
+  running: string[]
+  queued: string[]
+  limit: number
+  retrying: Record<string, number>
+} {
+  return {
+    ...queue.snapshot(),
+    limit: getMaxConcurrentGenerations(),
+    retrying: Object.fromEntries(retryCounts)
+  }
+}
 
 // ── Smart retry ───────────────────────────────────────────────────────────────
 // kie failures are often transient (model overload, upstream 5xx): re-submit
@@ -82,6 +101,8 @@ function maybeScheduleRetry(generationId: string, errorMessage: string): boolean
     .where(eq(generations.id, generationId))
     .run()
   broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
+  // The attempt counter is part of the queue-state payload the UI polls.
+  broadcastQueueChanged()
   console.warn(
     `[run-engine] generation ${generationId} failed ("${errorMessage}") — retry ${attempt}/${MAX_GENERATION_RETRIES} in ${GENERATION_RETRY_DELAY_MS / 1000}s`
   )

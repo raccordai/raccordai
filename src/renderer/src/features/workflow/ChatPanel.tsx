@@ -3,6 +3,7 @@ import { Check, Eraser, MessageSquare, Paperclip, Send, Wrench, X } from 'lucide
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ChatImage, ChatItem } from '@shared/ipc/contracts'
+import { useToast } from '@renderer/components/feedback/Feedback'
 import { ASSISTANT_MODEL_SHORT } from '@renderer/features/settings/AssistantModelSwitcher'
 import { invoke } from '@renderer/lib/ipc'
 
@@ -40,6 +41,7 @@ export function ChatPanel({
   onClose: () => void
 }): React.JSX.Element {
   const { t } = useTranslation()
+  const toast = useToast()
   const queryClient = useQueryClient()
   // Seeded from `prefill` so the injected draft survives any remount of the
   // panel during the open+prefill batch; kept until the user sends (consume).
@@ -54,7 +56,7 @@ export function ChatPanel({
     for (const file of Array.from(files)) {
       if (!IMAGE_TYPES.has(file.type)) continue
       if (file.size > MAX_IMAGE_BYTES) {
-        alert(t('chat.imageTooBig', { name: file.name }))
+        toast.warning(t('chat.imageTooBig', { name: file.name }))
         continue
       }
       const dataUrl = await new Promise<string>((resolve, reject) => {

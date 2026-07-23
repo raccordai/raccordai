@@ -2,6 +2,11 @@
   "app": {
     "name": "Raccord"
   },
+  "common": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "close": "Close"
+  },
   "menu": {
     "file": "File",
     "importWorkflow": "Import a workflow (JSON)…",
@@ -161,7 +166,9 @@
       "downloaded": "Version {{version}} ready to install.",
       "up-to-date": "The app is up to date.",
       "error": "Error: {{error}}"
-    }
+    },
+    "notifyOnCompletion": "Completion notifications",
+    "notifyOnCompletionHint": "Show a system notification when a generation finishes while the app is in the background."
   },
   "time": {
     "justNow": "just now",
@@ -250,7 +257,7 @@
     "assistantTitle": "Assistant (chat)",
     "undo": "Undo the last change",
     "redo": "Redo the undone change",
-    "replaceConfirm": "Replace existing nodes? OK = replace, Cancel = merge.",
+    "replaceConfirm": "Replace the existing nodes, or merge the import into the current graph?",
     "deleteNodeConfirm": "Delete this node and all its generations?",
     "estimatedCost": "~{{credits}} credits (estimate)",
     "historyPanel": {
@@ -276,6 +283,32 @@
       "normalize": "Normalizing",
       "concat": "Assembling",
       "mux": "Mixing audio"
+    },
+    "importReplaceBtn": "Replace",
+    "importMergeBtn": "Merge",
+    "replaceModelTitle": "Replace model",
+    "replaceModelConfirm": "Replace the model with “{{label}}”?\n\nConnections are remapped where possible and this node’s existing outputs are cleared.",
+    "deleteNodeNamedConfirm": "Delete node “{{label}}” and all its generations?",
+    "deleteAssetNodeConfirm": "Delete asset node “{{label}}”?",
+    "designFrameAnchorTitle": "Design sheet on a frame anchor",
+    "designFrameAnchorConnect": "Connect anyway",
+    "retry": "Retry",
+    "renderDone": "MP4 exported: {{path}}",
+    "queueBadge": {
+      "queued": "Queued (#{{position}})",
+      "generating": "Generating…",
+      "retrying": "Retry {{attempt}}/{{max}}"
+    },
+    "costModal": {
+      "title": "Confirm generation",
+      "credits": "~{{credits}} cr",
+      "unknownCost": "—",
+      "total": "Estimated total",
+      "balance": "Balance: {{credits}} credits",
+      "overBalance": "over your balance",
+      "dontAskUnder": "Don’t ask again under {{credits}} credits",
+      "confirm_one": "Generate {{count}} node",
+      "confirm_other": "Generate {{count}} nodes"
     }
   },
   "mcp": {
@@ -365,5 +398,11 @@
       "name": "Vertical social ad",
       "desc": "Hook + punchline in 9:16 + energetic track (15s)"
     }
+  },
+  "notifications": {
+    "generationSuccess": "“{{label}}” finished",
+    "generationFailed": "“{{label}}” failed",
+    "batchTitle": "Generations finished",
+    "batchSummary": "{{succeeded}} succeeded, {{failed}} failed"
   }
 }

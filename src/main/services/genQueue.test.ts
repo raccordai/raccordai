@@ -17,7 +17,7 @@ describe('GenerationQueue', () => {
     queue.enqueue('b', task(started, 'b'))
     queue.enqueue('c', task(started, 'c'))
     expect(started).toEqual(['a', 'b'])
-    expect(queue.snapshot()).toEqual({ active: 2, waiting: 1 })
+    expect(queue.snapshot()).toEqual({ running: ['a', 'b'], queued: ['c'] })
   })
 
   it('release frees the slot and starts the next task', () => {
@@ -29,7 +29,7 @@ describe('GenerationQueue', () => {
     queue.release('a')
     expect(started).toEqual(['a', 'b'])
     queue.release('b')
-    expect(queue.snapshot()).toEqual({ active: 0, waiting: 0 })
+    expect(queue.snapshot()).toEqual({ running: [], queued: [] })
   })
 
   it('release cancels a task still waiting in the queue', () => {
@@ -40,7 +40,23 @@ describe('GenerationQueue', () => {
     queue.release('b') // cancelled before it ever ran
     queue.release('a')
     expect(started).toEqual(['a'])
-    expect(queue.snapshot()).toEqual({ active: 0, waiting: 0 })
+    expect(queue.snapshot()).toEqual({ running: [], queued: [] })
+  })
+
+  it('notifies onChange on every transition', () => {
+    let changes = 0
+    const queue = new GenerationQueue(
+      () => 1,
+      () => changes++
+    )
+    const started: string[] = []
+    queue.enqueue('a', task(started, 'a')) // starts immediately
+    queue.enqueue('b', task(started, 'b')) // waits
+    expect(changes).toBe(2)
+    queue.release('a') // frees the slot, b starts
+    expect(changes).toBe(3)
+    queue.adopt('resumed')
+    expect(changes).toBe(4)
   })
 
   it('adopt occupies a slot without running anything', () => {

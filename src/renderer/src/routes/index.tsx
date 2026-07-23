@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { nameMatchesQuery } from '@shared/assets/search'
 import { HOME_CHAT_ID } from '@shared/ipc/contracts'
 import { LibraryCard } from '@renderer/components/LibraryCard'
+import { useConfirm } from '@renderer/components/feedback/Feedback'
 import { Button } from '@renderer/components/ui/Button'
 import { useHeaderActions } from '@renderer/components/menubar/MenuBar'
 import { ChatPanel } from '@renderer/features/workflow/ChatPanel'
@@ -19,6 +20,7 @@ export const Route = createFileRoute('/')({
 /** Home — the project library. */
 function LibraryPage(): React.JSX.Element {
   const { t } = useTranslation()
+  const confirmModal = useConfirm()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [showForm, setShowForm] = useState(false)
@@ -164,9 +166,13 @@ function LibraryPage(): React.JSX.Element {
                   }
                   onRename={(value) => rename.mutate({ id: project.id, name: value })}
                   onDelete={() => {
-                    if (confirm(t('library.deleteConfirm', { name: project.name }))) {
-                      remove.mutate(project.id)
-                    }
+                    void confirmModal({
+                      message: t('library.deleteConfirm', { name: project.name }),
+                      confirmLabel: t('library.delete'),
+                      danger: true
+                    }).then((accepted) => {
+                      if (accepted) remove.mutate(project.id)
+                    })
                   }}
                   renameTitle={t('library.rename')}
                   deleteTitle={t('library.delete')}

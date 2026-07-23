@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { zipSync, type Zippable } from 'fflate'
 import type { GraphNode, RenderProgressPayload } from '@shared/ipc/contracts'
+import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { invoke } from '@renderer/lib/ipc'
 import {
   buildFcpxml,
@@ -16,7 +17,7 @@ import { bestGeneration, collectTimelineClips } from '@shared/timeline'
 import { graphKeys, useIpcMutation, useVideo } from './data'
 
 // Workflow import/export actions, extracted from the toolbar so the app menu
-// bar (Fichier) can drive them. Errors surface via alert() — same convention
+// bar (Fichier) can drive them. Errors surface as toasts — same convention
 // as the editor's run failures.
 
 /** Trigger a browser download — lands in the browser's default download folder (~/Downloads). */
@@ -69,6 +70,8 @@ export interface WorkflowIO {
 
 export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
   const { t } = useTranslation()
+  const toast = useToast()
+  const confirmModal = useConfirm()
   const video = useVideo(videoId).data
   const { mutateAsync: importJson } = useIpcMutation('workflow:import', [
     graphKeys.graph(videoId),
@@ -90,14 +93,18 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
     setImporting(true)
     try {
       const text = await file.text()
-      const replace = confirm(t('editor.replaceConfirm'))
+      const replace = await confirmModal({
+        message: t('editor.replaceConfirm'),
+        confirmLabel: t('editor.importReplaceBtn'),
+        cancelLabel: t('editor.importMergeBtn')
+      })
       await importJson({ videoId, json: text, replace })
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setImporting(false)
     }
-  }, [importJson, t, videoId])
+  }, [importJson, confirmModal, toast, t, videoId])
 
   const exportJsonAction = useCallback(async () => {
     setExporting(true)
@@ -108,11 +115,11 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
       downloadBlob(blob, `workflow-${videoId}.json`)
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setExporting(false)
     }
-  }, [videoId])
+  }, [toast, videoId])
 
   /**
    * Bundle the timeline as an FCPXML + its media into a ZIP. For each clip we
@@ -201,11 +208,11 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
       const zipped = zipSync(entries)
       downloadBlob(new Blob([zipped as BlobPart], { type: 'application/zip' }), `${baseName}.zip`)
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setExportingZip(false)
     }
-  }, [timelineClips, videoId, videoName])
+  }, [timelineClips, toast, videoId, videoName])
 
   /**
    * Plain media export: each timeline clip's video, numbered in timeline order
@@ -249,13 +256,15 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
         new Blob([zipped as BlobPart], { type: 'application/zip' }),
         `${baseName}-clips.zip`
       )
-      if (skipped.length > 0) alert(t('editor.mediaZipSkipped', { clips: skipped.join(', ') }))
+      if (skipped.length > 0) {
+        toast.warning(t('editor.mediaZipSkipped', { clips: skipped.join(', ') }))
+      }
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setExportingMedia(false)
     }
-  }, [t, timelineClips, videoName])
+  }, [t, timelineClips, toast, videoName])
 
   // Live percent/step pushed by main while ffmpeg works.
   useEffect(() => {
@@ -274,18 +283,21 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
     setRenderingMp4(true)
     try {
       const result = await invoke('render:export', { videoId })
-      if (result && result.skipped.length > 0) {
-        alert(t('editor.renderSkipped', { clips: result.skipped.join(', ') }))
+      if (result) {
+        toast.success(t('editor.renderDone', { path: result.path }))
+        if (result.skipped.length > 0) {
+          toast.warning(t('editor.renderSkipped', { clips: result.skipped.join(', ') }))
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      // User-initiated cancellation is not an error worth an alert.
-      if (!message.includes('Render cancelled')) alert(message)
+      // User-initiated cancellation is not an error worth surfacing.
+      if (!message.includes('Render cancelled')) toast.error(message)
     } finally {
       setRenderingMp4(false)
       setRenderProgress(null)
     }
-  }, [t, videoId])
+  }, [t, toast, videoId])
 
   const cancelRenderMp4 = useCallback(() => {
     void invoke('render:cancel', { videoId })

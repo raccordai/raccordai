@@ -31,6 +31,10 @@ async function bootstrap(): Promise<void> {
   window.api.on('event:creditsChanged', () => {
     void queryClient.invalidateQueries({ queryKey: ['kie', 'credits'] })
   })
+  // The run queue moved (enqueue/start/settle/retry) — refresh queue positions.
+  window.api.on('event:queueChanged', () => {
+    void queryClient.invalidateQueries({ queryKey: ['queue'] })
+  })
   // The assistant (main process) mutated the graph — refetch everything it touches.
   window.api.on('event:workflowChanged', () => {
     void queryClient.invalidateQueries({ queryKey: ['graph'] })

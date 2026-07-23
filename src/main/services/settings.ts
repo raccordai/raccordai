@@ -112,6 +112,15 @@ export function setMaxConcurrentGenerations(value: number): void {
   setSetting('maxConcurrentGenerations', concurrencySchema.parse(value))
 }
 
+/** OS notification when a generation settles while the window is unfocused. */
+export function getNotifyOnCompletion(): boolean {
+  return getSetting('notifyOnCompletion') !== false
+}
+
+export function setNotifyOnCompletion(enabled: boolean): void {
+  setSetting('notifyOnCompletion', enabled)
+}
+
 /** Which kie.ai market model powers the embedded assistant. */
 export function getAssistantModel(): AssistantModel {
   const stored = assistantModelSchema.safeParse(getSetting('assistantModel'))

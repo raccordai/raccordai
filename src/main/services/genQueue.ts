@@ -19,13 +19,21 @@ export class GenerationQueue {
   private active = new Set<string>()
   private waiting: QueueItem[] = []
 
-  constructor(private readonly concurrency: () => number) {}
+  /**
+   * `onChange` fires after every state transition (enqueue, adopt, release,
+   * a waiting task starting) — the run engine broadcasts it to the renderer.
+   */
+  constructor(
+    private readonly concurrency: () => number,
+    private readonly onChange?: () => void
+  ) {}
 
   /** Schedules a task; it starts as soon as a slot is free (FIFO). */
   enqueue(id: string, start: () => Promise<void>): void {
     if (this.active.has(id) || this.waiting.some((w) => w.id === id)) return
     this.waiting.push({ id, start })
     this.pump()
+    this.onChange?.()
   }
 
   /**
@@ -34,6 +42,7 @@ export class GenerationQueue {
    */
   adopt(id: string): void {
     this.active.add(id)
+    this.onChange?.()
   }
 
   /** Frees the slot held by `id` (no-op for unknown ids) and starts waiting work. */
@@ -41,10 +50,12 @@ export class GenerationQueue {
     this.active.delete(id)
     this.waiting = this.waiting.filter((w) => w.id !== id)
     this.pump()
+    this.onChange?.()
   }
 
-  snapshot(): { active: number; waiting: number } {
-    return { active: this.active.size, waiting: this.waiting.length }
+  /** Ids in flight and ids still waiting, in start order. */
+  snapshot(): { running: string[]; queued: string[] } {
+    return { running: [...this.active], queued: this.waiting.map((w) => w.id) }
   }
 
   private pump(): void {

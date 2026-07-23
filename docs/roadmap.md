@@ -8,18 +8,16 @@ workflows**. The July 2026 audit (renderer UX, workflow building blocks,
 generation lifecycle) found the capabilities largely in place — templates,
 design recipes, storyboard pre-viz, a full-project assistant, dependency-aware
 runs, undo/redo, gapless timeline, rendered MP4 export — and the remaining
-friction concentrated in two moments of the user journey. The first — **the
-first fifteen minutes** (no onboarding, nothing pushing the user to configure
-the kie.ai key without which the app is inert) — is now addressed by the
-first-run onboarding + template slot form (see "Shipped"). The remaining one:
-
-- **Trust while generating** — queue position, automatic retries and
-  aggregate cost are invisible; errors surface as native `alert()`s.
+friction concentrated in two moments of the user journey. Both are now
+addressed (see "Shipped"): **the first fifteen minutes** by the first-run
+onboarding + template slot form, and **trust while generating** by the
+generation feedback layer (queue/retry visibility, cost preview, OS
+notifications, toasts/modals instead of native `alert()`s).
 
 The assistant currently exists to paper over manual-editor friction. The
 long-term differentiator is to invert that: make the conversational path the
 primary one (§4.7) on top of a manual editor that no longer needs papering
-over (§4.4–4.6).
+over (§4.5–4.6).
 
 ## Shipped
 
@@ -70,6 +68,22 @@ Landed in July 2026 (see CHANGELOG once releases start):
   `src/shared/timeline.ts` and the dead `Timeline.tsx` component was removed
   (§4.9). Verified end-to-end against the kie mock (heterogeneous clips +
   music, cancellation).
+- **Generation feedback layer** (§4.4, July 2026): renderer-wide toast stack +
+  styled confirm modal (`components/feedback/Feedback.tsx`, mounted in
+  `__root.tsx`) — zero native `alert()`/`confirm()` left in the renderer, all
+  replaced call sites i18n'd (fr+en). Queue & retry visibility: `GenerationQueue`
+  snapshot (running/queued ids) + `onChange` broadcast, `generations:queueState`
+  channel + `event:queueChanged`, nodes show "Queued (#N)" / "Generating…" /
+  "Retry K/3" (badge, border and preview states). Completion notifications:
+  `services/notifications.ts` (Electron `Notification` on `generationSettled`
+  when unfocused, localized from the shared i18n resources; click focuses the
+  window and centers the node via `event:focusNode`; batch summary "N succeeded,
+  M failed" through `notifications:batchSummary`), `notifyOnCompletion` setting
+  (default on, toggle in Settings → General). Cost preview: multi-node runs
+  compute the planned node set, show a per-node estimate breakdown + total vs
+  the live kie.ai balance before spending, with "don't ask under X credits"
+  remembered; failed generations get an explicit **Retry** button. The stale
+  `TODO(phase-3)` comments went with it (§4.9).
 
 ## 1. Open-source hygiene — before publishing
 
@@ -107,59 +121,6 @@ SQLite migrations are **additive only**; every user-visible string gets an
 i18next key in `fr/common.json` **and** `en/common.json`; graph mutations go
 through the graph service so `withGraphHistory` journals them; colors through
 the tokens in `styles.css`.
-
-### 4.1–4.3 First-run & onboarding, template slot filling, rendered MP4 export — shipped (see "Shipped"; §4.3 follow-ups folded into §2, §4.4, §4.5)
-
-### 4.4 Generation feedback layer — effort S/M (best ratio of the roadmap)
-
-**Problem.** The engine (`runEngine.ts`, `genQueue.ts`) is sophisticated —
-slot-based queue (limit = `maxConcurrentGenerations`), smart retry
-(`maybeScheduleRetry`, 3×, `isRetryableGenerationError`), startup resume —
-but almost none of it is visible: `pending` renders identically to `running`
-("Generating…"), `queue.snapshot()` is consumed nowhere, retries only leave a
-`console.warn` and a "(after N automatic retries)" suffix on the final error,
-there is no completion notification, and every error/confirmation goes
-through native `alert()`/`confirm()`.
-
-**Spec — four independent sub-items.**
-
-1. **Toast + modal system (S/M)** — one renderer toast stack (island style,
-   token colors, auto-dismiss for info, sticky for errors) and one styled
-   confirm modal. Replace every native call site: node/asset delete and
-   frame-anchor guard in `WorkflowEditor.tsx`, run failures in
-   `runWithDeps`/`handleRunAllVideos`, refresh/cancel in `ModelNode.tsx`,
-   export errors in `useWorkflowIO.ts` (incl. the MP4 render failure and
-   skipped-clips alerts), model-replace confirm. All strings
-   through i18n (several of these are currently hardcoded English — folds in
-   part of §4.9).
-2. **Queue & retry visibility (S)** — new read-only channel
-   `generations:queueState` exposing `queue.snapshot()` (running ids, queued
-   ids in order, limit) + `event:queueChanged` broadcast on
-   enqueue/adopt/release. `ModelNode` renders three distinct states:
-   "Queued (position N)" / "Generating…" / "Retrying (attempt K/3)". Retry
-   state: have `maybeScheduleRetry` broadcast the attempt counter with the
-   generation-changed event (in-memory is fine; persisting a `retry_count`
-   column is optional and additive if we want it to survive restart).
-3. **Completion notifications (S)** — Electron `Notification` from main on
-   `generationSettled` when the window is unfocused, and a summary
-   notification when a run-all batch fully settles (all watched generations
-   of the batch done: "4 succeeded, 1 failed"). Toggle in Settings → General
-   (`notifyOnCompletion`, default on). Clicking focuses the window on the
-   node (reuse HistoryPanel's `focusNode` path).
-4. **Cost preview & budget (S/M)** — `runWithDeps` already topo-resolves the
-   exact node set before running: before a multi-node run or "Generate
-   videos (N)", show a confirm modal with the per-node breakdown
-   (`estimateCreditsFor`), the total, and the current balance (HeaderCredits
-   data), with "don't ask under X credits" remembered. Optional per-project
-   soft budget: `creditWarnThreshold` setting; when
-   `projectCreditsUsage + planned > threshold`, the modal warns. Also add an
-   explicit **Retry** button on failed `GenerationCard`s (today the user
-   must guess that re-clicking ▶ works) — it simply re-runs the node.
-
-**Acceptance.** Zero `alert(`/`confirm(` calls left in the renderer; with
-limit 2 and 4 queued nodes, two show "Queued"; killing the mock mid-run shows
-"Retrying (1/3)" live; a run-all on the mock ends with an OS notification and
-a cost modal was shown before it started.
 
 ### 4.5 Video-level settings & style propagation — effort M
 
@@ -286,18 +247,16 @@ panels?}], style, totalCredits`). The ChatPanel renders it as a card list
 
 ### 4.8 Catalogue & smaller product items
 
-| Proposal                                                                           | Effort  | Why                                                                                                                        |
-| ---------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Grow the model catalogue (Veo, Kling variants, Flux…)                              | S/model | The registry makes adding nearly declarative: one file + one entry in `MODELS`, invariant tests come for free              |
-| Move the remaining hardcoded strings of `NodeParamsPanel` + `ModelNode` to i18next | S       | Node action tooltips, "No output yet", Replace-model dialog are hardcoded English — the canvas is only partially localized |
-| More i18n locales (es, de, ja) through community contributions                     | S       | The i18n infra + parity test makes contributing a locale trivial and safe                                                  |
-| Verify the per-model credit rates against the kie.ai dashboard                     | S       | `estimateCredits` ships with indicative rates flagged in each model file — align them with real billing                    |
+| Proposal                                                                           | Effort  | Why                                                                                                                                      |
+| ---------------------------------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Grow the model catalogue (Veo, Kling variants, Flux…)                              | S/model | The registry makes adding nearly declarative: one file + one entry in `MODELS`, invariant tests come for free                            |
+| Move the remaining hardcoded strings of `NodeParamsPanel` + `ModelNode` to i18next | S       | Node action tooltips, "No output yet", the promote-asset form are hardcoded English — the canvas is only partially localized             |
+| More i18n locales (es, de, ja) through community contributions                     | S       | The i18n infra + parity test makes contributing a locale trivial and safe                                                                |
+| Verify the per-model credit rates against the kie.ai dashboard                     | S       | `estimateCredits` ships with indicative rates flagged in each model file — align them with real billing                                  |
+| Per-project soft budget (`creditWarnThreshold`) in the §4.4 cost modal             | S       | Left out of the shipped feedback layer (optional in the spec): warn when `projectCreditsUsage + planned` exceeds a per-project threshold |
 
 ### 4.9 Cleanups (fold into whichever item touches the file first)
 
-- Remove the stale `TODO(phase-3)` comments in `WorkflowEditor.tsx` — the
-  engine is wired (`generationRuntime.ts` invokes `generations:run`,
-  `generationEngineReady = true`); the comments now actively mislead readers.
 - Undo/redo stacks (`graphHistory.ts`, in-memory, cap 100) and retry budgets
   reset silently on restart — acceptable, but document it in the UI (tooltip
   on the undo button) or persist if it ever bites.
@@ -318,15 +277,12 @@ would remove the last constraint (a running window).
 
 ## Suggested order
 
-1. **Feedback layer** (§4.4) — mostly wiring existing engine state to the
-   UI; lowest effort-to-trust ratio on the list. Also absorbs the render
-   error/skipped `alert()`s left interim by §4.3.
-2. **Video-level settings + style-at-payload** (§4.5) — removes the two main
+1. **Video-level settings + style-at-payload** (§4.5) — removes the two main
    sources of sequence incoherence, and unlocks the §4.3 follow-up (export
    presets per destination).
-3. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
+2. **Graph ergonomics** (§4.6) then **assistant-first** (§4.7) — the
    long-term differentiation.
-4. **OSS hygiene items** (§1) remain the blockers for a good first
+3. **OSS hygiene items** (§1) remain the blockers for a good first
    impression at publication; the **versioned E2E suite** (§2) should land
    before contributors arrive — the §4.3 render E2E driver (session
    scratchpad) is ready to be promoted into it.

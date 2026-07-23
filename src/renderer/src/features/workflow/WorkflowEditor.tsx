@@ -15,7 +15,8 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { GraphEdge, GraphNode } from '@shared/ipc/contracts'
+import type { FocusNodePayload, GraphEdge, GraphNode } from '@shared/ipc/contracts'
+import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { invoke } from '@renderer/lib/ipc'
 import { ModelNode, AssetNode } from './nodes/ModelNode'
 import { NodeParamsPanel } from './NodeParamsPanel'
@@ -40,6 +41,17 @@ const NODE_TYPES = {
   assetNode: AssetNode
 }
 
+/** "Don't ask again under X credits" — remembered locally on this machine. */
+const COST_SKIP_KEY = 'raccord.costConfirmSkipUnder'
+
+interface CostPreviewState {
+  rows: { id: string; label: string; credits: number | null }[]
+  total: number
+  /** Current kie.ai balance, null when unreachable (no key, offline). */
+  balance: number | null
+  resolve: (accepted: boolean) => void
+}
+
 interface Props {
   videoId: string
   projectId: string
@@ -55,6 +67,8 @@ export function WorkflowEditor(props: Props) {
 
 function WorkflowEditorInner({ videoId, projectId }: Props) {
   const { t } = useTranslation()
+  const toast = useToast()
+  const confirmModal = useConfirm()
   const graph = useGraph(videoId).data
   // Needed by the frame-anchor guard: a studio/asset node's design category
   // lives on the asset, not in the node params.
@@ -138,6 +152,8 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   const [timelineCollapsed, setTimelineCollapsed] = useCollapsed()
   /** True while a "generate all videos" batch run is in flight. */
   const [runningAll, setRunningAll] = useState(false)
+  /** Pending cost-preview modal for a multi-node run (null = none). */
+  const [costPreview, setCostPreview] = useState<CostPreviewState | null>(null)
 
   // ── Local React Flow state, seeded from the store and reconciled on change ──
   // Local state lets React Flow update positions instantly during drag.
@@ -263,16 +279,22 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
           }
         }
         if (change.type === 'remove') {
-          if (confirm(t('editor.deleteNodeConfirm'))) {
-            removeNode({ nodeId: change.id })
-          } else {
-            // Re-sync from server since we already applied the local removal.
-            setRfNodes(serverNodes)
-          }
+          void confirmModal({
+            message: t('editor.deleteNodeConfirm'),
+            confirmLabel: t('library.delete'),
+            danger: true
+          }).then((accepted) => {
+            if (accepted) {
+              removeNode({ nodeId: change.id })
+            } else {
+              // Re-sync from server since we already applied the local removal.
+              setRfNodes(serverNodes)
+            }
+          })
         }
       }
     },
-    [updatePosition, removeNode, serverNodes, t]
+    [updatePosition, removeNode, serverNodes, confirmModal, t]
   )
 
   const onEdgesChange = useCallback(
@@ -289,44 +311,47 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
 
   const onConnect = useCallback(
     (connection: Connection) => {
-      if (!connection.source || !connection.target || !connection.targetHandle) return
-      // Design sheets (character/décor/prop) are references: wired to a frame
-      // anchor they would literally appear on screen — warn before connecting.
-      // Same rule for studio/asset nodes carrying a published design sheet.
-      const source = graph?.nodes.find((n) => n.id === connection.source)
-      const sourceParams = source?.params as
-        { designId?: string; assetId?: string } | null | undefined
-      const designId =
-        sourceParams?.designId ??
-        (source?.modelId === 'studio/asset' && sourceParams?.assetId
-          ? (projectAssets?.find((a) => a.id === sourceParams.assetId)?.designId ?? undefined)
-          : undefined)
-      if (designId) {
-        const target = graph?.nodes.find((n) => n.id === connection.target)
-        const handle = target
-          ? getModel(target.modelId)?.inputs.find((h) => h.key === connection.targetHandle)
-          : undefined
-        if (
-          handle?.frameAnchor &&
-          !confirm(
-            t('editor.designFrameAnchorConfirm', {
-              label: source?.label ?? source?.key ?? '',
-              handle: connection.targetHandle
+      const { source: sourceId, target: targetId, targetHandle } = connection
+      if (!sourceId || !targetId || !targetHandle) return
+      void (async () => {
+        // Design sheets (character/décor/prop) are references: wired to a frame
+        // anchor they would literally appear on screen — warn before connecting.
+        // Same rule for studio/asset nodes carrying a published design sheet.
+        const source = graph?.nodes.find((n) => n.id === sourceId)
+        const sourceParams = source?.params as
+          { designId?: string; assetId?: string } | null | undefined
+        const designId =
+          sourceParams?.designId ??
+          (source?.modelId === 'studio/asset' && sourceParams?.assetId
+            ? (projectAssets?.find((a) => a.id === sourceParams.assetId)?.designId ?? undefined)
+            : undefined)
+        if (designId) {
+          const target = graph?.nodes.find((n) => n.id === targetId)
+          const handle = target
+            ? getModel(target.modelId)?.inputs.find((h) => h.key === targetHandle)
+            : undefined
+          if (handle?.frameAnchor) {
+            const accepted = await confirmModal({
+              title: t('editor.designFrameAnchorTitle'),
+              message: t('editor.designFrameAnchorConfirm', {
+                label: source?.label ?? source?.key ?? '',
+                handle: targetHandle
+              }),
+              confirmLabel: t('editor.designFrameAnchorConnect')
             })
-          )
-        ) {
-          return
+            if (!accepted) return
+          }
         }
-      }
-      connectEdge({
-        videoId,
-        sourceNodeId: connection.source,
-        sourceHandle: connection.sourceHandle ?? 'output',
-        targetNodeId: connection.target,
-        targetHandle: connection.targetHandle
-      })
+        connectEdge({
+          videoId,
+          sourceNodeId: sourceId,
+          sourceHandle: connection.sourceHandle ?? 'output',
+          targetNodeId: targetId,
+          targetHandle
+        })
+      })()
     },
-    [connectEdge, videoId, graph, projectAssets, t]
+    [connectEdge, videoId, graph, projectAssets, confirmModal, t]
   )
 
   // ── Recenter the canvas on a single node ────────────────────────────────
@@ -340,6 +365,14 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
     },
     [fitView]
   )
+
+  // Clicking a completion notification (main process) centers the node it's about.
+  useEffect(() => {
+    return window.api.on('event:focusNode', (payload) => {
+      const p = payload as FocusNodePayload
+      if (p.videoId === videoId) focusNode(p.nodeId)
+    })
+  }, [videoId, focusNode])
 
   // ── Auto-layout (Tidy) ──────────────────────────────────────────────────
   const handleTidy = useCallback(
@@ -401,6 +434,47 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
       }
       for (const id of targetNodeIds) visit(id)
 
+      // ── Cost preview ──────────────────────────────────────────────────────
+      // Mirror of the reuse rules below: which nodes will actually claim a new
+      // generation. Multi-node runs get a per-node breakdown + total + balance
+      // before any credit is spent; "don't ask under X" short-circuits it.
+      const planned: GraphNode[] = []
+      for (const id of visited) {
+        const node = nodesById.get(id)
+        if (!node || node.modelId === 'studio/asset') continue
+        const reuse = !targetSet.has(id) || reuseTargets
+        if (reuse && node.selectedGenerationId) {
+          const sel = await invoke('generations:get', {
+            generationId: node.selectedGenerationId
+          })
+          if (sel?.status === 'success') continue
+        }
+        planned.push(node)
+      }
+      if (planned.length >= 2) {
+        const rows = await Promise.all(
+          planned.map(async (node) => ({
+            id: node.id,
+            label: node.label ?? node.key,
+            credits: await invoke('generations:estimateCost', { nodeId: node.id })
+              .then((r) => r.credits)
+              .catch(() => null)
+          }))
+        )
+        const total = rows.reduce((sum, r) => sum + (r.credits ?? 0), 0)
+        const skipUnder = Number(localStorage.getItem(COST_SKIP_KEY) ?? '0')
+        if (!(skipUnder > 0 && total <= skipUnder)) {
+          const balance = await invoke('kie:credits')
+            .then((r) => r.credits)
+            .catch(() => null)
+          const accepted = await new Promise<boolean>((resolve) =>
+            setCostPreview({ rows, total, balance, resolve })
+          )
+          setCostPreview(null)
+          if (!accepted) return
+        }
+      }
+
       // Memoised per-node run: awaits the node's direct parents (in parallel),
       // then runs it once. Memoising means a shared upstream is launched a single
       // time even when several consumers depend on it; running parents via
@@ -429,8 +503,6 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
             if (sel?.status === 'success') return
           }
 
-          // TODO(phase-3): runNode currently throws until the local kie.ai
-          // engine ships — the seam below is where the real run plugs in.
           const { generationId } = await runNode({
             nodeId: id,
             reuseSatisfied: reuse
@@ -450,17 +522,26 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
 
       // Run every target concurrently. One failing branch is surfaced but doesn't
       // abort the others — the rest of the videos still get their shot.
+      let failedCount = 0
       await Promise.all(
         targetNodeIds.map((id) =>
           runWithDeps(id).catch((err) => {
+            failedCount++
             const message = err instanceof Error ? err.message : String(err)
             console.error('Run failed:', message)
-            alert(message)
+            toast.error(message)
           })
         )
       )
+      // One OS summary once the whole batch has settled ("4 succeeded, 1 failed").
+      if (targetNodeIds.length >= 2) {
+        void invoke('notifications:batchSummary', {
+          succeeded: targetNodeIds.length - failedCount,
+          failed: failedCount
+        }).catch(() => {})
+      }
     },
-    [graph]
+    [graph, toast]
   )
 
   const handleRunNode = useCallback((targetNodeId: string) => runNodes([targetNodeId]), [runNodes])
@@ -677,16 +758,94 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
           setCollapsed={setTimelineCollapsed}
         />
       </div>
+
+      {costPreview && <CostPreviewModal preview={costPreview} />}
     </WorkflowGraphContext.Provider>
+  )
+}
+
+/**
+ * Pre-run cost gate for multi-node runs (§4.4): per-node estimate breakdown,
+ * grand total vs the live kie.ai balance, and an opt-out below a remembered
+ * threshold. The promise held in `preview.resolve` gates the actual run.
+ */
+function CostPreviewModal({ preview }: { preview: CostPreviewState }) {
+  const { t } = useTranslation()
+  const [skipUnder, setSkipUnder] = useState(false)
+
+  function settle(accepted: boolean) {
+    if (accepted && skipUnder && preview.total > 0) {
+      localStorage.setItem(COST_SKIP_KEY, String(Math.ceil(preview.total)))
+    }
+    preview.resolve(accepted)
+  }
+
+  const overBalance = preview.balance !== null && preview.total > preview.balance
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+      onClick={() => settle(false)}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="island w-full max-w-md px-5 py-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-sm font-semibold text-neutral-100">{t('editor.costModal.title')}</h2>
+        <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto">
+          {preview.rows.map((row) => (
+            <li key={row.id} className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="min-w-0 flex-1 truncate text-neutral-300">{row.label}</span>
+              <span className="font-mono text-neutral-400">
+                {row.credits !== null
+                  ? t('editor.costModal.credits', { credits: row.credits })
+                  : t('editor.costModal.unknownCost')}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-2 flex items-baseline justify-between border-t border-neutral-800 pt-2 text-xs">
+          <span className="font-semibold text-neutral-200">{t('editor.costModal.total')}</span>
+          <span className="font-mono font-semibold text-neutral-100">
+            {t('editor.costModal.credits', { credits: preview.total })}
+          </span>
+        </div>
+        {preview.balance !== null && (
+          <div
+            className={`mt-1 text-right text-[11px] ${overBalance ? 'text-danger' : 'text-neutral-500'}`}
+          >
+            {t('editor.costModal.balance', { credits: preview.balance.toLocaleString() })}
+            {overBalance && ` — ${t('editor.costModal.overBalance')}`}
+          </div>
+        )}
+        {preview.total > 0 && (
+          <label className="mt-3 flex items-center gap-2 text-[11px] text-neutral-400">
+            <input
+              type="checkbox"
+              checked={skipUnder}
+              onChange={(e) => setSkipUnder(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-neutral-600 bg-neutral-900"
+            />
+            {t('editor.costModal.dontAskUnder', { credits: Math.ceil(preview.total) })}
+          </label>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => settle(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="primary" onClick={() => settle(true)} autoFocus>
+            {t('editor.costModal.confirm', { count: preview.rows.length })}
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }
 
 /**
  * Step-by-step sequencer helper: polls the generation row and resolves as soon
  * as it reaches a terminal state (success/failed). Hard caps at 10 min.
- *
- * TODO(phase-3): this only ever runs once the local generation engine exists;
- * simple 2s polling replaces video-studio's Convex watchQuery subscription.
  */
 async function waitForGeneration(generationId: string): Promise<void> {
   const start = Date.now()

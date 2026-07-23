@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useConfirm } from '@renderer/components/feedback/Feedback'
 import { AssistantModelSwitcher } from '@renderer/features/settings/AssistantModelSwitcher'
 import { LocaleSwitcher } from '@renderer/features/settings/LocaleSwitcher'
 import { invoke } from '@renderer/lib/ipc'
@@ -25,9 +26,12 @@ function SettingsPage(): React.JSX.Element {
       </div>
 
       <Section title={t('settings.general')}>
-        <div className="island flex items-center justify-between px-4 py-3">
-          <LocaleSwitcher />
-          <AssistantModelSwitcher />
+        <div className="flex flex-col gap-2">
+          <div className="island flex items-center justify-between px-4 py-3">
+            <LocaleSwitcher />
+            <AssistantModelSwitcher />
+          </div>
+          <NotificationsToggle />
         </div>
       </Section>
 
@@ -190,8 +194,41 @@ function UpdatesBlock(): React.JSX.Element {
   )
 }
 
+/** Settings → General: OS notification when a generation settles in the background. */
+function NotificationsToggle(): React.JSX.Element {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const enabled = useQuery({
+    queryKey: ['settings', 'notifyOnCompletion'],
+    queryFn: () => invoke('settings:getNotifyOnCompletion')
+  })
+  const setEnabled = useMutation({
+    mutationFn: (value: boolean) => invoke('settings:setNotifyOnCompletion', { enabled: value }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'notifyOnCompletion'] })
+  })
+
+  return (
+    <div className="island flex items-center justify-between gap-4 px-4 py-3">
+      <div>
+        <div className="text-sm text-neutral-200">{t('settings.notifyOnCompletion')}</div>
+        <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">
+          {t('settings.notifyOnCompletionHint')}
+        </p>
+      </div>
+      <input
+        type="checkbox"
+        checked={enabled.data ?? true}
+        onChange={(e) => setEnabled.mutate(e.target.checked)}
+        className="h-4 w-4 flex-shrink-0 rounded border-neutral-600 bg-neutral-900"
+      />
+    </div>
+  )
+}
+
 function BackupBlock(): React.JSX.Element {
   const { t } = useTranslation()
+  const confirmModal = useConfirm()
   const exportBackup = useMutation({
     mutationFn: () => invoke('backup:export')
   })
@@ -216,7 +253,13 @@ function BackupBlock(): React.JSX.Element {
           disabled={busy}
           className="rounded-md bg-neutral-800 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
           onClick={() => {
-            if (confirm(t('settings.backupImportConfirm'))) importBackup.mutate()
+            void confirmModal({
+              message: t('settings.backupImportConfirm'),
+              confirmLabel: t('settings.backupImport'),
+              danger: true
+            }).then((accepted) => {
+              if (accepted) importBackup.mutate()
+            })
           }}
         >
           {importBackup.isPending ? t('settings.backupImporting') : t('settings.backupImport')}

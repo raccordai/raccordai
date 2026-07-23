@@ -4,6 +4,7 @@ import { openDatabase } from './db/client'
 import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocolHandler, registerMediaProtocolPrivileges } from './media/protocol'
 import { startLocalApi } from './server'
+import { initNotifications } from './services/notifications'
 import { resumePolling } from './services/runEngine'
 import { backfillOnboardingCompleted } from './services/settings'
 import { initUpdater } from './services/updater'
@@ -83,6 +84,7 @@ if (!app.requestSingleInstanceLock()) {
       // Existing users (kie key already configured) never see the first-run overlay.
       backfillOnboardingCompleted()
       registerIpcHandlers()
+      initNotifications()
       resumePolling()
       initUpdater() // no-op in dev; packaged builds check the channel feed
 

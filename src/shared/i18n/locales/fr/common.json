@@ -2,6 +2,11 @@
   "app": {
     "name": "Raccord"
   },
+  "common": {
+    "confirm": "Confirmer",
+    "cancel": "Annuler",
+    "close": "Fermer"
+  },
   "menu": {
     "file": "Fichier",
     "importWorkflow": "Importer un workflow (JSON)…",
@@ -161,7 +166,9 @@
       "downloaded": "Version {{version}} prête à installer.",
       "up-to-date": "L'application est à jour.",
       "error": "Erreur : {{error}}"
-    }
+    },
+    "notifyOnCompletion": "Notifications de fin",
+    "notifyOnCompletionHint": "Afficher une notification système quand une génération se termine pendant que l’app est en arrière-plan."
   },
   "time": {
     "justNow": "à l'instant",
@@ -250,7 +257,7 @@
     "assistantTitle": "Assistant (chat)",
     "undo": "Annuler la dernière modification",
     "redo": "Rétablir la modification annulée",
-    "replaceConfirm": "Remplacer les nœuds existants ? OK = remplacer, Annuler = fusionner.",
+    "replaceConfirm": "Remplacer les nœuds existants, ou fusionner l’import dans le graphe actuel ?",
     "deleteNodeConfirm": "Supprimer ce nœud et toutes ses générations ?",
     "estimatedCost": "~{{credits}} crédits (estimation)",
     "historyPanel": {
@@ -276,6 +283,32 @@
       "normalize": "Normalisation",
       "concat": "Assemblage",
       "mux": "Mixage audio"
+    },
+    "importReplaceBtn": "Remplacer",
+    "importMergeBtn": "Fusionner",
+    "replaceModelTitle": "Remplacer le modèle",
+    "replaceModelConfirm": "Remplacer le modèle par « {{label}} » ?\n\nLes connexions sont réadaptées quand c’est possible et les sorties existantes de ce nœud sont effacées.",
+    "deleteNodeNamedConfirm": "Supprimer le nœud « {{label}} » et toutes ses générations ?",
+    "deleteAssetNodeConfirm": "Supprimer le nœud d’asset « {{label}} » ?",
+    "designFrameAnchorTitle": "Planche de design sur une ancre d’image",
+    "designFrameAnchorConnect": "Connecter quand même",
+    "retry": "Relancer",
+    "renderDone": "MP4 exporté : {{path}}",
+    "queueBadge": {
+      "queued": "En file (n°{{position}})",
+      "generating": "Génération…",
+      "retrying": "Essai {{attempt}}/{{max}}"
+    },
+    "costModal": {
+      "title": "Confirmer la génération",
+      "credits": "~{{credits}} cr",
+      "unknownCost": "—",
+      "total": "Total estimé",
+      "balance": "Solde : {{credits}} crédits",
+      "overBalance": "au-delà de votre solde",
+      "dontAskUnder": "Ne plus demander sous {{credits}} crédits",
+      "confirm_one": "Générer {{count}} nœud",
+      "confirm_other": "Générer {{count}} nœuds"
     }
   },
   "mcp": {
@@ -365,5 +398,11 @@
       "name": "Pub verticale 9:16",
       "desc": "Hook + punchline en 9:16 + musique énergique (15 s)"
     }
+  },
+  "notifications": {
+    "generationSuccess": "« {{label}} » terminé",
+    "generationFailed": "« {{label}} » en échec",
+    "batchTitle": "Générations terminées",
+    "batchSummary": "{{succeeded}} réussie(s), {{failed}} en échec"
   }
 }

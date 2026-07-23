@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Palette,
   Play,
+  RefreshCw,
   Sparkles,
   Trash2,
   X
@@ -23,6 +24,7 @@ import { Button } from '@renderer/components/ui/Button'
 import { Lightbox } from '@renderer/components/Lightbox'
 import { VideoThumb } from '@renderer/components/VideoThumb'
 import { Label, Select, TextArea, TextField } from '@renderer/components/ui/Input'
+import { useConfirm } from '@renderer/components/feedback/Feedback'
 import { incomingConnectionsFor, useWorkflowGraph } from './workflowContext'
 import { downloadMedia } from '@renderer/lib/downloadMedia'
 import { invoke } from '@renderer/lib/ipc'
@@ -44,10 +46,16 @@ interface Props {
 
 export function NodeParamsPanel({ node, projectId, onClose, onRun, onAskAssistant }: Props) {
   const { t } = useTranslation()
+  const confirmModal = useConfirm()
   const removeNode = useIpcMutation('nodes:remove', [graphKeys.graph(node.videoId)])
 
   async function handleDelete() {
-    if (!confirm(t('editor.deleteNodeConfirm'))) return
+    const accepted = await confirmModal({
+      message: t('editor.deleteNodeConfirm'),
+      confirmLabel: t('library.delete'),
+      danger: true
+    })
+    if (!accepted) return
     await removeNode.mutateAsync({ nodeId: node.id })
     onClose()
   }
@@ -602,6 +610,7 @@ function ModelNodeEditor({
                 defaultAssetName={node.label ?? model.label}
                 nodeLabel={node.label ?? model.label}
                 onAskAssistant={onAskAssistant}
+                onRetry={isRunning ? undefined : onRun}
               />
             ))}
           </ul>
@@ -776,7 +785,8 @@ function GenerationCard({
   onUseThis,
   defaultAssetName,
   nodeLabel,
-  onAskAssistant
+  onAskAssistant,
+  onRetry
 }: {
   generation: GenRow
   model: ModelDefinition
@@ -785,6 +795,8 @@ function GenerationCard({
   defaultAssetName: string
   nodeLabel: string
   onAskAssistant?: (text: string) => void
+  /** Re-runs the node — offered on failed generations (absent while one runs). */
+  onRetry?: () => void
 }) {
   const { t } = useTranslation()
   const [saving, setSaving] = useState(false)
@@ -858,21 +870,31 @@ function GenerationCard({
         ) : g.status === 'failed' ? (
           <div className="p-3">
             <div className="text-xs text-danger">Failed: {g.errorMessage ?? 'unknown error'}</div>
-            {onAskAssistant && (
-              <button
-                onClick={() =>
-                  onAskAssistant(
-                    t('chat.fixPromptPrefill', {
-                      label: nodeLabel,
-                      error: g.errorMessage ?? 'unknown error'
-                    })
-                  )
-                }
-                className="mt-2 flex items-center gap-1.5 rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-accent-soft hover:bg-accent/20"
-              >
-                <MessageSquare className="h-3 w-3" /> {t('editor.fixWithAssistant')}
-              </button>
-            )}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {onRetry && (
+                <button
+                  onClick={onRetry}
+                  className="flex items-center gap-1.5 rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-accent-soft hover:bg-accent/20"
+                >
+                  <RefreshCw className="h-3 w-3" /> {t('editor.retry')}
+                </button>
+              )}
+              {onAskAssistant && (
+                <button
+                  onClick={() =>
+                    onAskAssistant(
+                      t('chat.fixPromptPrefill', {
+                        label: nodeLabel,
+                        error: g.errorMessage ?? 'unknown error'
+                      })
+                    )
+                  }
+                  className="flex items-center gap-1.5 rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-accent-soft hover:bg-accent/20"
+                >
+                  <MessageSquare className="h-3 w-3" /> {t('editor.fixWithAssistant')}
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="p-3 text-xs text-neutral-500">Pending…</div>

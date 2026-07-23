@@ -4,6 +4,7 @@ import {
   Play,
   AlertCircle,
   CheckCircle2,
+  Clock,
   RefreshCw,
   Replace,
   Trash2,
@@ -11,12 +12,36 @@ import {
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { GraphNode } from '@shared/ipc/contracts'
+import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { VideoThumb } from '@renderer/components/VideoThumb'
 import { MODELS, getModel, type ModelDefinition } from '@shared/models'
 import { incomingConnectionsFor, useWorkflowGraph } from '../workflowContext'
-import { useAsset, useIpcMutation, useNodeGenerations, graphKeys } from '../data'
+import {
+  useAsset,
+  useIpcMutation,
+  useNodeGenerations,
+  useQueueState,
+  graphKeys,
+  runStateFor,
+  type RunState
+} from '../data'
 import { refreshStatus, cancelGeneration } from '../generationRuntime'
+
+/** Matches MAX_GENERATION_RETRIES in runEngine.ts — display only. */
+const MAX_RETRIES = 3
+
+/** Badge/status label for an in-flight generation ("Queued (#2)", "Retry 1/3"…). */
+function useRunStateLabel(): (state: RunState) => string {
+  const { t } = useTranslation()
+  return (state: RunState) =>
+    state.kind === 'queued'
+      ? t('editor.queueBadge.queued', { position: state.position })
+      : state.kind === 'retrying'
+        ? t('editor.queueBadge.retrying', { attempt: state.attempt, max: MAX_RETRIES })
+        : t('editor.queueBadge.generating')
+}
 
 export type ModelNodeData = {
   node: GraphNode
@@ -33,6 +58,8 @@ export type ModelRFNode = RFNode<ModelNodeData, 'modelNode'>
  * remaps connections and clears stale outputs — see nodes.replaceModel.
  */
 function ReplaceModelMenu({ node, model }: { node: GraphNode; model: ModelDefinition }) {
+  const { t } = useTranslation()
+  const confirmModal = useConfirm()
   const [open, setOpen] = useState(false)
   const replaceModel = useIpcMutation('nodes:replaceModel', [
     graphKeys.graph(node.videoId),
@@ -47,12 +74,11 @@ function ReplaceModelMenu({ node, model }: { node: GraphNode; model: ModelDefini
   async function choose(e: MouseEvent, modelId: string) {
     e.stopPropagation()
     setOpen(false)
-    if (
-      confirm(
-        `Replace model with "${getModel(modelId)?.label ?? modelId}"?\n\n` +
-          'Connections are remapped where possible and this node’s existing outputs are cleared.'
-      )
-    ) {
+    const accepted = await confirmModal({
+      title: t('editor.replaceModelTitle'),
+      message: t('editor.replaceModelConfirm', { label: getModel(modelId)?.label ?? modelId })
+    })
+    if (accepted) {
       await replaceModel.mutateAsync({ nodeId: node.id, modelId })
     }
   }
@@ -103,6 +129,10 @@ function ReplaceModelMenu({ node, model }: { node: GraphNode; model: ModelDefini
 }
 
 export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
+  const { t } = useTranslation()
+  const toast = useToast()
+  const confirmModal = useConfirm()
+  const runStateLabel = useRunStateLabel()
   const node = data.node
   const model = useMemo(() => getModel(node.modelId), [node.modelId])
   const removeNode = useIpcMutation('nodes:remove', [graphKeys.graph(node.videoId)])
@@ -112,9 +142,12 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
   // Always subscribe — we need to know about `running` generations even before
   // the node has any selected output (i.e. on its very first run).
   const generations = useNodeGenerations(node.id).data
+  const queue = useQueueState().data
 
   const latest = generations?.[0]
-  const isRunning = !!generations?.some((g) => g.status === 'running')
+  const inFlight = generations?.find((g) => g.status === 'running' || g.status === 'pending')
+  const runState = runStateFor(inFlight, queue)
+  const isInFlight = runState !== null
 
   // Group connections by handle for display alongside each input row.
   const connectionsByHandle = useMemo(() => {
@@ -138,7 +171,7 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
     try {
       await refreshStatus({ nodeId: node.id })
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setRefreshing(false)
     }
@@ -149,17 +182,20 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
     try {
       await cancelGeneration({ nodeId: node.id })
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     }
   }
 
   async function handleDelete(e: MouseEvent) {
     e.stopPropagation()
-    if (
-      confirm(
-        `Delete node "${node.label ?? model?.label ?? node.modelId}" and all its generations?`
-      )
-    ) {
+    const accepted = await confirmModal({
+      message: t('editor.deleteNodeNamedConfirm', {
+        label: node.label ?? model?.label ?? node.modelId
+      }),
+      confirmLabel: t('library.delete'),
+      danger: true
+    })
+    if (accepted) {
       await removeNode.mutateAsync({ nodeId: node.id })
     }
   }
@@ -190,8 +226,10 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
     ? generations?.find((g) => g.id === data.node.selectedGenerationId)
     : latest
 
-  const borderClass = isRunning
-    ? 'generating-border border-warning/60 shadow-warning/20'
+  const borderClass = runState
+    ? runState.kind === 'queued'
+      ? 'border-accent-soft/60'
+      : 'generating-border border-warning/60 shadow-warning/20'
     : selected
       ? 'border-accent'
       : kindColor
@@ -208,9 +246,20 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
             <span className={`text-[10px] font-semibold tracking-widest ${kindLabelColor}`}>
               {kindLabel}
             </span>
-            {isRunning && (
-              <span className="flex items-center gap-1 rounded bg-warning/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-warning ring-1 ring-warning/40">
-                <Loader2 className="h-2.5 w-2.5 animate-spin" /> Generating
+            {runState && (
+              <span
+                className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ring-1 ${
+                  runState.kind === 'queued'
+                    ? 'bg-accent-soft/15 text-accent-soft ring-accent-soft/40'
+                    : 'bg-warning/20 text-warning ring-warning/40'
+                }`}
+              >
+                {runState.kind === 'queued' ? (
+                  <Clock className="h-2.5 w-2.5" />
+                ) : (
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                )}{' '}
+                {runStateLabel(runState)}
               </span>
             )}
           </div>
@@ -222,16 +271,18 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {isRunning && (
+          {runState && (
             <>
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition hover:bg-warning/10 hover:text-warning disabled:opacity-50"
-                title="Check status now (queries kie.ai directly, in case the callback was dropped)"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              </button>
+              {runState.kind === 'generating' && (
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition hover:bg-warning/10 hover:text-warning disabled:opacity-50"
+                  title="Check status now (queries kie.ai directly, in case the callback was dropped)"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                </button>
+              )}
               <button
                 onClick={handleCancel}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition hover:bg-neutral-800 hover:text-danger"
@@ -251,11 +302,11 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
           </button>
           <button
             onClick={handleRun}
-            disabled={isRunning}
+            disabled={isInFlight}
             className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-neutral-900 shadow hover:bg-accent-hover disabled:opacity-50"
             title="Run node (auto-runs any missing upstream dependencies first)"
           >
-            {isRunning ? (
+            {isInFlight ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <Play className="h-3.5 w-3.5" />
@@ -318,9 +369,18 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
         {!currentGen && (
           <div className="text-xs text-neutral-600 italic">No output yet — click ▶ to run.</div>
         )}
-        {currentGen?.status === 'running' && (
-          <div className="flex items-center gap-2 text-xs text-warning">
-            <Loader2 className="h-3 w-3 animate-spin" /> Generating…
+        {(currentGen?.status === 'running' || currentGen?.status === 'pending') && runState && (
+          <div
+            className={`flex items-center gap-2 text-xs ${
+              runState.kind === 'queued' ? 'text-accent-soft' : 'text-warning'
+            }`}
+          >
+            {runState.kind === 'queued' ? (
+              <Clock className="h-3 w-3" />
+            ) : (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            )}{' '}
+            {runStateLabel(runState)}
           </div>
         )}
         {currentGen?.status === 'failed' && (
@@ -416,6 +476,8 @@ export type AssetNodeData = {
 export type AssetRFNode = RFNode<AssetNodeData, 'assetNode'>
 
 export function AssetNode({ data, selected }: NodeProps<AssetRFNode>) {
+  const { t } = useTranslation()
+  const confirmModal = useConfirm()
   const assetId = (data.node.params as { assetId?: string } | null | undefined)?.assetId
   const asset = useAsset(assetId ?? null).data
   const assetMeta = asset ?? undefined
@@ -423,7 +485,14 @@ export function AssetNode({ data, selected }: NodeProps<AssetRFNode>) {
 
   async function handleDelete(e: MouseEvent) {
     e.stopPropagation()
-    if (confirm(`Delete asset node "${data.node.label ?? assetMeta?.name ?? 'Asset'}"?`)) {
+    const accepted = await confirmModal({
+      message: t('editor.deleteAssetNodeConfirm', {
+        label: data.node.label ?? assetMeta?.name ?? 'Asset'
+      }),
+      confirmLabel: t('library.delete'),
+      danger: true
+    })
+    if (accepted) {
       await removeNode.mutateAsync({ nodeId: data.node.id })
     }
   }

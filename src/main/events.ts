@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import type { RenderProgressPayload } from '@shared/ipc/contracts'
+import type { FocusNodePayload, RenderProgressPayload } from '@shared/ipc/contracts'
 
 /**
  * Main→renderer push events. The desktop replacement for Convex's reactive
@@ -42,5 +42,19 @@ export function broadcastChatUpdate(videoId: string): void {
 export function broadcastRenderProgress(payload: RenderProgressPayload): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:renderProgress', payload)
+  }
+}
+
+/** The run queue moved (enqueue/start/settle/retry) — refetch generations:queueState. */
+export function broadcastQueueChanged(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:queueChanged', {})
+  }
+}
+
+/** Ask the editor to center a node (completion notification click). */
+export function broadcastFocusNode(payload: FocusNodePayload): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:focusNode', payload)
   }
 }

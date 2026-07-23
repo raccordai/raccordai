@@ -6,7 +6,8 @@ import type {
   GraphNode,
   IpcChannel,
   IpcInput,
-  IpcOutput
+  IpcOutput,
+  QueueState
 } from '@shared/ipc/contracts'
 import { invoke } from '@renderer/lib/ipc'
 
@@ -65,6 +66,37 @@ export function useGenerationHistory(videoId: string) {
     queryKey: graphKeys.history(videoId),
     queryFn: () => invoke('generations:historyForVideo', { videoId })
   })
+}
+
+/** Run-queue positions + retry attempts — refreshed by event:queueChanged. */
+export function useQueueState(): UseQueryResult<QueueState> {
+  return useQuery({
+    queryKey: ['queue', 'state'],
+    queryFn: () => invoke('generations:queueState')
+  })
+}
+
+/** What an in-flight generation is actually doing — drives the node badges. */
+export type RunState =
+  | { kind: 'queued'; position: number }
+  | { kind: 'retrying'; attempt: number }
+  | { kind: 'generating' }
+
+export function runStateFor(
+  generation: Pick<Generation, 'id' | 'status'> | undefined,
+  queue: QueueState | undefined
+): RunState | null {
+  if (!generation || (generation.status !== 'pending' && generation.status !== 'running')) {
+    return null
+  }
+  if (generation.status === 'pending' && queue) {
+    const attempt = queue.retrying[generation.id]
+    if (attempt) return { kind: 'retrying', attempt }
+    const position = queue.queued.indexOf(generation.id)
+    if (position >= 0) return { kind: 'queued', position: position + 1 }
+  }
+  // 'running', or 'pending' mid-submission (slot already acquired).
+  return { kind: 'generating' }
 }
 
 /** Pass null to skip (the Convex 'skip' sentinel equivalent). */

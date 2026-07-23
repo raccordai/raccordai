@@ -222,6 +222,19 @@ export const chatStateSchema = z.object({
 })
 export type ChatState = z.infer<typeof chatStateSchema>
 
+/**
+ * Live view of the generation queue (ids are generation ids). `queued` is in
+ * start order — a node's queue position is its index + 1. `retrying` maps a
+ * generation to its current automatic-retry attempt (1-based, max 3).
+ */
+export const queueStateSchema = z.object({
+  running: z.array(z.string()),
+  queued: z.array(z.string()),
+  limit: z.number().int().min(1),
+  retrying: z.record(z.string(), z.number())
+})
+export type QueueState = z.infer<typeof queueStateSchema>
+
 export const ipcContracts = {
   'app:getInfo': { input: z.void(), output: appInfoSchema },
   'settings:getLocale': { input: z.void(), output: localeSchema },
@@ -436,6 +449,13 @@ export const ipcContracts = {
     input: z.object({ generationId: z.string(), jpegBase64: z.string() }),
     output: z.void()
   },
+  /** Read-only snapshot of the run queue — pushed fresh via event:queueChanged. */
+  'generations:queueState': { input: z.void(), output: queueStateSchema },
+  /** OS notification summarizing a finished batch run ("4 succeeded, 1 failed"). */
+  'notifications:batchSummary': {
+    input: z.object({ succeeded: z.number().int().min(0), failed: z.number().int().min(0) }),
+    output: z.void()
+  },
   /** Indicative credit cost of running this node now (null = no rates declared). */
   'generations:estimateCost': {
     input: z.object({ nodeId: z.string() }),
@@ -492,6 +512,11 @@ export const ipcContracts = {
   },
   'settings:getOnboardingCompleted': { input: z.void(), output: z.boolean() },
   'settings:setOnboardingCompleted': { input: z.void(), output: z.void() },
+  'settings:getNotifyOnCompletion': { input: z.void(), output: z.boolean() },
+  'settings:setNotifyOnCompletion': {
+    input: z.object({ enabled: z.boolean() }),
+    output: z.void()
+  },
   'settings:getAssistantModel': { input: z.void(), output: assistantModelSchema },
   'settings:setAssistantModel': {
     input: z.object({ model: assistantModelSchema }),
@@ -564,11 +589,19 @@ export const ipcEvents = [
   'event:workflowChanged',
   'event:chatUpdate',
   'event:creditsChanged',
-  'event:renderProgress'
+  'event:renderProgress',
+  'event:queueChanged',
+  'event:focusNode'
 ] as const
 export type IpcEvent = (typeof ipcEvents)[number]
 
 export interface GenerationsChangedPayload {
+  videoId: string
+  nodeId: string
+}
+
+/** Clicking a completion notification asks the editor to center this node. */
+export interface FocusNodePayload {
   videoId: string
   nodeId: string
 }

@@ -12,6 +12,7 @@ import {
 } from '@shared/templates/registry'
 import { AssetCard } from '@renderer/components/AssetCard'
 import { LibraryCard } from '@renderer/components/LibraryCard'
+import { useConfirm } from '@renderer/components/feedback/Feedback'
 import { useProject } from '@renderer/features/workflow/data'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
@@ -32,6 +33,7 @@ function ProjectRoute(): React.JSX.Element {
 function VideosPage(): React.JSX.Element {
   const { projectId } = Route.useParams()
   const { t } = useTranslation()
+  const confirmModal = useConfirm()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<'videos' | 'assets'>('videos')
@@ -442,7 +444,12 @@ function VideosPage(): React.JSX.Element {
                                 videos: refs.map((r) => r.videoName).join(', ')
                               })
                             : t('assetsPage.deleteConfirm', { name: asset.name })
-                        if (confirm(message)) removeAsset.mutate(asset.id)
+                        const accepted = await confirmModal({
+                          message,
+                          confirmLabel: t('library.delete'),
+                          danger: true
+                        })
+                        if (accepted) removeAsset.mutate(asset.id)
                       })()
                     }}
                   />
@@ -496,9 +503,13 @@ function VideosPage(): React.JSX.Element {
                   }
                   onRename={(value) => renameVideo.mutate({ videoId: video.id, name: value })}
                   onDelete={() => {
-                    if (confirm(t('videosPage.deleteConfirm', { name: video.name }))) {
-                      removeVideo.mutate(video.id)
-                    }
+                    void confirmModal({
+                      message: t('videosPage.deleteConfirm', { name: video.name }),
+                      confirmLabel: t('library.delete'),
+                      danger: true
+                    }).then((accepted) => {
+                      if (accepted) removeVideo.mutate(video.id)
+                    })
                   }}
                   renameTitle={t('library.rename')}
                   deleteTitle={t('library.delete')}
