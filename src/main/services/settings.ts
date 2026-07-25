@@ -5,8 +5,10 @@ import { z } from 'zod'
 import { DEFAULT_LOCAL_API_PORT } from '@shared/config'
 import {
   assistantModelSchema,
+  assistantRunApprovalSchema,
   localeSchema,
   type AssistantModel,
+  type AssistantRunApproval,
   type Locale
 } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
@@ -129,6 +131,22 @@ export function getAssistantModel(): AssistantModel {
 
 export function setAssistantModel(model: AssistantModel): void {
   setSetting('assistantModel', assistantModelSchema.parse(model))
+}
+
+/**
+ * Whether the assistant must ask before running anything that costs credits
+ * (run_node, run_batch, finalize_video, review_generation). Defaults to 'ask':
+ * the user validates a plan, then still decides when credits are actually
+ * spent. 'auto' restores the previous behaviour (the assistant launches runs on
+ * its own). Enforced in chat.ts through `approvalGate`.
+ */
+export function getAssistantRunApproval(): AssistantRunApproval {
+  const stored = assistantRunApprovalSchema.safeParse(getSetting('assistantRunApproval'))
+  return stored.success ? stored.data : 'ask'
+}
+
+export function setAssistantRunApproval(mode: AssistantRunApproval): void {
+  setSetting('assistantRunApproval', assistantRunApprovalSchema.parse(mode))
 }
 
 const updateChannelSchema = z.enum(['stable', 'beta'])

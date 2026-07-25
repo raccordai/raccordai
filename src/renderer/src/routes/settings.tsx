@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useConfirm } from '@renderer/components/feedback/Feedback'
 import { AssistantModelSwitcher } from '@renderer/features/settings/AssistantModelSwitcher'
+import { AssistantRunApprovalSwitcher } from '@renderer/features/settings/AssistantRunApprovalSwitcher'
 import { LocaleSwitcher } from '@renderer/features/settings/LocaleSwitcher'
 import { invoke } from '@renderer/lib/ipc'
 
@@ -30,6 +31,10 @@ function SettingsPage(): React.JSX.Element {
           <div className="island flex items-center justify-between px-4 py-3">
             <LocaleSwitcher />
             <AssistantModelSwitcher />
+          </div>
+          <div className="island flex items-center justify-between px-4 py-3">
+            <p className="text-xs text-neutral-500">{t('settings.assistantRunApprovalHint')}</p>
+            <AssistantRunApprovalSwitcher />
           </div>
           <NotificationsToggle />
         </div>

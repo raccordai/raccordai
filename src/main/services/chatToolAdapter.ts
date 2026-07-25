@@ -31,6 +31,18 @@ const CONFIRM_PROPERTY = {
     'Destructive action — omit on the first call (the user gets an approval card); set true ONLY after the user approved.'
 }
 
+/**
+ * Same flag for spending tools. Always declared, never conditioned on the
+ * current setting: the session's tool list is built once at module load, so a
+ * schema that depended on the setting would need an app restart to change.
+ * `approvalGate` is what actually decides, per call.
+ */
+const SPENDING_CONFIRM_PROPERTY = {
+  type: 'boolean',
+  description:
+    'Costs credits — when the app requires approval, omit on the first call (the user gets a card showing the estimated cost) and set true ONLY after they approved.'
+}
+
 function withoutProperty(schema: JsonObjectSchema, property: string): JsonObjectSchema {
   const { [property]: _dropped, ...properties } = schema.properties ?? {}
   return {
@@ -52,10 +64,13 @@ export function toAnthropicTools(tools: AgentTool[], bound: boolean): Anthropic.
       if (tool.scope === 'video') schema = withoutProperty(schema, 'videoId')
       if (tool.scope === 'project') schema = withoutProperty(schema, 'projectId')
     }
-    if (tool.risk === 'destructive') {
+    if (tool.risk === 'destructive' || tool.risk === 'spending') {
       schema = {
         ...schema,
-        properties: { ...(schema.properties ?? {}), confirm: CONFIRM_PROPERTY }
+        properties: {
+          ...(schema.properties ?? {}),
+          confirm: tool.risk === 'destructive' ? CONFIRM_PROPERTY : SPENDING_CONFIRM_PROPERTY
+        }
       }
     }
     return {
@@ -83,17 +98,32 @@ export function injectBindingIds(
   return injected
 }
 
+/** What the caller currently requires approval for (read per call, never cached). */
+export interface ApprovalPolicy {
+  /** true when the user asked to approve every run that costs credits. */
+  requireSpendingApproval: boolean
+}
+
 /**
- * Destructive-approval protocol. Returns `approved: false` when the call must
- * NOT execute (an action card is shown instead); otherwise the args with the
- * chat-only `confirm` flag stripped, so the registry never sees it.
+ * Approval protocol. Returns `approved: false` when the call must NOT execute
+ * (an action card is shown instead); otherwise the args with the chat-only
+ * `confirm` flag stripped, so the registry never sees it.
+ *
+ * Destructive tools are always gated. Spending tools are gated only when the
+ * policy says so — the `assistantRunApproval` setting, so the user decides
+ * whether the assistant may launch generations on its own.
  */
 export function approvalGate(
   tool: Pick<AgentTool, 'risk'>,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  policy: ApprovalPolicy = { requireSpendingApproval: false }
 ): { approved: boolean; args: Record<string, unknown> } {
-  if (tool.risk !== 'destructive') return { approved: true, args }
+  const gated =
+    tool.risk === 'destructive' || (tool.risk === 'spending' && policy.requireSpendingApproval)
+  // The flag is stripped even when the tool isn't gated: a model that sends it
+  // anyway must not leak it into the registry's validated args.
   const { confirm, ...rest } = args
+  if (!gated) return { approved: true, args: rest }
   return { approved: confirm === true, args: rest }
 }
 

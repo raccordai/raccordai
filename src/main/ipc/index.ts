@@ -249,6 +249,10 @@ export function registerIpcHandlers(): void {
   )
   handle('settings:getAssistantModel', () => settingsService.getAssistantModel())
   handle('settings:setAssistantModel', ({ model }) => settingsService.setAssistantModel(model))
+  handle('settings:getAssistantRunApproval', () => settingsService.getAssistantRunApproval())
+  handle('settings:setAssistantRunApproval', ({ mode }) =>
+    settingsService.setAssistantRunApproval(mode)
+  )
 
   handle('settings:getUpdateChannel', () => settingsService.getUpdateChannel())
   handle('settings:setUpdateChannel', ({ channel }) => {

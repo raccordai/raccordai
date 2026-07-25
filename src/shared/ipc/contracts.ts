@@ -29,6 +29,14 @@ export const assistantModelSchema = z.enum([
 ])
 export type AssistantModel = z.infer<typeof assistantModelSchema>
 
+/**
+ * Does the assistant need the user's approval before spending credits?
+ * 'ask' (default) gates every run tool behind the same approval card as the
+ * destructive ones; 'auto' lets it launch generations on its own.
+ */
+export const assistantRunApprovalSchema = z.enum(['ask', 'auto'])
+export type AssistantRunApproval = z.infer<typeof assistantRunApprovalSchema>
+
 export const releaseChannelSchema = z.enum(['dev', 'beta', 'stable'])
 export type ReleaseChannel = z.infer<typeof releaseChannelSchema>
 
@@ -701,6 +709,11 @@ export const ipcContracts = {
   'settings:getAssistantModel': { input: z.void(), output: assistantModelSchema },
   'settings:setAssistantModel': {
     input: z.object({ model: assistantModelSchema }),
+    output: z.void()
+  },
+  'settings:getAssistantRunApproval': { input: z.void(), output: assistantRunApprovalSchema },
+  'settings:setAssistantRunApproval': {
+    input: z.object({ mode: assistantRunApprovalSchema }),
     output: z.void()
   },
 

@@ -74,9 +74,12 @@ Every tool declares two fields (invariant-tested in `registry.test.ts`):
   clients always pass them explicitly.
 - `risk`: `'read'` (no state change), `'write'`, `'destructive'` (permanent
   data loss) or `'spending'` (calls kie.ai, costs credits). Non-`read` tools
-  refresh the app UI after running. **Destructive tools are approval-gated on
-  the chat surface** (an action card + `confirm: true` re-call); MCP clients
-  remain the human's own agent and execute directly.
+  refresh the app UI after running. **Destructive tools are always
+  approval-gated on the chat surface**, and **spending tools are gated too
+  while the `assistantRunApproval` setting is `'ask'`** (its default) — an
+  action card showing the estimated credit cost + a `confirm: true` re-call.
+  MCP clients remain the human's own agent and execute directly, whatever the
+  setting.
 
 Rules to preserve: short descriptions (depth goes in `docs`), explicit ids in
 the schemas (an MCP client has no "current video"), and settings/backup stay

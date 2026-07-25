@@ -70,15 +70,25 @@ describe('toAnthropicTools', () => {
     }
   })
 
-  it('adds the confirm flag to destructive tools only', () => {
-    const tools = [tool({ name: 'delete_thing', risk: 'destructive' }), tool({ name: 'safe' })]
+  it('adds the confirm flag to destructive and spending tools only', () => {
+    const tools = [
+      tool({ name: 'delete_thing', risk: 'destructive' }),
+      tool({ name: 'run_thing', risk: 'spending' }),
+      tool({ name: 'safe' })
+    ]
     const adapted = toAnthropicTools(tools, false)
-    const destructive = adapted[0]!.input_schema as { properties: Record<string, unknown> }
-    const safe = adapted[1]!.input_schema as { properties: Record<string, unknown> }
-    expect(destructive.properties['confirm']).toBeDefined()
+    const props = (i: number): Record<string, unknown> =>
+      (adapted[i]!.input_schema as { properties: Record<string, unknown> }).properties
+
+    expect(props(0)['confirm']).toBeDefined()
+    // Declared unconditionally: the tool list is built once at module load, so
+    // a schema keyed on the setting would need a restart to take effect.
+    expect(props(1)['confirm']).toBeDefined()
+    expect(props(2)['confirm']).toBeUndefined()
     // confirm stays optional: the first (unconfirmed) call must be schema-valid.
-    expect((adapted[0]!.input_schema as { required: string[] }).required).not.toContain('confirm')
-    expect(safe.properties['confirm']).toBeUndefined()
+    for (const i of [0, 1]) {
+      expect((adapted[i]!.input_schema as { required: string[] }).required).not.toContain('confirm')
+    }
   })
 
   it('does not mutate the registry schema (shared with the MCP surface)', () => {
@@ -133,12 +143,42 @@ describe('approvalGate', () => {
     expect(gate.args).toEqual({ videoId: 'v1' })
   })
 
-  it('passes non-destructive calls through untouched', () => {
-    for (const risk of ['read', 'write', 'spending'] as const) {
-      const gate = approvalGate(tool({ risk }), { videoId: 'v1' })
-      expect(gate.approved).toBe(true)
-      expect(gate.args).toEqual({ videoId: 'v1' })
+  it('passes read and write calls through untouched under either policy', () => {
+    for (const risk of ['read', 'write'] as const) {
+      for (const requireSpendingApproval of [true, false]) {
+        const gate = approvalGate(tool({ risk }), { videoId: 'v1' }, { requireSpendingApproval })
+        expect(gate.approved).toBe(true)
+        expect(gate.args).toEqual({ videoId: 'v1' })
+      }
     }
+  })
+
+  it('gates spending calls only when the policy requires approval', () => {
+    const args = { nodeId: 'n1' }
+    expect(
+      approvalGate(tool({ risk: 'spending' }), args, { requireSpendingApproval: true }).approved
+    ).toBe(false)
+    expect(
+      approvalGate(tool({ risk: 'spending' }), args, { requireSpendingApproval: false }).approved
+    ).toBe(true)
+  })
+
+  it('approves a confirmed spending call and strips the flag', () => {
+    // registry.test.ts forbids `confirm` on registry schemas — it must never
+    // reach execute(), whatever the policy.
+    for (const requireSpendingApproval of [true, false]) {
+      const gate = approvalGate(
+        tool({ risk: 'spending' }),
+        { nodeId: 'n1', confirm: true },
+        { requireSpendingApproval }
+      )
+      expect(gate.approved).toBe(true)
+      expect(gate.args).toEqual({ nodeId: 'n1' })
+    }
+  })
+
+  it('defaults to leaving spending ungated when no policy is passed', () => {
+    expect(approvalGate(tool({ risk: 'spending' }), { nodeId: 'n1' }).approved).toBe(true)
   })
 
   it('the approval-required result tells the model to wait and re-call with confirm', () => {

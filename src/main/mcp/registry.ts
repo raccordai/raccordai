@@ -45,9 +45,10 @@ export type ToolScope = 'global' | 'project' | 'video'
 /**
  * Blast radius of the tool. 'read' = no state change (no UI refresh);
  * 'write' = reversible-ish mutation; 'destructive' = permanent data loss —
- * the CHAT surface requires user approval (`confirm: true` after an action
- * card; MCP clients remain the human's own agent and execute directly);
- * 'spending' = calls kie.ai and costs credits.
+ * the CHAT surface always requires user approval (`confirm: true` after an
+ * action card); 'spending' = calls kie.ai and costs credits, gated the same
+ * way while the `assistantRunApproval` setting is 'ask' (the default).
+ * MCP clients remain the human's own agent and execute directly either way.
  */
 export type ToolRisk = 'read' | 'write' | 'destructive' | 'spending'
 
