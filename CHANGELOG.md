@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.0](https://github.com/raccordai/raccordai/compare/v1.0.0...v1.1.0) (2026-07-25)
+
+
+### Features
+
+* **assistant:** global sidebar, unified tool registry & smart batch runs ([d2267ea](https://github.com/raccordai/raccordai/commit/d2267ea336fcdb40b75573ea678457eef1fdaf8a))
+* **editor:** generation feedback layer (toasts, queue, notifications) ([900108e](https://github.com/raccordai/raccordai/commit/900108e23f8c846b50c7e13edbacef365115973f))
+* **onboarding:** first-run overlay, live kie key validation ([ec8b381](https://github.com/raccordai/raccordai/commit/ec8b381ba715b674acf7e8831e327fb8b25b2605))
+* **render:** rendered MP4 export ([77315da](https://github.com/raccordai/raccordai/commit/77315dacf33d857c8d77f12f7594d19ee5bb5d63))
+* **video:** video-level defaults, style-at-payload, MP4 export presets ([9e4b313](https://github.com/raccordai/raccordai/commit/9e4b313bd7f9c2184751744d24afc4cd28e6e62c))
+
+
+### Bug Fixes
+
+* guard storyboard-driven shots against rendering the grid on screen ([4fe8879](https://github.com/raccordai/raccordai/commit/4fe887949bab641eb07b129b9c9e37e2a22d050a))
+
 ## [1.0.0](https://github.com/raccordai/raccordai/compare/v0.3.0...v1.0.0) (2026-07-21)
 
 
