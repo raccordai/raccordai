@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq } from 'drizzle-orm'
 import { defaultParamsFor, getModel, getModelOrThrow, videoDefaultParams } from '@shared/models'
+import {
+  autoLayoutPositions,
+  needsLayout,
+  resolveOverlaps,
+  type LayoutEdge,
+  type LayoutNode
+} from '@shared/graphLayout'
 import { APPLY_VIDEO_STYLE_PARAM } from '@shared/styles/registry'
 import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
@@ -66,10 +73,33 @@ function keyExists(videoId: string, key: string): boolean {
   )
 }
 
+/** Column pitch of the left-to-right flow convention (matches the templates). */
+const COLUMN_PITCH = 420
+
+/**
+ * Free slot for a node created without an explicit position — the next column
+ * to the right of the graph, aligned on its top row. Agents call add_node
+ * without x/y all the time; defaulting to the origin piled every one of them
+ * onto the same spot.
+ */
+export function nextFreePosition(videoId: string): { x: number; y: number } {
+  const existing = getDb()
+    .select({ x: nodes.positionX, y: nodes.positionY })
+    .from(nodes)
+    .where(eq(nodes.videoId, videoId))
+    .all()
+  if (existing.length === 0) return { x: 40, y: 40 }
+  return {
+    x: Math.max(...existing.map((n) => n.x)) + COLUMN_PITCH,
+    y: Math.min(...existing.map((n) => n.y))
+  }
+}
+
 export function createNode(args: {
   videoId: string
   modelId: string
-  position: { x: number; y: number }
+  /** Omit to drop the node in the next free slot (see nextFreePosition). */
+  position?: { x: number; y: number }
   key?: string
   params?: unknown
   label?: string
@@ -86,6 +116,7 @@ export function createNode(args: {
   // manage their own markers); the plain-creation path pre-fills the video's
   // defaults and opts visual nodes into style-at-payload.
   const params = args.params ?? defaultCreationParams(args.videoId, args.modelId)
+  const position = args.position ?? nextFreePosition(args.videoId)
 
   const row: NodeRow = {
     id: randomUUID(),
@@ -94,8 +125,8 @@ export function createNode(args: {
     modelId: args.modelId,
     label: args.label ?? null,
     intent: args.intent ?? null,
-    positionX: args.position.x,
-    positionY: args.position.y,
+    positionX: position.x,
+    positionY: position.y,
     params,
     selectedGenerationId: null,
     createdAt: now,
@@ -453,6 +484,80 @@ export function exportWorkflow(videoId: string): WorkflowExport {
   return { version: 1, assets: exportedAssets, nodes: exportedNodes, edges: exportedEdges }
 }
 
+/** Vertical gap left between an existing graph and an appended import. */
+const IMPORT_APPEND_GAP = 120
+
+/**
+ * Positions for an imported graph. Agents routinely omit `position` entirely
+ * (every node then defaulted to the origin — the "all my nodes are stacked on
+ * top of each other" bug) or reuse one coordinate for the whole workflow, so
+ * the layout is computed here rather than trusted. When positions ARE usable
+ * they win, and only genuine overlaps get pushed apart.
+ *
+ * Appending (replace=false) shifts the result below the existing graph so the
+ * import never lands on top of what is already on the canvas.
+ */
+function planImportPositions(
+  videoId: string,
+  incomingNodes: Array<{ key?: string; modelId?: string; label?: string; position?: unknown }>,
+  incomingEdges: Array<{ from?: string; to?: string }>,
+  replace: boolean
+): Map<string, { x: number; y: number }> {
+  const usable = incomingNodes.filter(
+    (n): n is typeof n & { key: string } => typeof n?.key === 'string' && n.key !== ''
+  )
+  if (usable.length === 0) return new Map()
+
+  const coord = (raw: unknown): { x: number; y: number } => {
+    const p = (raw ?? {}) as { x?: unknown; y?: unknown }
+    return { x: Number(p.x) || 0, y: Number(p.y) || 0 }
+  }
+  const layoutNodes: LayoutNode[] = usable.map((n, i) => ({
+    id: n.key,
+    type: n.modelId === 'studio/asset' ? 'assetNode' : 'modelNode',
+    position: coord(n.position),
+    label: typeof n.label === 'string' ? n.label : undefined,
+    key: n.key,
+    // No timestamps in a blueprint — array order IS the authored order.
+    createdAt: i
+  }))
+  const layoutEdges: LayoutEdge[] = incomingEdges
+    .filter((e) => typeof e?.from === 'string' && typeof e?.to === 'string')
+    .map((e) => ({ source: e.from!, target: e.to! }))
+
+  const positions = new Map<string, { x: number; y: number }>()
+  if (needsLayout(layoutNodes.map((n) => n.position))) {
+    for (const { id, position } of autoLayoutPositions(layoutNodes, layoutEdges)) {
+      positions.set(id, position)
+    }
+  } else {
+    for (const n of layoutNodes) positions.set(n.id, n.position)
+    // Authored positions are kept as-is; only real collisions are resolved.
+    const seeds = layoutNodes.map((n) => n.id)
+    for (const { id, position } of resolveOverlaps(layoutNodes, seeds)) {
+      positions.set(id, position)
+    }
+  }
+
+  if (!replace) {
+    const existing = getDb()
+      .select({ y: nodes.positionY })
+      .from(nodes)
+      .where(eq(nodes.videoId, videoId))
+      .all()
+    if (existing.length > 0) {
+      // Approximate node height is enough — the gap absorbs the difference.
+      const bottom = Math.max(...existing.map((n) => n.y)) + 260 + IMPORT_APPEND_GAP
+      const top = Math.min(...[...positions.values()].map((p) => p.y))
+      const shift = bottom - top
+      if (shift > 0) {
+        for (const [id, p] of positions) positions.set(id, { x: p.x, y: p.y + shift })
+      }
+    }
+  }
+  return positions
+}
+
 export function importWorkflow(
   videoId: string,
   json: string,
@@ -476,6 +581,8 @@ export function importWorkflow(
   if (!video) throw new Error('Target video not found')
   const projectId = video.projectId
   const db = getDb()
+
+  const placed = planImportPositions(videoId, incomingNodes, incomingEdges, replace)
 
   function resolveAssetParams(rawParams: unknown): Record<string, unknown> {
     const params = { ...((rawParams as Record<string, unknown> | null | undefined) ?? {}) }
@@ -539,7 +646,7 @@ export function importWorkflow(
             ? resolveAssetParams(raw.params)
             : (raw.params ?? defaultParamsFor(raw.modelId))
 
-        const position = raw.position ?? { x: 0, y: 0 }
+        const position = placed.get(raw.key) ?? raw.position ?? { x: 0, y: 0 }
         const id = randomUUID()
         tx.insert(nodes)
           .values({

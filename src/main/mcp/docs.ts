@@ -46,7 +46,8 @@ Typical session:
      automatically at every image settle.
 
 Conventions:
-  - Position nodes left-to-right (x: 0, 420, 840…; y spaced ~350).
+  - Position nodes left-to-right (x: 0, 420, 840…; y spaced ~350). Omitting positions is fine —
+    the app lays the graph out itself. Never reuse one coordinate for several nodes (they pile up).
   - node "label": short display name. Prefix video clips "Shot 01 — …" to order the timeline.
   - node "intent": expected result in plain language, shown to the user next to the output.
   - Asset nodes: modelId "studio/asset", params {"assetId": "<id from list_assets>"}.

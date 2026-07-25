@@ -84,6 +84,19 @@ describe('createNode', () => {
     createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
     expect(getVideo(videoId)!.updatedAt).toBeGreaterThanOrEqual(before)
   })
+
+  it('drops a position-less node in a free slot instead of the origin', () => {
+    // add_node without x/y used to land every node on (0,0).
+    const first = createNode({ videoId, modelId: SEEDANCE })
+    const second = createNode({ videoId, modelId: SEEDANCE })
+    const third = createNode({ videoId, modelId: SEEDANCE })
+
+    expect(second.position.x).toBeGreaterThan(first.position.x)
+    expect(third.position.x).toBeGreaterThan(second.position.x)
+    expect(new Set([first, second, third].map((n) => `${n.position.x}:${n.position.y}`)).size).toBe(
+      3
+    )
+  })
 })
 
 describe('edges', () => {
@@ -397,6 +410,72 @@ describe('workflow export / import', () => {
 
   it('rejects invalid JSON with a clear error', () => {
     expect(() => importWorkflow(videoId, '{not json', false)).toThrowError(/Invalid JSON/)
+  })
+
+  it('lays out a workflow whose nodes carry no position', () => {
+    // The assistant's #1 layout bug: no `position` on any node meant every one
+    // of them was written at (0,0) and the graph imported as a single pile.
+    const json = JSON.stringify({
+      version: 1,
+      nodes: [
+        { key: 'ref', modelId: SEEDANCE, params: {} },
+        { key: 'shot_01', modelId: SEEDANCE, params: {} },
+        { key: 'shot_02', modelId: SEEDANCE, params: {} },
+        { key: 'shot_03', modelId: SEEDANCE, params: {} }
+      ],
+      edges: [
+        { from: 'ref', to: 'shot_01', input: 'reference_image_urls' },
+        { from: 'ref', to: 'shot_02', input: 'reference_image_urls' },
+        { from: 'ref', to: 'shot_03', input: 'reference_image_urls' }
+      ]
+    })
+    const target = createVideo(projectId, 'Unpositioned')
+    importWorkflow(target.id, json, false)
+
+    const placed = listGraph(target.id).nodes
+    const spots = new Set(placed.map((n) => `${n.position.x}:${n.position.y}`))
+    expect(spots.size).toBe(4)
+    // The shared reference is upstream, so it sits left of every shot.
+    const ref = placed.find((n) => n.key === 'ref')!
+    for (const key of ['shot_01', 'shot_02', 'shot_03']) {
+      expect(placed.find((n) => n.key === key)!.position.x).toBeGreaterThan(ref.position.x)
+    }
+  })
+
+  it('keeps authored positions when the blueprint provides them', () => {
+    const json = JSON.stringify({
+      version: 1,
+      nodes: [
+        { key: 'a', modelId: SEEDANCE, position: { x: 0, y: 0 }, params: {} },
+        { key: 'b', modelId: SEEDANCE, position: { x: 420, y: 0 }, params: {} }
+      ],
+      edges: []
+    })
+    const target = createVideo(projectId, 'Authored')
+    importWorkflow(target.id, json, false)
+
+    const placed = listGraph(target.id).nodes
+    expect(placed.find((n) => n.key === 'a')!.position).toEqual({ x: 0, y: 0 })
+    expect(placed.find((n) => n.key === 'b')!.position).toEqual({ x: 420, y: 0 })
+  })
+
+  it('appends an import below the existing graph instead of on top of it', () => {
+    createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 }, key: 'existing' })
+    const json = JSON.stringify({
+      version: 1,
+      nodes: [
+        { key: 'new_a', modelId: SEEDANCE, position: { x: 0, y: 0 }, params: {} },
+        { key: 'new_b', modelId: SEEDANCE, position: { x: 420, y: 0 }, params: {} }
+      ],
+      edges: []
+    })
+    importWorkflow(videoId, json, false)
+
+    const placed = listGraph(videoId).nodes
+    const existing = placed.find((n) => n.key === 'existing')!
+    for (const key of ['new_a', 'new_b']) {
+      expect(placed.find((n) => n.key === key)!.position.y).toBeGreaterThan(existing.position.y)
+    }
   })
 
   it('rejects nodes without key/modelId and edges pointing at unknown keys', () => {
