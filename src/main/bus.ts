@@ -12,6 +12,9 @@ export interface GenerationSettledEvent {
   nodeId: string
   status: 'success' | 'failed'
   errorMessage: string | null
+  /** Vision-QC outcome (§6.2), already persisted when the event fires. Absent when QC didn't run. */
+  qcVerdict?: 'pass' | 'warn' | 'error' | null
+  qcNotes?: string | null
 }
 
 const emitter = new EventEmitter()

@@ -87,6 +87,21 @@ export interface ModelDefinition<TParams = any> {
    */
   estimateCredits?(params: TParams): number
   /**
+   * Cheaper stand-in used when the video is in draft mode (§6.1): `prepareRun`
+   * swaps the run to `modelId` (same kind and provider — registry-test
+   * enforced), overlaying `params` on the node's raw params. Enum values the
+   * draft model doesn't accept fall back to the draft model's defaults
+   * ("resolution floored"). `inputs` remaps input-handle keys when the draft
+   * model names them differently (original key → draft key); unmapped keys
+   * must exist verbatim on the draft model. `modelId` may be the model's own
+   * id when the draft is just cheaper params (e.g. Kling in std mode).
+   */
+  draftEquivalent?: {
+    modelId: string
+    params?: Record<string, unknown>
+    inputs?: Record<string, string>
+  }
+  /**
    * Declarative use-case tags (kebab-case, e.g. "character-consistency",
    * "cheap-draft", "photorealism", "first-frame-animation"): surfaced as
    * badges + recommended sort in the add-node menu, in the assistant's

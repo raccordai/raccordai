@@ -88,6 +88,10 @@ export const videoSchema = z.object({
   /** Video-level generation defaults — pre-fill new nodes, never silently rewrite existing ones. */
   defaultAspectRatio: z.string().nullable(),
   defaultResolution: z.string().nullable(),
+  /** Draft mode (§6.1): runs substitute each model's draftEquivalent until finalized. */
+  draftMode: z.boolean(),
+  /** Vision QC (§6.2): successful image generations get one cheap vision check. */
+  qcEnabled: z.boolean(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -151,6 +155,10 @@ export type GraphEdge = z.infer<typeof graphEdgeSchema>
 
 export const generationStatusSchema = z.enum(['pending', 'running', 'success', 'failed'])
 
+/** Vision-QC verdict (§6.2): 'error' means the QC call itself failed. */
+export const qcVerdictSchema = z.enum(['pass', 'warn', 'error'])
+export type QcVerdict = z.infer<typeof qcVerdictSchema>
+
 export const generationSchema = z.object({
   id: z.string(),
   nodeId: z.string(),
@@ -162,6 +170,11 @@ export const generationSchema = z.object({
   url: z.string().nullable(),
   lastFrameUrl: z.string().nullable(),
   resultMimeType: z.string().nullable(),
+  /** True when the run was substituted to the model's draftEquivalent (§6.1). */
+  draft: z.boolean(),
+  /** Vision-QC verdict (§6.2) — 'pass' | 'warn' | 'error', null = not checked. */
+  qcVerdict: qcVerdictSchema.nullable(),
+  qcNotes: z.string().nullable(),
   errorMessage: z.string().nullable(),
   createdAt: z.number(),
   completedAt: z.number().nullable()
@@ -357,6 +370,16 @@ export const ipcContracts = {
   'nodes:applyVideoDefaults': {
     input: z.object({ videoId: z.string() }),
     output: z.object({ updated: z.number() })
+  },
+  /** Draft mode (§6.1): while on, runs substitute each model's draftEquivalent. */
+  'videos:setDraftMode': {
+    input: z.object({ videoId: z.string(), enabled: z.boolean() }),
+    output: z.void()
+  },
+  /** Vision QC (§6.2): while on, successful image generations get one cheap vision check. */
+  'videos:setQcEnabled': {
+    input: z.object({ videoId: z.string(), enabled: z.boolean() }),
+    output: z.void()
   },
 
   'assets:listByProject': {
@@ -586,6 +609,38 @@ export const ipcContracts = {
       /** nodeId → generationId for every node that claimed one. */
       generations: z.record(z.string(), z.string())
     })
+  },
+  /** §6.1 finalize — nodes whose selected generation is a draft, with the
+   *  draft cost already spent vs the estimated cost on the real models. */
+  'generations:planFinalize': {
+    input: z.object({ videoId: z.string() }),
+    output: z.object({
+      rows: z.array(
+        z.object({
+          nodeId: z.string(),
+          label: z.string(),
+          draftCredits: z.number().nullable(),
+          finalCredits: z.number().nullable()
+        })
+      ),
+      totalDraft: z.number(),
+      totalFinal: z.number()
+    })
+  },
+  /** Re-runs every draft-selected node on the real models (draft substitution
+   *  bypassed for these runs; draft mode itself stays on for exploration). */
+  'generations:finalizeVideo': {
+    input: z.object({ videoId: z.string() }),
+    output: z.object({
+      succeeded: z.number().int().min(0),
+      failed: z.number().int().min(0),
+      generations: z.record(z.string(), z.string())
+    })
+  },
+  /** §6.2 — run (or re-run) the vision QC on one successful generation. */
+  'generations:reviewGeneration': {
+    input: z.object({ generationId: z.string() }),
+    output: z.object({ verdict: qcVerdictSchema, notes: z.string() })
   },
   /** Estimated credits spent + attempt count across a whole project. */
   'projects:creditsUsage': {

@@ -9,8 +9,9 @@ import * as graphHistory from '../services/graphHistory'
 import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
 import * as renderService from '../services/render'
-import { startBatch, videoNodeTargets } from '../services/runBatch'
+import { finalizeVideo, planFinalize, startBatch, videoNodeTargets } from '../services/runBatch'
 import { cancelGeneration, refreshStatus, runNode } from '../services/runEngine'
+import { reviewGeneration } from '../services/qc'
 import * as videos from '../services/videos'
 import { DOC_TOPICS, getDoc } from './docs'
 
@@ -125,6 +126,8 @@ export const AGENT_TOOLS: AgentTool[] = [
           description: f.description
         })),
         promptingNotes: m.promptingNotes,
+        // Cheap stand-in used automatically when the video is in draft mode.
+        draftEquivalent: m.draftEquivalent?.modelId,
         // Long-form guide served on demand — read it before writing prompts.
         promptGuideTopic: m.promptGuide ? `prompting:${m.id}` : undefined
       }))
@@ -306,6 +309,18 @@ export const AGENT_TOOLS: AgentTool[] = [
     risk: 'write',
     execute: ({ videoId }) => graph.applyVideoDefaultsToNodes(String(videoId))
   },
+  {
+    name: 'set_draft_mode',
+    description:
+      'Toggle a video’s draft mode: while on, every run is substituted with the model’s cheap draft equivalent (5–10× cheaper) and stamped as a draft. Explore in draft, then finalize_video re-runs the keepers on the real models.',
+    inputSchema: obj({ videoId: str(), enabled: { type: 'boolean' } }, ['videoId', 'enabled']),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, enabled }) => {
+      videos.setDraftMode(String(videoId), Boolean(enabled))
+      return { ok: true }
+    }
+  },
 
   // ── Workflow graph ─────────────────────────────────────────────────────────
   {
@@ -340,6 +355,9 @@ export const AGENT_TOOLS: AgentTool[] = [
           aspectRatio: video.defaultAspectRatio ?? null,
           resolution: video.defaultResolution ?? null
         },
+        // §6 iteration loop: cheap-substitution runs / vision checks on settle.
+        draftMode: video.draftMode,
+        qcEnabled: video.qcEnabled,
         nodes: nodes.map((n) => ({
           id: n.id,
           key: n.key,
@@ -539,9 +557,39 @@ export const AGENT_TOOLS: AgentTool[] = [
     }
   },
   {
+    name: 'finalize_video',
+    description:
+      'Re-run every node whose selected generation is a draft on the REAL models (COSTS MONEY — draft substitution bypassed) and promote each result to the node’s selection. Pass plan_only: true to get the draft-vs-final cost preview without running anything.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        plan_only: { type: 'boolean', description: 'Only return the cost preview' }
+      },
+      ['videoId']
+    ),
+    scope: 'video',
+    risk: 'spending',
+    execute: ({ videoId, plan_only }) => {
+      const plan = planFinalize(String(videoId))
+      if (plan_only || plan.rows.length === 0) return plan
+      const { planned, done } = finalizeVideo(String(videoId))
+      void done
+      return { planned }
+    }
+  },
+  {
+    name: 'review_generation',
+    description:
+      'Vision QC on a successful image generation: does it fulfill the prompt, any defects, consistent with its wired reference sheets? Verdict pass/warn + notes, persisted on the generation. Costs a small amount of credits.',
+    inputSchema: obj({ generationId: str() }, ['generationId']),
+    scope: 'global',
+    risk: 'spending',
+    execute: ({ generationId }) => reviewGeneration(String(generationId))
+  },
+  {
     name: 'get_generations',
     description:
-      'List a node’s generations: status (pending/running/success/failed), media URL, error.',
+      'List a node’s generations: status (pending/running/success/failed), media URL, draft flag, vision-QC verdict, error.',
     inputSchema: obj({ nodeId: str() }, ['nodeId']),
     scope: 'global',
     risk: 'read',
@@ -550,6 +598,9 @@ export const AGENT_TOOLS: AgentTool[] = [
         id: g.id,
         status: g.status,
         url: g.resultUrl,
+        draft: g.draft ?? false,
+        qcVerdict: g.qcVerdict,
+        qcNotes: g.qcNotes,
         error: g.errorMessage,
         createdAt: g.createdAt
       }))

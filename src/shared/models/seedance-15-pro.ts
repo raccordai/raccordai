@@ -26,6 +26,8 @@ export const seedance15Pro: ModelDefinition<Params> = {
     'Cinematic video generation (text-to-video or image-to-video with up to 2 frames), up to 1080p with native audio and dialogue.',
   kind: 'video',
   recommendedFor: ['first-frame-animation', 'dialogue-audio', 'cinematic'],
+  // No cheaper sibling — draft = same model floored to 480p (2 cr/s vs 10 at 1080p).
+  draftEquivalent: { modelId: 'bytedance/seedance-1.5-pro', params: { resolution: '480p' } },
   paramsSchema,
   // Indicative per-second rates by resolution — align with https://kie.ai/pricing.
   estimateCredits: (params) =>

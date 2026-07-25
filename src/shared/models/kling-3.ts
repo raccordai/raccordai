@@ -22,6 +22,8 @@ export const kling3: ModelDefinition<Params> = {
     'Kuaishou Kling 3.0 video generation — text-to-video or first/last frame anchoring, up to 4K.',
   kind: 'video',
   recommendedFor: ['first-frame-animation', 'high-resolution', 'photorealism'],
+  // No cheaper sibling — draft = same model in std (720p) mode.
+  draftEquivalent: { modelId: 'kling-3.0/video', params: { mode: 'std' } },
   paramsSchema,
   paramFields: [
     {

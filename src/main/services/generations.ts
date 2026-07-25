@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { estimateCreditsFor, getModel } from '@shared/models'
+import { resolveDraftRun } from '@shared/models/draft'
 import type { GraphNode } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { generations, nodes, videos } from '../db/schema'
@@ -31,11 +32,24 @@ export function getGeneration(id: string): GenerationRow | null {
 
 /**
  * Indicative credit cost of running this node right now (its current params),
- * null when the model declares no rates. See ModelDefinition.estimateCredits.
+ * null when the model declares no rates. Under draft mode (§6.1) the run is
+ * substituted, so the estimate follows the draft model — `forceFinal` asks for
+ * the real-model cost instead (the finalize preview).
  */
-export function estimateNodeRunCredits(nodeId: string): number | null {
-  const node = getDb().select().from(nodes).where(eq(nodes.id, nodeId)).get()
+export function estimateNodeRunCredits(
+  nodeId: string,
+  opts?: { forceFinal?: boolean }
+): number | null {
+  const db = getDb()
+  const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
   if (!node || node.modelId === 'studio/asset') return null
+  if (!opts?.forceFinal) {
+    const video = db.select().from(videos).where(eq(videos.id, node.videoId)).get()
+    if (video?.draftMode) {
+      const sub = resolveDraftRun(node.modelId, node.params ?? {})
+      if (sub) return estimateCreditsFor(sub.modelId, sub.params)
+    }
+  }
   return estimateCreditsFor(node.modelId, node.params)
 }
 

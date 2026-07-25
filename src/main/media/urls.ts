@@ -18,6 +18,9 @@ export function toGeneration(row: GenerationRow): Generation {
     url: row.resultPath ? `media://generation/${row.id}/result` : row.resultUrl,
     lastFrameUrl: row.lastFramePath ? `media://generation/${row.id}/lastFrame` : null,
     resultMimeType: row.resultMimeType,
+    draft: row.draft ?? false,
+    qcVerdict: row.qcVerdict,
+    qcNotes: row.qcNotes,
     errorMessage: row.errorMessage,
     createdAt: row.createdAt,
     completedAt: row.completedAt

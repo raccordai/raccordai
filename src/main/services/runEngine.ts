@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
+import { remapDraftInputs, resolveDraftRun } from '@shared/models/draft'
 import { appendStyleBible, getStyle, nodeAppliesVideoStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes, videos } from '../db/schema'
@@ -23,6 +24,7 @@ import {
   parseResultUrl
 } from './kie'
 import { type GenerationRow } from './generations'
+import { maybeRunQcOnSettle } from './qc'
 import { getKieApiKey, getMaxConcurrentGenerations } from './settings'
 
 /**
@@ -253,25 +255,38 @@ interface PreparedRun {
   videoId: string
   modelId: string
   provider: 'jobs' | 'suno'
+  /** True when the run was substituted to the model's draftEquivalent (§6.1). */
+  draft: boolean
   payload: Record<string, unknown>
   inputSnapshot: {
+    /** The SUBMITTED model id (the draft one under draft mode) — replay-identical retries. */
+    modelId: string
     params: unknown
     inputs: Record<string, string[]>
     aliases: Record<string, string>
   }
 }
 
-async function prepareRun(nodeId: string): Promise<PreparedRun> {
+async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Promise<PreparedRun> {
   const db = getDb()
   const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
   if (!node) throw new Error('Node not found')
   if (node.modelId === 'studio/asset') throw new Error('Asset nodes are not runnable')
 
-  const model = getModelOrThrow(node.modelId)
+  const nodeModel = getModelOrThrow(node.modelId)
+  const video = db.select().from(videos).where(eq(videos.id, node.videoId)).get()
+
+  // Draft mode (§6.1): substitute the model's declared draftEquivalent — same
+  // mechanic as style-at-payload below: resolved BEFORE the input snapshot is
+  // persisted, so retries and re-queues replay the substituted run, and the
+  // node's stored model/params stay untouched. Finalize passes forceFinal.
+  const draftSub =
+    video?.draftMode && !opts?.forceFinal ? resolveDraftRun(nodeModel.id, node.params ?? {}) : null
+  const model = draftSub ? getModelOrThrow(draftSub.modelId) : nodeModel
 
   let validatedParams: unknown
   try {
-    validatedParams = model.paramsSchema.parse(node.params ?? {})
+    validatedParams = model.paramsSchema.parse(draftSub ? draftSub.params : (node.params ?? {}))
   } catch (err) {
     throw new Error(`Invalid params: ${err instanceof Error ? err.message : String(err)}`, {
       cause: err
@@ -283,7 +298,6 @@ async function prepareRun(nodeId: string): Promise<PreparedRun> {
   // persisted, so retries and re-queues replay the exact same payload. Stored
   // prompts stay business-only; a style change propagates on the next run.
   if (model.kind !== 'audio' && nodeAppliesVideoStyle(node.params)) {
-    const video = db.select().from(videos).where(eq(videos.id, node.videoId)).get()
     const style = video?.styleId ? getStyle(video.styleId) : undefined
     const prompt = (validatedParams as { prompt?: unknown }).prompt
     if (style && typeof prompt === 'string') {
@@ -319,13 +333,15 @@ async function prepareRun(nodeId: string): Promise<PreparedRun> {
     }
     const bucket = (inputUrls[edge.targetHandle] ??= [])
     bucket.push(url)
-    const handle = model.inputs.find((h) => h.key === edge.targetHandle)
+    const handle = nodeModel.inputs.find((h) => h.key === edge.targetHandle)
     if (handle?.referenceAlias) {
       aliasMap[`${handle.referenceAlias}${bucket.length}`] = source.key
     }
   }
 
-  for (const handle of model.inputs) {
+  // Edges are wired to the NODE model's handles — validate against those, then
+  // remap onto the draft model's handles (renames + maxCount clamp) if needed.
+  for (const handle of nodeModel.inputs) {
     const count = inputUrls[handle.key]?.length ?? 0
     if (handle.required && count === 0) {
       throw new Error(`Required input "${handle.key}" is not connected`)
@@ -336,15 +352,22 @@ async function prepareRun(nodeId: string): Promise<PreparedRun> {
       )
     }
   }
+  const runInputs = draftSub ? remapDraftInputs(draftSub, inputUrls) : inputUrls
 
-  const payload = model.buildPayload({ params: validatedParams as never, inputs: inputUrls })
+  const payload = model.buildPayload({ params: validatedParams as never, inputs: runInputs })
 
   return {
     videoId: node.videoId,
     modelId: model.id,
     provider: model.provider ?? 'jobs',
+    draft: draftSub !== null,
     payload,
-    inputSnapshot: { params: validatedParams, inputs: inputUrls, aliases: aliasMap }
+    inputSnapshot: {
+      modelId: model.id,
+      params: validatedParams,
+      inputs: runInputs,
+      aliases: aliasMap
+    }
   }
 }
 
@@ -355,7 +378,8 @@ function claimRun(
   videoId: string,
   inputSnapshot: unknown,
   reuseSatisfied: boolean,
-  creditsEstimated: number | null
+  creditsEstimated: number | null,
+  draft: boolean
 ): { generationId: string; reused: boolean; kieTaskId: string | null } {
   const db = getDb()
   const rows = db
@@ -388,6 +412,7 @@ function claimRun(
       status: 'pending',
       inputSnapshot,
       creditsEstimated,
+      draft,
       createdAt: Date.now()
     })
     .run()
@@ -496,13 +521,31 @@ function completeFromKie(
       .run()
   }
   broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
-  emitGenerationSettled({
-    generationId,
-    videoId: gen.videoId,
-    nodeId: gen.nodeId,
-    status: state === 'success' ? 'success' : 'failed',
-    errorMessage: state === 'success' ? null : (failMsg ?? 'kie.ai task failed')
-  })
+  if (state === 'success') {
+    // Vision QC (§6.2) runs BEFORE the settle event fires, so the chat
+    // wake-up note and batch summaries carry the verdict. The service
+    // degrades every failure to an 'error' verdict or null — the settle
+    // path can never hang on it beyond its internal timeout.
+    void maybeRunQcOnSettle(generationId).then((qc) => {
+      emitGenerationSettled({
+        generationId,
+        videoId: gen.videoId,
+        nodeId: gen.nodeId,
+        status: 'success',
+        errorMessage: null,
+        qcVerdict: qc?.verdict ?? null,
+        qcNotes: qc?.notes ?? null
+      })
+    })
+  } else {
+    emitGenerationSettled({
+      generationId,
+      videoId: gen.videoId,
+      nodeId: gen.nodeId,
+      status: 'failed',
+      errorMessage: failMsg ?? 'kie.ai task failed'
+    })
+  }
   return { transitioned: true }
 }
 
@@ -635,17 +678,24 @@ export function resumePolling(): void {
 function prepFromSnapshot(gen: GenerationRow): PreparedRun | null {
   const node = getDb().select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
   const snapshot = gen.inputSnapshot as PreparedRun['inputSnapshot'] | null
-  const model = node ? getModel(node.modelId) : undefined
+  // The snapshot records the SUBMITTED model (the draft one under draft mode —
+  // pre-6.1 snapshots have no modelId); the node's model is only a fallback.
+  const model = snapshot?.modelId
+    ? getModel(snapshot.modelId)
+    : node
+      ? getModel(node.modelId)
+      : undefined
   if (!node || !model || !snapshot?.params) return null
   return {
     videoId: gen.videoId,
     modelId: model.id,
     provider: model.provider ?? 'jobs',
+    draft: gen.draft ?? false,
     payload: model.buildPayload({
       params: snapshot.params as never,
       inputs: snapshot.inputs ?? {}
     }),
-    inputSnapshot: snapshot
+    inputSnapshot: { ...snapshot, modelId: model.id }
   }
 }
 
@@ -697,7 +747,8 @@ async function submitGeneration(generationId: string, prep: PreparedRun): Promis
 
 export async function runNode(
   nodeId: string,
-  reuseSatisfied = false
+  reuseSatisfied = false,
+  opts?: { forceFinal?: boolean }
 ): Promise<{ generationId: string; kieTaskId: string }> {
   // Fail fast on the one config error the user can fix immediately — every
   // other submission error surfaces asynchronously on the generation row.
@@ -706,10 +757,17 @@ export async function runNode(
       "kie.ai API key is not configured. Add it in the app's Integrations section on the home page."
     )
   }
-  const prep = await prepareRun(nodeId)
+  const prep = await prepareRun(nodeId, opts)
 
   const estimate = estimateCreditsFor(prep.modelId, prep.inputSnapshot.params)
-  const claim = claimRun(nodeId, prep.videoId, prep.inputSnapshot, reuseSatisfied, estimate)
+  const claim = claimRun(
+    nodeId,
+    prep.videoId,
+    prep.inputSnapshot,
+    reuseSatisfied,
+    estimate,
+    prep.draft
+  )
   if (claim.reused) return { generationId: claim.generationId, kieTaskId: claim.kieTaskId ?? '' }
   const generationId = claim.generationId
   broadcastGenerationsChanged({ videoId: prep.videoId, nodeId })

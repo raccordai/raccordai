@@ -109,6 +109,11 @@ export function startBatch(args: {
   videoId: string
   targetNodeIds: string[]
   reuseTargets: boolean
+  /** §6.1 finalize: bypass the draft substitution for every run of this batch. */
+  forceFinal?: boolean
+  /** §6.1 finalize: promote each successful generation to the node's selection
+   *  as it settles, so dependents (and the timeline) consume the final output. */
+  selectOnSettle?: boolean
   onGenerationStarted?: (nodeId: string, generationId: string) => void
 }): { planned: PlannedRow[]; done: Promise<BatchResult> } {
   const plan = buildPlan(args.videoId, args.targetNodeIds, args.reuseTargets)
@@ -128,13 +133,15 @@ export function startBatch(args: {
       if (!entry) return
       await Promise.all(entry.parents.map(runWithDeps))
       if (!entry.run) return
-      const { generationId } = await runNode(id, entry.reuse)
+      const { generationId } = await runNode(id, entry.reuse, { forceFinal: args.forceFinal })
       startedGenerations[id] = generationId
       args.onGenerationStarted?.(id, generationId)
       const status = await waitForSettle(generationId)
       if (status !== 'success') {
         throw new Error(`Node "${entry.label}" did not complete successfully — stopping.`)
       }
+      // Before dependents resolve their inputs (they read the selection).
+      if (args.selectOnSettle) graph.setSelectedGeneration(id, generationId)
     })()
     promises.set(id, p)
     return p
@@ -169,4 +176,64 @@ export function startBatch(args: {
     })),
     done
   }
+}
+
+// ── §6.1 finalize — re-run draft keepers on the real models ──────────────────
+
+export interface FinalizeRow {
+  nodeId: string
+  label: string
+  /** Estimate stamped on the draft generation when it was claimed. */
+  draftCredits: number | null
+  /** Estimate of the same run on the real model (substitution bypassed). */
+  finalCredits: number | null
+}
+
+/** Nodes whose SELECTED generation is a successful draft, draft-vs-final cost. */
+export function planFinalize(videoId: string): {
+  rows: FinalizeRow[]
+  totalDraft: number
+  totalFinal: number
+} {
+  const { nodes } = graph.listGraph(videoId)
+  const rows: FinalizeRow[] = []
+  for (const node of nodes) {
+    if (!node.selectedGenerationId) continue
+    const gen = generations.getGeneration(node.selectedGenerationId)
+    if (!gen || gen.status !== 'success' || !gen.draft) continue
+    rows.push({
+      nodeId: node.id,
+      label: node.label ?? node.key,
+      draftCredits: gen.creditsEstimated,
+      finalCredits: generations.estimateNodeRunCredits(node.id, { forceFinal: true })
+    })
+  }
+  return {
+    rows,
+    totalDraft: rows.reduce((sum, r) => sum + (r.draftCredits ?? 0), 0),
+    totalFinal: rows.reduce((sum, r) => sum + (r.finalCredits ?? 0), 0)
+  }
+}
+
+/**
+ * Re-runs every draft-selected node on the real models (draft substitution
+ * bypassed) and promotes each successful result to the node's selection.
+ * Draft mode itself stays on — exploration can continue after finalizing.
+ */
+export function finalizeVideo(
+  videoId: string,
+  onGenerationStarted?: (nodeId: string, generationId: string) => void
+): { planned: PlannedRow[]; done: Promise<BatchResult> } {
+  const targetNodeIds = planFinalize(videoId).rows.map((row) => row.nodeId)
+  if (targetNodeIds.length === 0) {
+    return { planned: [], done: Promise.resolve({ succeeded: 0, failed: 0, generations: {} }) }
+  }
+  return startBatch({
+    videoId,
+    targetNodeIds,
+    reuseTargets: false,
+    forceFinal: true,
+    selectOnSettle: true,
+    onGenerationStarted
+  })
 }

@@ -78,6 +78,17 @@ export const videos = sqliteTable(
      */
     defaultAspectRatio: text('default_aspect_ratio'),
     defaultResolution: text('default_resolution'),
+    /**
+     * Draft mode (§6.1): while on, prepareRun substitutes each model's
+     * draftEquivalent — explore cheap, then "finalize" re-runs the keepers on
+     * the real models. Null/false = off.
+     */
+    draftMode: integer('draft_mode', { mode: 'boolean' }),
+    /**
+     * Vision QC (§6.2): while on, every successful image generation gets one
+     * cheap vision check (verdict stored on the generation row). Null/false = off.
+     */
+    qcEnabled: integer('qc_enabled', { mode: 'boolean' }),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },
@@ -160,6 +171,12 @@ export const generations = sqliteTable(
     lastFrameUploadedAt: integer('last_frame_uploaded_at'),
     /** Indicative kie.ai credit cost, computed from the model's declared rates at claim time. */
     creditsEstimated: real('credits_estimated'),
+    /** True when the run was substituted to the model's draftEquivalent (§6.1). */
+    draft: integer('draft', { mode: 'boolean' }),
+    /** Vision-QC verdict (§6.2): 'pass' | 'warn' | 'error' (QC call itself failed). Null = not checked. */
+    qcVerdict: text('qc_verdict', { enum: ['pass', 'warn', 'error'] }),
+    /** Human-readable QC issues, shown on the card and fed to "Fix with assistant". */
+    qcNotes: text('qc_notes'),
     errorMessage: text('error_message'),
     createdAt: integer('created_at').notNull(),
     completedAt: integer('completed_at')

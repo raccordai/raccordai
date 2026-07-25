@@ -11,7 +11,7 @@ import {
 import { onGenerationSettled } from '../bus'
 import { broadcastChatUpdate, broadcastWorkflowChanged } from '../events'
 import { AGENT_TOOLS } from '../mcp/registry'
-import { startBatch, videoNodeTargets } from './runBatch'
+import { finalizeVideo, planFinalize, startBatch, videoNodeTargets } from './runBatch'
 import {
   SUMMARY_SYSTEM,
   needsCompaction,
@@ -78,6 +78,8 @@ How to work:
 - Destructive tools (remove_node, delete_video, delete_project, delete_asset) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call.
 - When you launch run_node, the app automatically wakes you with a message once that generation finishes (success or failure) — you can tell the user you'll report back, then end your turn. Never poll get_generations to wait.
 - To generate SEVERAL shots, prefer ONE run_batch call (targetNodeIds, or all_videos: true for every video node) over chained run_node calls: it runs the whole subgraph dependency-aware — shared upstreams generate once, independent branches in parallel, already-satisfied nodes are reused — and wakes you as each generation settles.
+- Explore in draft, finalize once approved: draft mode (set_draft_mode) substitutes every run with the model's cheap draft equivalent (5–10× cheaper, generations stamped "draft") — propose it whenever the user is iterating. Once they approve the results, finalize_video re-runs the draft keepers on the REAL models and promotes them; call it with plan_only: true first and show the draft-vs-final cost.
+- When the video has vision QC enabled, every successful image generation is auto-reviewed and your wake-up message carries the verdict: leave "pass" alone, and on "WARN" read the notes, look at the output and propose a concrete fix (edit node, new prompt, re-run). review_generation re-checks a single generation on demand.
 - The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a character/décor/prop sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.
 - Plan before building: on any multi-shot build, call present_plan (structured shots + models + estimated credits + total) BEFORE import_workflow, and before launching a batch of runs whose total cost is significant. The user gets an approval card with Approve / Request changes — WAIT for their reply before executing. This is the validation gate before spending credits (the conversational sibling of the storyboard review).
 
@@ -89,7 +91,7 @@ You are also the film director. When the user asks for a video (an ad, an anime 
 5. Pre-visualize before spending video credits (Seedance 2): docs "designs" — design sheets (character/décor/prop) first, then one "storyboard" node per scene: a 9-panel grid built FROM the sheets (gpt-image-2-image-to-image) showing the scene beat by beat. Check the project library BEFORE generating a sheet: assets with designId/designSubject (see get_workflow, or search_assets) are published design sheets — reuse one for the same subject via a studio/asset node (reference inputs only, never a frame anchor) instead of regenerating it. And once the user approves a freshly generated sheet, publish_design it so the whole project can reuse it. The user reviews the staging on the grid, THEN you wire it as a reference on the scene's shots ("@ImageN is the 9-panel storyboard — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom"; the character sheet stays its own reference, and each shot's prompt says which panels it covers). MANDATORY on every storyboard-driven shot prompt, or the model may render the grid itself in the video: append "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout". The storyboard encodes composition — keep the video prompts about motion: camera, rhythm, transitions.
 6. Before writing ANY prompt, docs "prompting:<model id>" and follow that model's grammar exactly (camera vocabulary, dialogue syntax, @references, shot markers). Write prompts in English; per-shot: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
 7. Score last: add a Suno node once the shots exist, matching the style's music hint; wire it into Seedance reference_audio_urls when the model supports it.
-8. Report the estimated credit cost before proposing to run anything; propose running the cheap design/storyboard images first so the user validates the staging before any video shot.`
+8. Report the estimated credit cost before proposing to run anything; propose running the cheap design/storyboard images first so the user validates the staging before any video shot. For iteration-heavy work, propose draft mode (explore cheap, finalize_video the approved shots on the real models).`
 
 const SYSTEM_HOME = `You are the embedded assistant of Raccord, a node-based AI video studio — reached from the HOME screen, so you operate at PROJECT level: the user can ask you for a complete production from scratch ("create an anime project of 2.5 minutes about…") and you deliver the whole thing: project, video(s), art direction, full workflow.
 
@@ -107,7 +109,7 @@ How to deliver a full project:
 3. docs "models" FIRST — the frame-anchor vs reference distinction decides your wiring: character sheets/storyboards go to Seedance 2 reference_image_urls (with an explicit role in the prompt, they never appear on screen); Seedance 1.5 / Grok image inputs literally BECOME frames. docs "styles" → set_video_style; the style bible is appended automatically at run time to every visual node whose params carry "applyVideoStyle": true — set that flag on the visual nodes you create and NEVER paste the bible into a prompt. For standard shapes, scale a template (docs "template:<id>") to the requested duration. On an existing project, search_assets first: published design sheets (designId/designSubject set) are reused via studio/asset nodes (reference inputs only) instead of regenerating them; publish_design a newly approved sheet so later videos can reuse it.
 4. Build the graph in ONE import_workflow call (nodes + edges, left-to-right positions x: 0, 420, 840…, y by scene ~350): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); lastFrame chaining with "@Image3 as the first frame" (seamless cuts); one Suno music node per video matching the style's music hint.
 5. docs "prompting:<model id>" before writing ANY prompt. English prompts: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
-6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. Same gate before launching any significant batch of runs (they cost money). To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll.
+6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. Same gate before launching any significant batch of runs (they cost money). To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll. For iteration-heavy work, propose draft mode (set_draft_mode: every run substituted with a cheap draft equivalent), then finalize_video (plan_only: true first for the draft-vs-final cost) re-runs the approved keepers on the real models; when vision QC is enabled, wake-up messages carry a pass/warn verdict per image generation — only dig into the warns.
 
 The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a design sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.`
 
@@ -362,6 +364,35 @@ async function executeTool(
         label: `Batch started · ${planned.length} nodes`
       }
     }
+    // Same watched-generation wiring for the finalize batch (§6.1): the settle
+    // wake-up reports each real-model re-run back to the assistant.
+    case 'finalize_video': {
+      const tool = AGENT_TOOLS.find((t) => t.name === name)!
+      const args = injectBindingIds(tool, input, bindingFor(ctx))
+      const videoId = String(args['videoId'] ?? '')
+      if (!videoId) throw new Error('finalize_video needs a "videoId".')
+      const plan = planFinalize(videoId)
+      if (args['plan_only'] || plan.rows.length === 0) {
+        return {
+          result: JSON.stringify(plan),
+          mutatedVideoId: null,
+          label: `Finalize preview · ${plan.rows.length} draft nodes`
+        }
+      }
+      const session = sessionFor(ctx.sessionKey)
+      const { planned } = finalizeVideo(videoId, (_nodeId, generationId) => {
+        session.watched.add(generationId)
+        persistSession(ctx.sessionKey, session)
+      })
+      return {
+        result: JSON.stringify({
+          planned,
+          note: 'The finalize batch re-runs the draft keepers on the real models in the background and promotes each success to the node selection; you are woken automatically as each generation settles — never poll.'
+        }),
+        mutatedVideoId: videoId,
+        label: `Finalize started · ${planned.length} nodes`
+      }
+    }
     default: {
       // Everything else IS the registry (§4.10 phase 3): one execution path
       // shared with MCP, plus the chat-only concerns — session-id injection,
@@ -415,6 +446,11 @@ const CHAT_LABELS: Record<string, (args: Record<string, unknown>, result: unknow
     return `Style · ${styleId ? (getStyle(styleId)?.label ?? styleId) : 'none'}`
   },
   set_video_defaults: () => 'Video defaults updated',
+  set_draft_mode: (a) => `Draft mode ${a['enabled'] ? 'on' : 'off'}`,
+  review_generation: (_a, r) => {
+    const qc = r as { verdict?: string }
+    return `Vision QC · ${qc.verdict ?? '?'}`
+  },
   apply_video_defaults: (_a, r) =>
     `Defaults applied · ${(r as { updated?: number }).updated ?? 0} nodes`,
   get_workflow: () => 'Read workflow',
@@ -883,9 +919,19 @@ onGenerationSettled((event) => {
     const session = peekSession(sessionKey)
     if (!session || !session.watched.has(event.generationId)) continue
     session.watched.delete(event.generationId)
+    // §6.2 — surface the vision-QC verdict so the assistant only digs into
+    // what's wrong ("generate the whole film, wake me for the bad shots").
+    const qcNote =
+      event.qcVerdict === 'pass'
+        ? ' Vision QC: pass.'
+        : event.qcVerdict === 'warn'
+          ? ` Vision QC: WARN — ${event.qcNotes || 'issues found'}. Review the output and propose a fix.`
+          : event.qcVerdict === 'error'
+            ? ` Vision QC could not run (${event.qcNotes || 'unknown error'}).`
+            : ''
     const note =
       event.status === 'success'
-        ? `Generation ${event.generationId} (node ${event.nodeId}) finished successfully.`
+        ? `Generation ${event.generationId} (node ${event.nodeId}) finished successfully.${qcNote}`
         : `Generation ${event.generationId} (node ${event.nodeId}) FAILED: ${event.errorMessage ?? 'unknown error'}.`
     if (session.busy) {
       session.pending.push(note)

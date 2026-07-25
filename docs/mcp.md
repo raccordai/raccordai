@@ -45,6 +45,14 @@ A video can carry a **style template** (art direction): `get_workflow` returns
 its `styleId`, `set_video_style` changes it, and agents are instructed to append
 the style's _bible_ paragraph to every visual prompt (cross-shot consistency).
 
+Two video-level iteration switches (§6) ride the same surface: `set_draft_mode`
+makes every run substitute the model's cheap `draftEquivalent` (generations
+stamped `draft`; `finalize_video` re-runs the draft keepers on the real models
+and promotes them, `plan_only: true` for the draft-vs-final cost preview), and
+`review_generation` runs the vision QC on a successful image generation
+(automatic at settle when the video's QC option is on — verdict and notes come
+back in `get_generations`).
+
 ## Extending the server
 
 Everything lives in `src/main/mcp/`:

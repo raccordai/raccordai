@@ -30,6 +30,8 @@ export const gptImage2T2I: ModelDefinition<Params> = {
   description: 'Generate an image from a text prompt — no source image required.',
   kind: 'image',
   recommendedFor: ['text-to-image', 'style-frames'],
+  // No cheaper sibling — draft = same model floored to 1K (10 cr vs 30 at 4K).
+  draftEquivalent: { modelId: 'gpt-image-2-text-to-image', params: { resolution: '1K' } },
   paramsSchema,
   paramFields: [
     { key: 'prompt', label: 'Prompt', type: 'textarea', defaultValue: '' },

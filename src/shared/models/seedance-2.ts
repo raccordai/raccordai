@@ -24,6 +24,8 @@ export const seedance2: ModelDefinition<Params> = {
     'The full Seedance 2.0 tier — same @ reference system as Fast/Mini, plus 1080p and 4k output. For live-action realism and final masters; for animation, Fast matches its quality at a fraction of the cost.',
   kind: 'video',
   recommendedFor: ['photorealism', 'high-resolution', 'final-masters', 'character-consistency'],
+  // Identical schema/handles; 1080p/4k are floored to Fast's 720p cap by the draft layer.
+  draftEquivalent: { modelId: 'bytedance/seedance-2-fast' },
   paramsSchema,
   paramFields: [
     { key: 'prompt', label: 'Prompt', type: 'textarea', defaultValue: '' },

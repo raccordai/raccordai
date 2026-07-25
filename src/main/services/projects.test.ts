@@ -7,6 +7,8 @@ import {
   getVideo,
   listVideos,
   renameVideo,
+  setDraftMode,
+  setQcEnabled,
   setVideoDefaults,
   setVideoStyle
 } from './videos'
@@ -88,5 +90,19 @@ describe('videos', () => {
     setVideoDefaults(v.id, { defaultAspectRatio: null })
     setVideoDefaults(v.id, {})
     expect(getVideo(v.id)).toMatchObject({ defaultAspectRatio: null, defaultResolution: '1080p' })
+  })
+
+  it('toggles draft mode and vision QC (both default off)', () => {
+    const p = createProject('P')
+    const v = createVideo(p.id, 'V')
+    expect(v.draftMode).toBe(false)
+    expect(v.qcEnabled).toBe(false)
+
+    setDraftMode(v.id, true)
+    setQcEnabled(v.id, true)
+    expect(getVideo(v.id)).toMatchObject({ draftMode: true, qcEnabled: true })
+
+    setDraftMode(v.id, false)
+    expect(getVideo(v.id)).toMatchObject({ draftMode: false, qcEnabled: true })
   })
 })

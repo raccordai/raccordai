@@ -59,6 +59,43 @@ describe('model registry invariants', () => {
         expect(payload).toBeTypeOf('object')
         expect(Object.keys(payload).length).toBeGreaterThan(0)
       })
+
+      it('declares a coherent draftEquivalent when it has one (§6.1 draft mode)', () => {
+        const draft = model.draftEquivalent
+        if (!draft) return
+        const target = getModel(draft.modelId)
+        // Target must exist, be runnable the same way (kind drives result
+        // handling, provider drives polling) and not chain into another draft.
+        expect(target, `unknown draft model ${draft.modelId}`).toBeDefined()
+        expect(target!.kind).toBe(model.kind)
+        expect(target!.provider ?? 'jobs').toBe(model.provider ?? 'jobs')
+        if (target!.id !== model.id) expect(target!.draftEquivalent).toBeUndefined()
+        // Overridden params must pass the target's schema on top of this
+        // model's defaults (zod strips params the target doesn't declare).
+        const params = {
+          ...defaultParamsFor(model.id),
+          prompt: 'test prompt',
+          ...(draft.params ?? {})
+        }
+        const parsed = target!.paramsSchema.safeParse(params)
+        expect(parsed.success, JSON.stringify((parsed as { error?: unknown }).error)).toBe(true)
+        // Every input handle must land on a target handle (renamed via the
+        // mapping or verbatim) with the same media types and anchor semantics.
+        const mapping = draft.inputs ?? {}
+        for (const key of Object.keys(mapping)) {
+          expect(
+            model.inputs.some((h) => h.key === key),
+            `mapping source ${key}`
+          ).toBe(true)
+        }
+        for (const handle of model.inputs) {
+          const mappedKey = mapping[handle.key] ?? handle.key
+          const targetHandle = target!.inputs.find((h) => h.key === mappedKey)
+          expect(targetHandle, `no draft handle for ${model.id}.${handle.key}`).toBeDefined()
+          expect(targetHandle!.accepts).toEqual(handle.accepts)
+          expect(Boolean(targetHandle!.frameAnchor)).toBe(Boolean(handle.frameAnchor))
+        }
+      })
     })
   }
 })

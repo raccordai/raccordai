@@ -219,7 +219,7 @@ export async function kieGetSunoStatus(
 
 // ── Claude messages proxy (prompt refinement) ────────────────────────────────
 
-type ClaudeContentBlock =
+export type ClaudeContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; source: { type: 'url'; url: string } }
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }

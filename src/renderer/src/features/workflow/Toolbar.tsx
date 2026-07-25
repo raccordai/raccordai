@@ -6,6 +6,7 @@ import {
   ArrowRightToLine,
   ChevronDown,
   FileImage,
+  FlaskConical,
   FileVideo,
   FolderInput,
   Loader2,
@@ -69,6 +70,9 @@ export function WorkflowToolbar({
   const project = useProject(projectId).data
   const { mutate: setStyle } = useIpcMutation('videos:setStyle', [['videos']])
   const { mutate: setDefaults } = useIpcMutation('videos:setDefaults', [['videos']])
+  const { mutate: setDraftMode } = useIpcMutation('videos:setDraftMode', [['videos']])
+  const { mutate: setQcEnabled } = useIpcMutation('videos:setQcEnabled', [['videos']])
+  const [finalizeOpen, setFinalizeOpen] = useState(false)
   const { mutateAsync: applyDefaults } = useIpcMutation('nodes:applyVideoDefaults', [
     graphKeys.graph(videoId),
     ['history']
@@ -130,6 +134,14 @@ export function WorkflowToolbar({
       <span className="max-w-[10rem] truncate text-sm text-neutral-200" title={video?.name}>
         {video?.name ?? '…'}
       </span>
+      {video?.draftMode && (
+        <span
+          className="ml-1 flex flex-shrink-0 items-center gap-1 rounded-full bg-accent-soft/15 px-2 py-0.5 text-[10px] font-semibold text-accent-soft"
+          title={t('editor.draft.badgeTitle')}
+        >
+          <FlaskConical className="h-3 w-3" /> {t('editor.draft.badge')}
+        </span>
+      )}
 
       <div className="flex-1" />
 
@@ -153,7 +165,11 @@ export function WorkflowToolbar({
             toast.success(t('editor.videoDefaults.applied', { count: updated }))
           )
         }}
+        onSetDraftMode={(enabled) => setDraftMode({ videoId, enabled })}
+        onSetQcEnabled={(enabled) => setQcEnabled({ videoId, enabled })}
+        onFinalize={() => setFinalizeOpen(true)}
       />
+      {finalizeOpen && <FinalizeModal videoId={videoId} onClose={() => setFinalizeOpen(false)} />}
 
       <div className="mx-1.5 h-5 w-px bg-neutral-800" />
 
@@ -678,7 +694,10 @@ function StyleMenu({
   graph,
   onSelect,
   onSetDefaults,
-  onApplyDefaults
+  onApplyDefaults,
+  onSetDraftMode,
+  onSetQcEnabled,
+  onFinalize
 }: {
   video: Video | null | undefined
   graph: { nodes: GraphNode[] }
@@ -688,6 +707,9 @@ function StyleMenu({
     defaultResolution?: VideoResolution | null
   }) => void
   onApplyDefaults: () => void
+  onSetDraftMode: (enabled: boolean) => void
+  onSetQcEnabled: (enabled: boolean) => void
+  onFinalize: () => void
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -821,8 +843,145 @@ function StyleMenu({
               {t('editor.videoDefaults.apply', { count: applicableCount })}
             </Button>
           </div>
+
+          {/* §6 iteration loop: draft mode + vision QC + finalize */}
+          <div className="border-t border-neutral-800 p-3">
+            <label className="flex cursor-pointer items-start justify-between gap-3">
+              <span>
+                <span className="block text-xs text-neutral-200">{t('editor.draft.toggle')}</span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-neutral-500">
+                  {t('editor.draft.toggleHint')}
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={video?.draftMode ?? false}
+                onChange={(e) => onSetDraftMode(e.target.checked)}
+                className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-neutral-600 bg-neutral-900"
+              />
+            </label>
+            <label className="mt-3 flex cursor-pointer items-start justify-between gap-3">
+              <span>
+                <span className="block text-xs text-neutral-200">{t('editor.qc.toggle')}</span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-neutral-500">
+                  {t('editor.qc.toggleHint')}
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={video?.qcEnabled ?? false}
+                onChange={(e) => onSetQcEnabled(e.target.checked)}
+                className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-neutral-600 bg-neutral-900"
+              />
+            </label>
+            {video?.draftMode && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-3 w-full justify-center"
+                onClick={() => {
+                  setOpen(false)
+                  onFinalize()
+                }}
+              >
+                <FlaskConical className="h-3.5 w-3.5" /> {t('editor.draft.finalize')}
+              </Button>
+            )}
+          </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * §6.1 finalize preview: nodes whose selected generation is a draft, the
+ * credits already spent in draft vs the estimate on the real models, and the
+ * button that re-runs them all (the batch selects each success as it settles).
+ */
+function FinalizeModal({ videoId, onClose }: { videoId: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const toast = useToast()
+  const plan = useQuery({
+    queryKey: ['finalizePlan', videoId],
+    queryFn: () => invoke('generations:planFinalize', { videoId })
+  })
+  const rows = plan.data?.rows ?? []
+
+  function confirm() {
+    const count = rows.length
+    void invoke('generations:finalizeVideo', { videoId })
+      .then(({ succeeded, failed }) =>
+        toast.success(t('editor.draft.finalizeDone', { succeeded, failed }))
+      )
+      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : String(err)))
+    toast.success(t('editor.draft.finalizeStarted', { count }))
+    onClose()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="island w-full max-w-md px-5 py-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-sm font-semibold text-neutral-100">
+          {t('editor.draft.finalizeTitle')}
+        </h2>
+        <p className="mt-1 text-[11px] leading-snug text-neutral-500">
+          {t('editor.draft.finalizeHint')}
+        </p>
+        {plan.isLoading ? (
+          <div className="mt-3 flex items-center gap-2 text-xs text-neutral-500">
+            <Loader2 className="h-3 w-3 animate-spin" /> …
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="mt-3 text-xs text-neutral-500 italic">
+            {t('editor.draft.finalizeEmpty')}
+          </div>
+        ) : (
+          <>
+            <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto">
+              {rows.map((row) => (
+                <li key={row.nodeId} className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className="min-w-0 flex-1 truncate text-neutral-300">{row.label}</span>
+                  <span className="font-mono text-neutral-400">
+                    {row.draftCredits !== null
+                      ? t('editor.costModal.credits', { credits: row.draftCredits })
+                      : t('editor.costModal.unknownCost')}
+                    {' → '}
+                    {row.finalCredits !== null
+                      ? t('editor.costModal.credits', { credits: row.finalCredits })
+                      : t('editor.costModal.unknownCost')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 flex items-baseline justify-between border-t border-neutral-800 pt-2 text-xs">
+              <span className="font-semibold text-neutral-200">{t('editor.costModal.total')}</span>
+              <span className="font-mono font-semibold text-neutral-100">
+                {t('editor.costModal.credits', { credits: plan.data?.totalDraft ?? 0 })} (
+                {t('editor.draft.draftCost')}) {' → '}
+                {t('editor.costModal.credits', { credits: plan.data?.totalFinal ?? 0 })} (
+                {t('editor.draft.finalCost')})
+              </span>
+            </div>
+          </>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="primary" onClick={confirm} disabled={rows.length === 0} autoFocus>
+            {t('editor.draft.finalizeConfirm', { count: rows.length })}
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

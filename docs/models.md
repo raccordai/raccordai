@@ -53,6 +53,7 @@ export const myModel: ModelDefinition<Params> = {
   inputs, outputs,                       // graph handles
   buildPayload,                          // params+inputs → kie.ai body
   estimateCredits?,                      // indicative cost
+  draftEquivalent?,                      // cheap stand-in for draft mode (§6.1)
   promptingNotes?, promptGuide?,         // agent-facing guidance
 }
 ```
@@ -190,6 +191,29 @@ constants with a comment pointing at <https://kie.ai/pricing>; the kie
 dashboard is the authority, this is an order of magnitude. Omit entirely if no
 reliable rate is known — the UI then shows nothing (never guess).
 
+### `draftEquivalent` — draft mode (§6.1)
+
+Optional cheap stand-in used while the video's **draft mode** is on:
+`prepareRun` swaps the run to `{ modelId, params?, inputs? }` and stamps the
+generation `draft` (the input snapshot records the substituted model, so
+retries replay it). Rules, all registry-test enforced:
+
+- the target must exist, have the **same `kind` and `provider`** (polling and
+  result handling depend on them), and not chain into another draft;
+- `params` overlays the node's params; enum values the target doesn't accept
+  fall back to the target's defaults ("resolution floored"). `modelId` may be
+  the model's own id when the draft is just cheaper params (Kling `std`,
+  gpt-image `1K`);
+- every input handle must land on a target handle with the same `accepts` and
+  `frameAnchor` semantics — declare `inputs: { originalKey: draftKey }` when
+  the target names a handle differently (nano-banana → lite's `image_urls`);
+  arrays are clamped to the target handle's `maxCount`.
+
+The pure substitution logic lives in `src/shared/models/draft.ts`
+(`resolveDraftRun` / `remapDraftInputs`, unit-tested). A self-substitution
+that changes nothing returns null so already-cheap runs are never stamped
+draft (finalize would pointlessly re-run them).
+
 ### `promptingNotes` and `promptGuide` — the quality lever
 
 These two fields are how agents (embedded assistant + any MCP-connected agent)
@@ -219,6 +243,7 @@ afterthought.
 | Model swap       | params intersected by key, edges re-mapped by `accepts`/`kind`, else dropped   | `replaceNodeModel` in `graph.ts`                                          |
 | Run              | `paramsSchema.parse`, `required`/`maxCount` checks, `buildPayload`, `provider` | `prepareRun`/`submitGeneration` in `runEngine.ts`                         |
 | Credits          | `estimateCredits` → `creditsEstimated` → per-project totals                    | `runEngine.ts`, `projects:creditsUsage`                                   |
+| Draft mode       | `draftEquivalent` → substituted run + `draft` stamp; finalize re-runs          | `shared/models/draft.ts`, `prepareRun`, `runBatch.ts` (`planFinalize`)    |
 | Timeline         | `kind === 'video'`/`'audio'`, `params.duration`, `params.resolution`           | `Timeline.tsx` (`collectTimelineClips`, `clipDuration`), `TimelineV2.tsx` |
 | Continuity       | `lastFrame` output ← browser-side frame extraction                             | `useLastFrameExtractor.ts`                                                |
 | Assistant (chat) | `MODELS` (list_models tool), notes/guides                                      | `chat.ts`                                                                 |

@@ -18,6 +18,7 @@ import * as library from '../services/library'
 import * as projects from '../services/projects'
 import { kieGetCredits, kieTestApiKey } from '../services/kie'
 import * as notificationsService from '../services/notifications'
+import * as qcService from '../services/qc'
 import * as runBatchService from '../services/runBatch'
 import * as renderService from '../services/render'
 import * as runEngine from '../services/runEngine'
@@ -68,6 +69,12 @@ export function registerIpcHandlers(): void {
   handle('videos:setStyle', ({ videoId, styleId }) => videosService.setVideoStyle(videoId, styleId))
   handle('videos:setDefaults', ({ videoId, ...defaults }) =>
     videosService.setVideoDefaults(videoId, defaults)
+  )
+  handle('videos:setDraftMode', ({ videoId, enabled }) =>
+    videosService.setDraftMode(videoId, enabled)
+  )
+  handle('videos:setQcEnabled', ({ videoId, enabled }) =>
+    videosService.setQcEnabled(videoId, enabled)
   )
 
   handle('assets:listByProject', ({ projectId }) =>
@@ -194,6 +201,11 @@ export function registerIpcHandlers(): void {
     ({ videoId, targetNodeIds, reuseTargets }) =>
       runBatchService.startBatch({ videoId, targetNodeIds, reuseTargets }).done
   )
+  handle('generations:planFinalize', ({ videoId }) => runBatchService.planFinalize(videoId))
+  handle('generations:reviewGeneration', ({ generationId }) =>
+    qcService.reviewGeneration(generationId)
+  )
+  handle('generations:finalizeVideo', ({ videoId }) => runBatchService.finalizeVideo(videoId).done)
   handle('generations:refreshStatus', ({ nodeId }) => runEngine.refreshStatus(nodeId))
   handle('generations:cancel', ({ nodeId }) => runEngine.cancelGeneration(nodeId))
   handle('generations:setLastFrame', ({ generationId, jpegBase64 }) =>

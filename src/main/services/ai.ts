@@ -20,8 +20,9 @@ Rules:
 /**
  * The renderer addresses local media as media:// URLs, which kie.ai's Claude
  * proxy cannot fetch — resolve those to a base64 block instead.
+ * Shared with the vision QC service (qc.ts).
  */
-function imageBlockFor(
+export function imageBlockFor(
   imageUrl: string
 ):
   | { type: 'image'; source: { type: 'url'; url: string } }
@@ -39,7 +40,7 @@ function imageBlockFor(
     const gen = db.select().from(generations).where(eq(generations.id, id)).get()
     filePath = (url.pathname.includes('lastFrame') ? gen?.lastFramePath : gen?.resultPath) ?? null
   }
-  if (!filePath) throw new Error('Local image not found for prompt refinement.')
+  if (!filePath) throw new Error('Local image file not found.')
   return {
     type: 'image',
     source: {

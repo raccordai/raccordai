@@ -36,6 +36,12 @@ Typical session:
   4. add_node / connect_nodes / update_node — or import_workflow for a whole plan
   5. run_node (COSTS MONEY — each run calls the kie.ai API); completion is
      asynchronous: poll get_generations until status is success/failed.
+  6. Iterating? set_draft_mode makes every run substitute the model's cheap
+     draft equivalent (generations stamped "draft"); finalize_video (plan_only
+     first for the draft-vs-final cost) re-runs the approved keepers on the
+     real models. review_generation runs a vision QC (pass/warn + notes) on a
+     successful image generation; with the video's QC option on it runs
+     automatically at every image settle.
 
 Conventions:
   - Position nodes left-to-right (x: 0, 420, 840…; y spaced ~350).
@@ -121,7 +127,11 @@ function modelDetail(id: string): string {
     .join('\n')
   return `${m.label} — id "${m.id}" [${m.kind}]
 ${m.description}
-Recommended for: ${m.recommendedFor.join(', ')}
+Recommended for: ${m.recommendedFor.join(', ')}${
+    m.draftEquivalent
+      ? `\nDraft equivalent (used automatically in draft mode): ${m.draftEquivalent.modelId}${m.draftEquivalent.params ? ` with ${JSON.stringify(m.draftEquivalent.params)}` : ''}`
+      : ''
+  }
 
 Edge inputs (edge "input" values targeting this model):
 ${inputs}

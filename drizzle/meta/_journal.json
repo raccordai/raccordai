@@ -57,6 +57,13 @@
       "when": 1784832547429,
       "tag": "0007_simple_typhoid_mary",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784977282087,
+      "tag": "0008_soft_goliath",
+      "breakpoints": true
     }
   ]
 }

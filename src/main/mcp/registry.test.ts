@@ -63,7 +63,12 @@ describe('AGENT_TOOLS registry', () => {
 
   it('declares spending on everything that calls kie.ai generation', () => {
     const spending = AGENT_TOOLS.filter((t) => t.risk === 'spending').map((t) => t.name)
-    expect(spending.sort()).toEqual(['run_batch', 'run_node'])
+    expect(spending.sort()).toEqual([
+      'finalize_video',
+      'review_generation',
+      'run_batch',
+      'run_node'
+    ])
   })
 
   it('keeps settings and backup out of the registry', () => {

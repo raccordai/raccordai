@@ -5,6 +5,13 @@ import { isStyleId } from '@shared/styles/registry'
 import { getDb } from '../db/client'
 import { videos } from '../db/schema'
 
+export type VideoRow = typeof videos.$inferSelect
+
+/** DB row → DTO: the toggles are nullable columns (additive migration), booleans in the contract. */
+export function toVideo(row: VideoRow): Video {
+  return { ...row, draftMode: row.draftMode ?? false, qcEnabled: row.qcEnabled ?? false }
+}
+
 export function listVideos(projectId: string): Video[] {
   return getDb()
     .select()
@@ -12,10 +19,12 @@ export function listVideos(projectId: string): Video[] {
     .where(eq(videos.projectId, projectId))
     .orderBy(desc(videos.updatedAt))
     .all()
+    .map(toVideo)
 }
 
 export function getVideo(id: string): Video | null {
-  return getDb().select().from(videos).where(eq(videos.id, id)).get() ?? null
+  const row = getDb().select().from(videos).where(eq(videos.id, id)).get()
+  return row ? toVideo(row) : null
 }
 
 export function createVideo(projectId: string, name: string): Video {
@@ -27,6 +36,8 @@ export function createVideo(projectId: string, name: string): Video {
     styleId: null,
     defaultAspectRatio: null,
     defaultResolution: null,
+    draftMode: false,
+    qcEnabled: false,
     createdAt: now,
     updatedAt: now
   }
@@ -57,6 +68,24 @@ export function setVideoDefaults(
   getDb()
     .update(videos)
     .set({ ...patch, updatedAt: Date.now() })
+    .where(eq(videos.id, id))
+    .run()
+}
+
+/** Draft mode (§6.1): while on, prepareRun substitutes each model's draftEquivalent. */
+export function setDraftMode(id: string, enabled: boolean): void {
+  getDb()
+    .update(videos)
+    .set({ draftMode: enabled, updatedAt: Date.now() })
+    .where(eq(videos.id, id))
+    .run()
+}
+
+/** Vision QC (§6.2): while on, successful image generations get one cheap vision check. */
+export function setQcEnabled(id: string, enabled: boolean): void {
+  getDb()
+    .update(videos)
+    .set({ qcEnabled: enabled, updatedAt: Date.now() })
     .where(eq(videos.id, id))
     .run()
 }

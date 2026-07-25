@@ -14,6 +14,8 @@ import {
   Play,
   RefreshCw,
   Sparkles,
+  ShieldAlert,
+  ShieldCheck,
   Trash2,
   X
 } from 'lucide-react'
@@ -1143,6 +1145,11 @@ type GenRow = {
   url?: string | null
   createdAt: number
   errorMessage?: string | null
+  /** §6.1 — the run was substituted to the model's draft equivalent. */
+  draft?: boolean
+  /** §6.2 — vision-QC outcome ('error' = the QC call itself failed). */
+  qcVerdict?: 'pass' | 'warn' | 'error' | null
+  qcNotes?: string | null
 }
 
 function GenerationCard({
@@ -1277,6 +1284,38 @@ function GenerationCard({
       <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-1 text-[10px] text-neutral-500">
         <span>{new Date(g.createdAt).toLocaleString()}</span>
         <div className="flex items-center gap-1">
+          {g.draft && (
+            <span
+              className="rounded bg-accent-soft/15 px-1.5 py-0.5 text-accent-soft"
+              title={t('editor.draft.badgeTitle')}
+            >
+              {t('editor.draft.badge')}
+            </span>
+          )}
+          {g.qcVerdict === 'pass' && (
+            <span
+              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-success"
+              title={t('editor.qc.passTitle')}
+            >
+              <ShieldCheck className="h-3 w-3" /> {t('editor.qc.pass')}
+            </span>
+          )}
+          {g.qcVerdict === 'warn' && (
+            <span
+              className="flex items-center gap-0.5 rounded bg-warning/10 px-1.5 py-0.5 text-warning"
+              title={g.qcNotes ?? t('editor.qc.warnTitle')}
+            >
+              <ShieldAlert className="h-3 w-3" /> {t('editor.qc.warn')}
+            </span>
+          )}
+          {g.qcVerdict === 'error' && (
+            <span
+              className="rounded px-1.5 py-0.5 text-neutral-500"
+              title={t('editor.qc.errorTitle', { notes: g.qcNotes ?? '' })}
+            >
+              {t('editor.qc.error')}
+            </span>
+          )}
           {g.status === 'success' && onAskAssistant && (
             <button
               onClick={() => onAskAssistant(t('chat.adjustPromptPrefill', { label: nodeLabel }))}
@@ -1352,6 +1391,23 @@ function GenerationCard({
           )}
         </div>
       </div>
+
+      {/* §6.2 — the QC linter's report, with the fix gesture carrying the notes. */}
+      {g.qcVerdict === 'warn' && g.qcNotes && (
+        <div className="border-t border-warning/20 bg-warning/5 px-2 py-1.5">
+          <div className="text-[10px] leading-snug text-warning">{g.qcNotes}</div>
+          {onAskAssistant && (
+            <button
+              onClick={() =>
+                onAskAssistant(t('chat.qcFixPrefill', { label: nodeLabel, notes: g.qcNotes ?? '' }))
+              }
+              className="mt-1.5 flex items-center gap-1.5 rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-accent-soft hover:bg-accent/20"
+            >
+              <MessageSquare className="h-3 w-3" /> {t('editor.fixWithAssistant')}
+            </button>
+          )}
+        </div>
+      )}
 
       {error && !formOpen && <div className="px-2 pb-1 text-[10px] text-danger">{error}</div>}
 

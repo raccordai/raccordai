@@ -30,6 +30,8 @@ export const gptImage2I2I: ModelDefinition<Params> = {
   description: 'Edit or transform an input image with a text prompt.',
   kind: 'image',
   recommendedFor: ['image-editing', 'storyboards'],
+  // No cheaper sibling — draft = same model floored to 1K (10 cr vs 30 at 4K).
+  draftEquivalent: { modelId: 'gpt-image-2-image-to-image', params: { resolution: '1K' } },
   paramsSchema,
   // Indicative per-image rates by resolution — align with https://kie.ai/pricing.
   estimateCredits: (params) => ({ '1K': 10, '2K': 15, '4K': 30 })[params.resolution],

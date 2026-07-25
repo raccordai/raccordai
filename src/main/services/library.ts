@@ -1,6 +1,7 @@
 import { desc, eq, inArray } from 'drizzle-orm'
 import { getModel } from '@shared/models'
 import type { MediaKind } from './libraryTypes'
+import { toVideo } from './videos'
 import { getDb } from '../db/client'
 import { generations, nodes, projects, videos } from '../db/schema'
 
@@ -77,7 +78,7 @@ export function videosOverview(projectId: string) {
         .where(eq(nodes.videoId, video.id))
         .all()
       return {
-        ...video,
+        ...toVideo(video),
         nodeCount: nodeRows.length,
         clipCount: nodeRows.filter((n) => getModel(n.modelId)?.kind === 'video').length,
         ...thumbnailForVideos([video.id])
