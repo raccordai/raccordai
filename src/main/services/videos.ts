@@ -4,6 +4,7 @@ import type { Video } from '@shared/ipc/contracts'
 import { isStyleId } from '@shared/styles/registry'
 import { getDb } from '../db/client'
 import { videos } from '../db/schema'
+import { unbindThreadsOfVideo } from './chatStore'
 
 export type VideoRow = typeof videos.$inferSelect
 
@@ -95,6 +96,10 @@ export function renameVideo(id: string, name: string): void {
 }
 
 export function deleteVideo(id: string): void {
+  // chat_threads.video_id has no FK (a conversation outlives its video), so the
+  // demotion to "unbound" is explicit — otherwise a bound thread would keep
+  // injecting a dead videoId into every tool call.
+  unbindThreadsOfVideo(id)
   getDb().delete(videos).where(eq(videos.id, id)).run()
 }
 

@@ -36,9 +36,9 @@ export function broadcastCreditsChanged(): void {
   }
 }
 
-export function broadcastChatUpdate(videoId: string): void {
+export function broadcastChatUpdate(threadId: string): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send('event:chatUpdate', { videoId })
+    window.webContents.send('event:chatUpdate', { threadId })
   }
 }
 

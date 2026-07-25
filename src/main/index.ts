@@ -6,7 +6,13 @@ import { registerMediaProtocolHandler, registerMediaProtocolPrivileges } from '.
 import { startLocalApi } from './server'
 import { initNotifications } from './services/notifications'
 import { resumePolling } from './services/runEngine'
-import { backfillOnboardingCompleted } from './services/settings'
+import { ensureDefaultThread } from './services/chat'
+import { backfillChatThreads } from './services/chatStore'
+import {
+  backfillOnboardingCompleted,
+  getChatThreadsBackfilled,
+  setChatThreadsBackfilled
+} from './services/settings'
 import { initUpdater } from './services/updater'
 
 // Must run before app ready.
@@ -83,6 +89,10 @@ if (!app.requestSingleInstanceLock()) {
       registerMediaProtocolHandler()
       // Existing users (kie key already configured) never see the first-run overlay.
       backfillOnboardingCompleted()
+      // Pre-thread conversations become threads once, then the switcher is
+      // guaranteed to have at least one row to select.
+      backfillChatThreads(getChatThreadsBackfilled, setChatThreadsBackfilled)
+      ensureDefaultThread()
       registerIpcHandlers()
       initNotifications()
       resumePolling()

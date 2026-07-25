@@ -45,16 +45,18 @@ function dataUrlToChatImage(dataUrl: string): ChatImage | null {
  * the global AssistantSidebar; tool calls render as compact chips.
  */
 export function ChatPanel({
-  videoId,
+  threadId,
   projectId,
   emptyText,
   prefill,
   onPrefillConsumed,
   getContext,
-  onClose
+  onClose,
+  headerExtras
 }: {
-  videoId: string
-  /** '' for the home session (the assistant then works across projects). */
+  /** Conversation thread this panel is showing. */
+  threadId: string
+  /** '' for an unbound thread (the assistant then works across projects). */
   projectId: string
   /** Overrides the default empty-state hint (the home session has its own). */
   emptyText?: string
@@ -64,6 +66,9 @@ export function ChatPanel({
   /** Snapshot of what the user is looking at, attached to each send (§4.10). */
   getContext?: () => AppContext | undefined
   onClose: () => void
+  /** Header content replacing the plain title (the sidebar puts its switcher
+   *  and its "new chat" button there, so there is only ever one header bar). */
+  headerExtras?: React.ReactNode
 }): React.JSX.Element {
   const { t } = useTranslation()
   const toast = useToast()
@@ -107,8 +112,8 @@ export function ChatPanel({
     queryFn: () => invoke('settings:getAssistantModel')
   })
   const chat = useQuery({
-    queryKey: ['chat', videoId],
-    queryFn: () => invoke('chat:get', { videoId })
+    queryKey: ['chat', threadId],
+    queryFn: () => invoke('chat:get', { threadId })
   })
 
   // ── "/" actions and "@" mentions ──────────────────────────────────────────
@@ -187,11 +192,11 @@ export function ChatPanel({
   // Live updates pushed by the main process while the loop runs.
   useEffect(() => {
     return window.api.on('event:chatUpdate', (payload) => {
-      if ((payload as { videoId?: string })?.videoId === videoId) {
-        void queryClient.invalidateQueries({ queryKey: ['chat', videoId] })
+      if ((payload as { threadId?: string })?.threadId === threadId) {
+        void queryClient.invalidateQueries({ queryKey: ['chat', threadId] })
       }
     })
-  }, [videoId, queryClient])
+  }, [threadId, queryClient])
 
   // Keep the transcript pinned to the bottom (streaming text included).
   useEffect(() => {
@@ -206,13 +211,13 @@ export function ChatPanel({
   const send = useMutation({
     mutationFn: (args: { text: string; images: ChatImage[] }) =>
       invoke('chat:send', {
-        videoId,
+        threadId,
         projectId,
         text: args.text,
         images: args.images.length > 0 ? args.images : undefined,
         context: getContext?.()
       }),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['chat', videoId] })
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['chat', threadId] })
   })
 
   const busy = chat.data?.busy ?? false
@@ -232,30 +237,37 @@ export function ChatPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-neutral-100">
-          <MessageSquare className="h-3.5 w-3.5 text-accent" /> {t('chat.title')}
-          <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[9px] font-medium text-accent-soft">
-            {ASSISTANT_MODEL_SHORT[assistantModel.data ?? 'claude-opus-4-8']}
+      {/* One header bar, not two: the thread switcher lives here rather than in
+          a bordered row of its own, and the model is a muted caption instead of
+          a tinted badge — both took more room than they were worth. */}
+      <div className="flex items-center gap-1 border-b border-neutral-800 px-2 py-2">
+        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-accent" />
+        {headerExtras ?? (
+          <span className="min-w-0 flex-1 truncate px-1.5 text-sm font-semibold text-neutral-100">
+            {t('chat.title')}
           </span>
-        </h2>
-        <div className="flex items-center gap-0.5">
-          {(chat.data?.items.length ?? 0) > 0 && (
-            <button
-              onClick={() => void invoke('chat:clear', { videoId })}
-              className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-              title={t('chat.clear')}
-            >
-              <Eraser className="h-3.5 w-3.5" />
-            </button>
-          )}
+        )}
+        <span
+          className="shrink-0 px-1 text-[10px] text-neutral-600"
+          title={t('settings.assistantModel')}
+        >
+          {ASSISTANT_MODEL_SHORT[assistantModel.data ?? 'claude-opus-4-8']}
+        </span>
+        {(chat.data?.items.length ?? 0) > 0 && (
           <button
-            onClick={onClose}
-            className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            onClick={() => void invoke('chat:clear', { threadId })}
+            className="shrink-0 rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            title={t('chat.clear')}
           >
-            <X className="h-4 w-4" />
+            <Eraser className="h-3.5 w-3.5" />
           </button>
-        </div>
+        )}
+        <button
+          onClick={onClose}
+          className="shrink-0 rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">

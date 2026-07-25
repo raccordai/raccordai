@@ -64,6 +64,13 @@
       "when": 1784977282087,
       "tag": "0008_soft_goliath",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785004026023,
+      "tag": "0009_shiny_nehzno",
+      "breakpoints": true
     }
   ]
 }

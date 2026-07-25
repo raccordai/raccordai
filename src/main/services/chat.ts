@@ -22,7 +22,15 @@ import {
 } from './chatCompaction'
 import { formatAppContext } from './chatContext'
 import { SseParser, createAnthropicAccumulator, createResponsesAccumulator } from './chatStream'
-import { deleteChatSession, listChatSessions, loadChatSession, saveChatSession } from './chatStore'
+import {
+  createChatThread,
+  deleteChatSession,
+  findThreadIdsWatching,
+  listChatThreads,
+  loadChatSession,
+  renameChatThread,
+  saveChatSession
+} from './chatStore'
 import * as assets from './assets'
 import * as generations from './generations'
 import {
@@ -210,7 +218,7 @@ export function listAssistantTools(): { name: string; description: string }[] {
 // ── Tool execution against the local services ────────────────────────────────
 
 interface ToolCtx {
-  /** Chat session key: a videoId, or HOME_CHAT_ID for the home session. */
+  /** Conversation thread id. */
   sessionKey: string
   /** Bound video for per-video sessions; null for the home session. */
   videoId: string | null
@@ -699,6 +707,9 @@ interface Session {
   busy: boolean
   error: string | null
   projectId: string | null
+  /** Bound video (legacy threads); null = unbound, i.e. home prompt + toolset. */
+  videoId: string | null
+  title: string | null
   /** Generations launched via run_node — their completion resumes the loop. */
   watched: Set<string>
   /** Settle notes that arrived while the loop was busy. */
@@ -712,60 +723,109 @@ interface Session {
 
 const sessions = new Map<string, Session>()
 
-function sessionFor(videoId: string): Session {
-  let session = sessions.get(videoId)
+/**
+ * Threads deleted while a turn was in flight. That turn holds the Session by
+ * reference and re-persists it in its `finally`, which would resurrect the row
+ * with a half-finished transcript — so persistSession checks this first.
+ */
+const deletedThreads = new Set<string>()
+
+function sessionFor(threadId: string): Session {
+  let session = sessions.get(threadId)
   if (!session) {
     // A restart resumes the persisted transcript — including the watched
     // generation ids that drive the automatic wake-up (busy never survives
     // a restart: whatever turn was running died with the process).
-    const persisted = loadChatSession(videoId)
+    const persisted = loadChatSession(threadId)
     session = {
       history: persisted?.history ?? [],
       items: persisted?.items ?? [],
       busy: false,
       error: null,
       projectId: persisted?.projectId ?? null,
+      videoId: persisted?.videoId ?? null,
+      title: persisted?.title ?? null,
       watched: new Set(persisted?.watched ?? []),
       pending: [],
       pendingSends: [],
       partial: null
     }
-    sessions.set(videoId, session)
+    sessions.set(threadId, session)
   }
   return session
 }
 
 /** In-memory session, or a hydrated one if a transcript is persisted — never creates. */
-function peekSession(videoId: string): Session | null {
-  if (sessions.has(videoId)) return sessions.get(videoId)!
-  return loadChatSession(videoId) ? sessionFor(videoId) : null
+function peekSession(threadId: string): Session | null {
+  if (sessions.has(threadId)) return sessions.get(threadId)!
+  return loadChatSession(threadId) ? sessionFor(threadId) : null
 }
 
-function persistSession(videoId: string, session: Session): void {
-  // Video sessions need their projectId to persist; the home session has none.
-  if (videoId !== HOME_CHAT_ID && !session.projectId) return
-  saveChatSession(videoId, {
+function persistSession(threadId: string, session: Session): void {
+  if (deletedThreads.has(threadId)) return
+  saveChatSession(threadId, {
     projectId: session.projectId ?? '',
+    videoId: session.videoId,
+    title: session.title,
     history: session.history,
     items: session.items,
     watched: [...session.watched]
   })
 }
 
-export function getChatState(videoId: string): ChatState {
-  const { items, busy, error, partial } = sessionFor(videoId)
+export function getChatState(threadId: string): ChatState {
+  const { items, busy, error, partial } = sessionFor(threadId)
   return { items, busy, error, partialText: partial }
 }
 
-/** Persisted per-video threads for the sidebar's conversation switcher. */
-export function listSessions(): ReturnType<typeof listChatSessions> {
-  return listChatSessions()
+/** Threads for the sidebar switcher, most recently used first. */
+export function listThreads(): ReturnType<typeof listChatThreads> {
+  return listChatThreads()
 }
 
-export function clearChat(videoId: string): void {
-  sessions.delete(videoId)
-  deleteChatSession(videoId)
-  broadcastChatUpdate(videoId)
+/** Opens an empty conversation and returns its id. */
+export function newThread(options: { projectId?: string; videoId?: string | null } = {}): string {
+  const id = createChatThread(options)
+  broadcastChatUpdate(id)
+  return id
+}
+
+/**
+ * Guarantees the default conversation (HOME_CHAT_ID) always exists, so the
+ * renderer's initial selection resolves to the same thread every time. Created
+ * only when missing — never "when the table is empty": with backfilled legacy
+ * threads around, the sidebar would otherwise fall back to whichever of them
+ * was touched last, which is both surprising and (being video-bound) a
+ * different prompt and toolset. Called at startup, after the backfill.
+ */
+export function ensureDefaultThread(): void {
+  createChatThread({ id: HOME_CHAT_ID })
+}
+
+export function renameThread(threadId: string, title: string): void {
+  renameChatThread(threadId, title)
+  const session = sessions.get(threadId)
+  if (session) session.title = title
+  broadcastChatUpdate(threadId)
+}
+
+/** Clears a thread's transcript, keeping the thread itself. */
+export function clearChat(threadId: string): void {
+  const session = sessionFor(threadId)
+  session.history = []
+  session.items = []
+  session.watched.clear()
+  session.error = null
+  session.partial = null
+  persistSession(threadId, session)
+  broadcastChatUpdate(threadId)
+}
+
+export function deleteThread(threadId: string): void {
+  deletedThreads.add(threadId)
+  sessions.delete(threadId)
+  deleteChatSession(threadId)
+  broadcastChatUpdate(threadId)
 }
 
 /** One full agentic turn over whatever is already in the session history. */
@@ -777,7 +837,10 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
     )
   }
 
-  const isHome = sessionKey === HOME_CHAT_ID
+  // A thread is "home-like" unless it is bound to a video (legacy threads).
+  // Derived from the thread's own videoId — NOT from the session key, which is
+  // now an opaque thread id.
+  const isHome = session.videoId === null
   session.busy = true
   session.error = null
   broadcastChatUpdate(sessionKey)
@@ -844,7 +907,9 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
           const { result, mutatedVideoId, label, item } = await executeTool(
             toolUse.name,
             (toolUse.input ?? {}) as Record<string, unknown>,
-            { sessionKey, videoId: isHome ? null : sessionKey }
+            // The bound video comes from the thread, never from the key: the
+            // key is an opaque thread id and would be injected as a videoId.
+            { sessionKey, videoId: session.videoId }
           )
           session.items.push(item ?? { type: 'tool', name: toolUse.name, label, ok: true })
           results.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result })
@@ -968,12 +1033,13 @@ function injectSettleNotes(videoId: string, session: Session, notes: string[]): 
 }
 
 // A generation launched by the assistant settled → resume the conversation.
-// peekSession also hydrates persisted transcripts, so a generation that was
-// still polling across an app restart wakes the assistant up all the same.
-// The home session watches generations across ALL videos, so both keys are
-// candidates; whichever session actually watches this generation wins.
+// The watching thread is looked up in the STORE, not guessed from the event:
+// thread ids are opaque, so there is nothing to derive from a videoId. The
+// query also finds threads that are not in memory, which is what makes a
+// generation still polling across an app restart wake its conversation up.
+// peekSession then hydrates the persisted transcript.
 onGenerationSettled((event) => {
-  for (const sessionKey of [event.videoId, HOME_CHAT_ID]) {
+  for (const sessionKey of findThreadIdsWatching(event.generationId)) {
     const session = peekSession(sessionKey)
     if (!session || !session.watched.has(event.generationId)) continue
     session.watched.delete(event.generationId)
@@ -1032,15 +1098,25 @@ function pushUserHistory(
   })
 }
 
+/** Thread name derived from the first user message (trimmed to one short line). */
+function deriveTitle(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim()
+  return line.length > 60 ? `${line.slice(0, 57)}…` : line
+}
+
 export async function sendChatMessage(
-  videoId: string,
+  threadId: string,
   projectId: string,
   text: string,
   images: ChatImage[] = [],
   context?: AppContext
 ): Promise<ChatState> {
-  const session = sessionFor(videoId)
+  const session = sessionFor(threadId)
   session.projectId = projectId || session.projectId
+  // Unbound threads keep projectId '' on purpose: inheriting the project the
+  // user happened to be viewing would pin the thread to it forever
+  // (resolveProjectId prefers session.projectId over the <app-context>).
+  if (!session.title) session.title = deriveTitle(text)
 
   // The transcript shows only what the user typed (never the context block).
   session.items.push({
@@ -1056,12 +1132,12 @@ export async function sendChatMessage(
   // turn drains the queue.
   if (session.busy) {
     session.pendingSends.push({ text, images, context })
-    broadcastChatUpdate(videoId)
-    return getChatState(videoId)
+    broadcastChatUpdate(threadId)
+    return getChatState(threadId)
   }
 
   pushUserHistory(session, text, images, context)
-  persistSession(videoId, session)
-  await runTurn(videoId, session)
-  return getChatState(videoId)
+  persistSession(threadId, session)
+  await runTurn(threadId, session)
+  return getChatState(threadId)
 }

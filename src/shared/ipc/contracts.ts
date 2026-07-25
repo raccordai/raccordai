@@ -764,31 +764,44 @@ export const ipcContracts = {
   // Resolves true if a render was in flight and got cancelled.
   'render:cancel': { input: z.object({ videoId: z.string() }), output: z.boolean() },
 
-  'chat:get': { input: z.object({ videoId: z.string() }), output: chatStateSchema },
+  'chat:get': { input: z.object({ threadId: z.string() }), output: chatStateSchema },
   'chat:send': {
     input: z.object({
-      videoId: z.string(),
-      projectId: z.string(),
+      threadId: z.string(),
+      projectId: z.string().optional(),
       text: z.string().trim().min(1),
       images: z.array(chatImageSchema).max(4).optional(),
       context: appContextSchema.optional()
     }),
     output: chatStateSchema
   },
-  'chat:clear': { input: z.object({ videoId: z.string() }), output: z.void() },
-  /** Persisted per-video threads for the sidebar's conversation switcher
-   *  (§4.10 phase 5) — the global thread is implicit and always first. */
-  'chat:listSessions': {
+  /** Empties a thread's transcript, keeping the thread. */
+  'chat:clear': { input: z.object({ threadId: z.string() }), output: z.void() },
+  /** Conversation threads for the sidebar switcher, most recent first. */
+  'chat:listThreads': {
     input: z.void(),
     output: z.array(
       z.object({
-        videoId: z.string(),
+        id: z.string(),
+        title: z.string().nullable(),
         projectId: z.string(),
+        videoId: z.string().nullable(),
         videoName: z.string().nullable(),
+        createdAt: z.number(),
         updatedAt: z.number()
       })
     )
   },
+  /** Opens an empty conversation; returns its id. */
+  'chat:newThread': {
+    input: z.object({ projectId: z.string().optional() }),
+    output: z.object({ threadId: z.string() })
+  },
+  'chat:renameThread': {
+    input: z.object({ threadId: z.string(), title: z.string().trim().min(1).max(120) }),
+    output: z.void()
+  },
+  'chat:deleteThread': { input: z.object({ threadId: z.string() }), output: z.void() },
   /** Assistant capabilities for the chat input's "/" action menu — name +
    *  first sentence of the tool description (product data, English). */
   'chat:listTools': {

@@ -149,6 +149,19 @@ export function setAssistantRunApproval(mode: AssistantRunApproval): void {
   setSetting('assistantRunApproval', assistantRunApprovalSchema.parse(mode))
 }
 
+/**
+ * Marker for the one-time import of the pre-thread chat tables. A flag, not an
+ * "is the table empty?" check: a user who deletes every thread must not get the
+ * legacy conversations back on the next launch.
+ */
+export function getChatThreadsBackfilled(): boolean {
+  return getSetting('chatThreadsBackfilled') === true
+}
+
+export function setChatThreadsBackfilled(): void {
+  setSetting('chatThreadsBackfilled', true)
+}
+
 const updateChannelSchema = z.enum(['stable', 'beta'])
 export type UpdateChannel = z.infer<typeof updateChannelSchema>
 

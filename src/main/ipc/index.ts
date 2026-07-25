@@ -312,11 +312,16 @@ export function registerIpcHandlers(): void {
   })
   handle('render:cancel', ({ videoId }) => renderService.cancelRender(videoId))
 
-  handle('chat:get', ({ videoId }) => chatService.getChatState(videoId))
-  handle('chat:send', ({ videoId, projectId, text, images, context }) =>
-    chatService.sendChatMessage(videoId, projectId, text, images, context)
+  handle('chat:get', ({ threadId }) => chatService.getChatState(threadId))
+  handle('chat:send', ({ threadId, projectId, text, images, context }) =>
+    chatService.sendChatMessage(threadId, projectId ?? '', text, images, context)
   )
-  handle('chat:clear', ({ videoId }) => chatService.clearChat(videoId))
-  handle('chat:listSessions', () => chatService.listSessions())
+  handle('chat:clear', ({ threadId }) => chatService.clearChat(threadId))
+  handle('chat:listThreads', () => chatService.listThreads())
+  handle('chat:newThread', ({ projectId }) => ({
+    threadId: chatService.newThread(projectId ? { projectId } : {})
+  }))
+  handle('chat:renameThread', ({ threadId, title }) => chatService.renameThread(threadId, title))
+  handle('chat:deleteThread', ({ threadId }) => chatService.deleteThread(threadId))
   handle('chat:listTools', () => chatService.listAssistantTools())
 }

@@ -181,10 +181,16 @@ async function waitFor(fn, timeoutMs, label) {
 }
 
 const DB_PATH = path.join(os.homedir(), 'Library/Application Support/Raccord/raccord.db')
+/** Sentinel id of the default conversation thread (HOME_CHAT_ID). */
+const HOME_THREAD_ID = 'home'
 
 async function main() {
-  // Fresh home-assistant transcript so the scripted conversation starts clean.
-  execFileSync('sqlite3', [DB_PATH, "DELETE FROM chat_home_session WHERE id='home';"])
+  // Fresh transcript for the thread the sidebar opens on, so the scripted
+  // conversation starts clean. The app reads chat_threads now, but the delete
+  // stays SCOPED to the default thread — this runs against the developer's real
+  // database, and a blanket `DELETE FROM chat_threads` would take their other
+  // conversations with it.
+  execFileSync('sqlite3', [DB_PATH, `DELETE FROM chat_threads WHERE id='${HOME_THREAD_ID}';`])
   // The mock scripts the Claude proxy: force the default model for this run,
   // restoring the user's choice afterwards.
   const prevModel = execFileSync('sqlite3', [
@@ -306,9 +312,10 @@ async function main() {
   await app.close()
   server.close()
 
-  // Remove artifacts we created (never a pre-existing key).
+  // Remove artifacts we created (never a pre-existing key, never a thread the
+  // developer started — only the default one this run scripted).
   const cleanupSql = [
-    "DELETE FROM chat_home_session WHERE id='home';",
+    `DELETE FROM chat_threads WHERE id='${HOME_THREAD_ID}';`,
     createdKey ? "DELETE FROM settings WHERE key='kieApiKeyEncrypted';" : ''
   ].join(' ')
   execFileSync('sqlite3', [DB_PATH, cleanupSql])

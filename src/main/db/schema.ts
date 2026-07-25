@@ -226,3 +226,29 @@ export const chatHomeSession = sqliteTable('chat_home_session', {
   watched: text('watched', { mode: 'json' }).$type<string[]>().notNull(),
   updatedAt: integer('updated_at').notNull()
 })
+
+/**
+ * Assistant conversations as first-class THREADS: the user can open a new chat
+ * at any time instead of erasing the single global one. Supersedes
+ * chat_sessions / chat_home_session, which stay in the schema (migrations are
+ * additive) and are read once by `backfillChatThreads` so existing transcripts
+ * carry over.
+ *
+ * `video_id` deliberately carries NO foreign key: a thread outlives the video
+ * it was started from (deleting the video demotes the thread to unbound rather
+ * than silently destroying the conversation). Unbound threads (`video_id` null)
+ * use the home prompt + explicit-id toolset.
+ */
+export const chatThreads = sqliteTable('chat_threads', {
+  id: text('id').primaryKey(),
+  /** Display name, derived from the first user message (renameable). */
+  title: text('title'),
+  /** '' when the thread is not tied to a project. */
+  projectId: text('project_id').notNull(),
+  videoId: text('video_id'),
+  history: text('history', { mode: 'json' }).notNull(),
+  items: text('items', { mode: 'json' }).notNull(),
+  watched: text('watched', { mode: 'json' }).$type<string[]>().notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
