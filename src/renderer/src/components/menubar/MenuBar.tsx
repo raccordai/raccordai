@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -7,6 +8,9 @@ import {
   type Dispatch,
   type SetStateAction
 } from 'react'
+import { useDismissable } from '@renderer/components/ui/useDismissable'
+import { shortcutLabel } from '@renderer/components/ui/useShortcut'
+import type { ShortcutId } from '@renderer/lib/shortcuts'
 
 // App menu bar (Figma-style, in the title bar) — pages contribute menus while
 // they are mounted via useAppMenus(); the header renders them with <MenuBar />.
@@ -16,6 +20,8 @@ export interface MenuEntry {
   label: string
   onSelect: () => void
   disabled?: boolean
+  /** Registered binding, rendered right-aligned (the caller also binds it). */
+  shortcut?: ShortcutId
 }
 
 /** Sections are separated by a thin rule inside the dropdown. */
@@ -89,28 +95,31 @@ export function MenuBar() {
   const rootRef = useRef<HTMLDivElement>(null)
 
   // Close on outside click / Escape (menu buttons toggle themselves).
-  useEffect(() => {
-    if (!openId) return
-    function onPointerDown(e: PointerEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpenId(null)
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpenId(null)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [openId])
+  const close = useCallback(() => setOpenId(null), [])
+  useDismissable(openId !== null, close, rootRef)
 
   if (menus.length === 0) return null
 
   return (
-    <div ref={rootRef} className="no-drag flex items-center gap-0.5">
+    // `relative z-50` keeps the bar above its own dismiss overlay, so hovering
+    // between menus and re-clicking the open one still work.
+    <div ref={rootRef} className="no-drag relative z-50 flex items-center gap-0.5">
+      {/*
+        The header is an Electron drag region (`-webkit-app-region: drag`), and
+        macOS swallows pointer events over it — the document listener in
+        useDismissable never sees a click on the empty strip of the title bar,
+        so the menu stayed open. This overlay is `no-drag`, so those clicks
+        reach the renderer again; it also covers the rest of the window, which
+        is the usual "first click dismisses the menu" behaviour.
+      */}
+      {openId !== null && (
+        <div className="no-drag fixed inset-0 z-40" onPointerDown={close} aria-hidden="true" />
+      )}
       {menus.map((menu) => (
-        <div key={menu.id} className="relative">
+        // z-50 keeps the trigger above the dismiss overlay below (they are
+        // siblings, so the overlay's z-40 would otherwise cover the buttons and
+        // swallow the re-click that closes the menu).
+        <div key={menu.id} className="relative z-50">
           <button
             onClick={() => setOpenId((v) => (v === menu.id ? null : menu.id))}
             // Once a menu is open, hovering a sibling switches to it (native menu bar UX).
@@ -136,9 +145,14 @@ export function MenuBar() {
                         setOpenId(null)
                         entry.onSelect()
                       }}
-                      className="flex w-full items-center px-3 py-1.5 text-left text-sm text-neutral-200 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:text-neutral-600 disabled:hover:bg-transparent"
+                      className="flex w-full items-center gap-6 px-3 py-1.5 text-left text-sm text-neutral-200 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:text-neutral-600 disabled:hover:bg-transparent"
                     >
-                      {entry.label}
+                      <span className="flex-1">{entry.label}</span>
+                      {entry.shortcut && (
+                        <span className="shrink-0 text-xs text-neutral-500">
+                          {shortcutLabel(entry.shortcut)}
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>

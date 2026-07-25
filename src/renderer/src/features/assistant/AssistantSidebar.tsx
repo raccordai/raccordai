@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HOME_CHAT_ID, type AppContext } from '@shared/ipc/contracts'
 import { useConfirm } from '@renderer/components/feedback/Feedback'
+import { useDismissable } from '@renderer/components/ui/useDismissable'
+import { useShortcut } from '@renderer/components/ui/useShortcut'
 import { ChatPanel } from '@renderer/features/workflow/ChatPanel'
 import { invoke } from '@renderer/lib/ipc'
 import { getEditorContext } from './appContextStore'
@@ -13,6 +15,7 @@ import {
   ASSISTANT_MIN_WIDTH,
   closeAssistant,
   consumeAssistantPrefill,
+  openAssistant,
   setAssistantWidth,
   useAssistant
 } from './assistantStore'
@@ -79,6 +82,12 @@ export function AssistantSidebar(): React.JSX.Element | null {
       selectThread(threadId)
       void queryClient.invalidateQueries({ queryKey: ['chat', 'threads'] })
     }
+  })
+
+  // ⇧⌘N opens a chat from anywhere — and opens the sidebar first if it's shut.
+  useShortcut('newChat', () => {
+    if (!open) openAssistant()
+    newThread.mutate()
   })
 
   // What the user is LOOKING at (independent of the selected thread): route +
@@ -191,21 +200,11 @@ function ThreadSwitcher({
   const rootRef = useRef<HTMLDivElement>(null)
 
   // Close on outside click / Escape (the button toggles itself).
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(e: PointerEvent): void {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    function onKeyDown(e: KeyboardEvent): void {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
+  useDismissable(
+    open,
+    useCallback(() => setOpen(false), []),
+    rootRef
+  )
 
   const refresh = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['chat', 'threads'] })

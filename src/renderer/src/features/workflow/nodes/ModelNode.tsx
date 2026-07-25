@@ -11,11 +11,12 @@ import {
   Trash2,
   X
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { GraphNode } from '@shared/ipc/contracts'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
+import { useDismissable } from '@renderer/components/ui/useDismissable'
 import { VideoThumb } from '@renderer/components/VideoThumb'
 import { MODELS, getModel, type ModelDefinition } from '@shared/models'
 import { incomingConnectionsFor, useWorkflowGraph } from '../workflowContext'
@@ -62,6 +63,14 @@ function ReplaceModelMenu({ node, model }: { node: GraphNode; model: ModelDefini
   const { t } = useTranslation()
   const confirmModal = useConfirm()
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  // Replaces a `fixed inset-0` catcher, which dismissed the menu but also ate
+  // the click it was aimed at (and never handled Escape).
+  useDismissable(
+    open,
+    useCallback(() => setOpen(false), []),
+    rootRef
+  )
   const replaceModel = useIpcMutation('nodes:replaceModel', [
     graphKeys.graph(node.videoId),
     ['generations']
@@ -85,7 +94,7 @@ function ReplaceModelMenu({ node, model }: { node: GraphNode; model: ModelDefini
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <button
         onClick={(e) => {
           e.stopPropagation()
@@ -97,33 +106,23 @@ function ReplaceModelMenu({ node, model }: { node: GraphNode; model: ModelDefini
         <Replace className="h-3.5 w-3.5" />
       </button>
       {open && (
-        <>
-          {/* click-away catcher */}
-          <div
-            className="fixed inset-0 z-30"
-            onClick={(e) => {
-              e.stopPropagation()
-              setOpen(false)
-            }}
-          />
-          <div className="absolute right-0 z-40 mt-1 w-56 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">
-            <div className="border-b border-neutral-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-              Replace with
-            </div>
-            <div className="py-1">
-              {targets.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={(e) => choose(e, m.id)}
-                  className="flex w-full flex-col items-start px-3 py-1.5 text-left hover:bg-neutral-800"
-                >
-                  <span className="text-sm text-neutral-200">{m.label}</span>
-                  <span className="font-mono text-[10px] text-neutral-600">{m.id}</span>
-                </button>
-              ))}
-            </div>
+        <div className="absolute right-0 z-40 mt-1 w-56 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">
+          <div className="border-b border-neutral-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+            Replace with
           </div>
-        </>
+          <div className="py-1">
+            {targets.map((m) => (
+              <button
+                key={m.id}
+                onClick={(e) => choose(e, m.id)}
+                className="flex w-full flex-col items-start px-3 py-1.5 text-left hover:bg-neutral-800"
+              >
+                <span className="text-sm text-neutral-200">{m.label}</span>
+                <span className="font-mono text-[10px] text-neutral-600">{m.id}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )

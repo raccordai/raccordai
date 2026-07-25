@@ -39,6 +39,7 @@ export default defineConfig({
         'src/main/services/backup.ts',
         'src/main/media/files.ts',
         'src/renderer/src/lib/relativeTime.ts',
+        'src/renderer/src/lib/shortcuts.ts',
         'src/renderer/src/lib/formatSeconds.ts',
         'src/renderer/src/lib/mentionToken.ts'
       ],

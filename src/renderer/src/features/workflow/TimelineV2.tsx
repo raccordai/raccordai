@@ -18,6 +18,7 @@ import type { WorkflowGraph } from './workflowContext'
 import { bestGeneration, clipDuration, collectTimelineClips } from '@shared/timeline'
 import { useResizableHeight } from './timelineHooks'
 import { formatSeconds } from '../../lib/formatSeconds'
+import { useShortcut } from '../../components/ui/useShortcut'
 import { VideoThumb } from '../../components/VideoThumb'
 
 /** Timeline clock formatting: tenth-of-a-second precision, never raw floats. */
@@ -424,28 +425,14 @@ export function TimelineV2({
 
   // Space = play/pause everywhere in the editor (FCP-style), except while typing.
   const { playing, play, pause } = engine
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || e.repeat) return
-      const target = e.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          // A focused <video> (generation card, lightbox) owns Space for its own play/pause.
-          target.tagName === 'VIDEO' ||
-          target.isContentEditable)
-      ) {
-        return
-      }
-      // preventDefault also keeps a focused button from being "clicked" by Space.
-      e.preventDefault()
-      if (playing) pause()
-      else play()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [playing, play, pause])
+  useShortcut('playPause', (event) => {
+    if (event.repeat) return
+    // A focused <video> (generation card, lightbox) owns Space for its own
+    // play/pause — the shared typing guard doesn't cover that case.
+    if ((event.target as HTMLElement | null)?.tagName === 'VIDEO') return
+    if (playing) pause()
+    else play()
+  })
 
   if (collapsed) {
     return (

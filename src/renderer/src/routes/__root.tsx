@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, createRootRoute, useRouter, useRouterState } from '@tanstack/react-router'
 import { KeyRound, MessageSquare, Settings } from 'lucide-react'
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HeaderActions, MenuBar, MenuBarProvider } from '@renderer/components/menubar/MenuBar'
 import { FeedbackProvider } from '@renderer/components/feedback/Feedback'
 import { HeaderCredits } from '@renderer/components/HeaderCredits'
 import { Button } from '@renderer/components/ui/Button'
+import { useShortcut } from '@renderer/components/ui/useShortcut'
 import { AssistantSidebar } from '@renderer/features/assistant/AssistantSidebar'
 import { toggleAssistant, useAssistant } from '@renderer/features/assistant/assistantStore'
 import { FirstRunOverlay } from '@renderer/features/onboarding/FirstRunOverlay'
@@ -18,7 +19,6 @@ export const Route = createRootRoute({
 })
 
 function RootLayout(): React.JSX.Element {
-  const { t } = useTranslation()
   const router = useRouter()
 
   // The assistant's open_video tool pushes a route for the app to follow.
@@ -29,17 +29,7 @@ function RootLayout(): React.JSX.Element {
     })
   }, [router])
 
-  // Global assistant shortcut — ⌘J (mac) / Ctrl+J.
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent): void {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
-        e.preventDefault()
-        toggleAssistant()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  useShortcut('toggleAssistant', toggleAssistant)
 
   return (
     <MenuBarProvider>
@@ -52,13 +42,7 @@ function RootLayout(): React.JSX.Element {
             <HeaderCredits />
             <HeaderActions />
             <AssistantToggle />
-            <Link
-              to="/settings"
-              className="rounded-md p-1.5 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-              title={t('settings.title')}
-            >
-              <Settings className="h-4 w-4" />
-            </Link>
+            <SettingsToggle />
           </header>
           <MissingKeyBanner />
           <div className="flex min-h-0 flex-1">
@@ -71,6 +55,46 @@ function RootLayout(): React.JSX.Element {
         <FirstRunOverlay />
       </FeedbackProvider>
     </MenuBarProvider>
+  )
+}
+
+/**
+ * Settings gear — a TOGGLE, not a one-way link: clicking it while already on
+ * /settings goes back where you came from. Anything that opens from a button
+ * should close from that same button; the gear was the one place in the header
+ * that didn't.
+ *
+ * The origin is remembered rather than using `history.back()`, which would walk
+ * back into an earlier route if the user navigated within /settings, or do
+ * nothing at all when settings was the first screen.
+ */
+function SettingsToggle(): React.JSX.Element {
+  const { t } = useTranslation()
+  const router = useRouter()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const onSettings = pathname === '/settings'
+  const origin = useRef('/')
+  if (!onSettings) origin.current = pathname
+
+  const toggle = useCallback(() => {
+    router.navigate({ to: onSettings ? origin.current : '/settings' })
+  }, [router, onSettings])
+
+  useShortcut('openSettings', toggle)
+
+  return (
+    <button
+      onClick={toggle}
+      aria-pressed={onSettings}
+      className={`rounded-md p-1.5 ${
+        onSettings
+          ? 'bg-neutral-800 text-neutral-200'
+          : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200'
+      }`}
+      title={t('settings.title')}
+    >
+      <Settings className="h-4 w-4" />
+    </button>
   )
 }
 

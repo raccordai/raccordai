@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { nameMatchesQuery } from '@shared/assets/search'
 import { LibraryCard } from '@renderer/components/LibraryCard'
 import { useConfirm } from '@renderer/components/feedback/Feedback'
+import { useShortcut } from '@renderer/components/ui/useShortcut'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
 
@@ -31,6 +32,9 @@ function LibraryPage(): React.JSX.Element {
     () => (projects.data ?? []).filter((p) => nameMatchesQuery(p.name, query)),
     [projects.data, query]
   )
+
+  // ⌘N opens the new-project form (⇧⌘N is the assistant's new chat).
+  useShortcut('newProject', () => setShowForm(true))
 
   const invalidate = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['projects'] })

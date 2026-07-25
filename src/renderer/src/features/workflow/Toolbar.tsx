@@ -20,7 +20,7 @@ import {
   Sparkles,
   Undo2
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type {
@@ -36,6 +36,7 @@ import { STYLES } from '@shared/styles/registry'
 import { DESIGN_RECIPES, type DesignRecipe } from '@shared/designs/registry'
 import { invoke } from '@renderer/lib/ipc'
 import { Button } from '@renderer/components/ui/Button'
+import { useDismissable } from '@renderer/components/ui/useDismissable'
 import { useToast } from '@renderer/components/feedback/Feedback'
 import { Logo } from '@renderer/components/Logo'
 import { graphKeys, useIpcMutation, useProject, useVideo } from './data'
@@ -300,8 +301,14 @@ export interface AddNodeActions {
 function AddNodeMenu(props: AddNodeActions) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const close = useCallback(() => setOpen(false), [])
+  // Was dismissed by the search input's onBlur + a 150 ms timer, which only
+  // fired when the click landed on something focusable.
+  useDismissable(open, close, rootRef)
+
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <Button
         variant="secondary"
         size="sm"
@@ -312,7 +319,7 @@ function AddNodeMenu(props: AddNodeActions) {
       </Button>
       {open && (
         <div className="absolute left-0 z-20 mt-1">
-          <AddNodePanel {...props} onClose={() => setOpen(false)} />
+          <AddNodePanel {...props} onClose={close} />
         </div>
       )}
     </div>
@@ -343,16 +350,6 @@ export function AddNodePanel({
   const inputRef = useRef<HTMLInputElement>(null)
   const designInputRef = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
-  // Mirrors for the search input's onBlur timeout (the state values are stale there).
-  const pendingDesignRef = useRef<DesignRecipe | null>(null)
-  const libraryOpenRef = useRef(false)
-  useEffect(() => {
-    pendingDesignRef.current = pendingDesign
-  }, [pendingDesign])
-  useEffect(() => {
-    libraryOpenRef.current = libraryOpen
-  }, [libraryOpen])
-
   const entries = useMemo<AddEntry[]>(
     () => [
       ...(onAddFromLibrary && (libraryAssets?.length ?? 0) > 0
@@ -509,7 +506,6 @@ export function AddNodePanel({
                 setPendingDesign(null)
               }
             }}
-            onBlur={() => setTimeout(close, 150)}
             placeholder={t(`designs.${pendingDesign.id}.placeholder` as never)}
             className="mt-2 w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
           />
@@ -554,7 +550,6 @@ export function AddNodePanel({
                 setLibraryOpen(false)
               }
             }}
-            onBlur={() => setTimeout(close, 150)}
             placeholder={t('editor.designLibraryFilter')}
             className="mt-2 w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
           />
@@ -608,12 +603,6 @@ export function AddNodePanel({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
-              onBlur={() =>
-                setTimeout(() => {
-                  // Not when the blur is the hand-off to a second-step input.
-                  if (!pendingDesignRef.current && !libraryOpenRef.current) close()
-                }, 150)
-              }
               placeholder={t('editor.filterPlaceholder')}
               className="w-full bg-transparent text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
             />
@@ -716,15 +705,12 @@ function StyleMenu({
   const rootRef = useRef<HTMLDivElement>(null)
   const current = video?.styleId ?? null
 
-  // Close on outside click (an onBlur close would swallow the selects inside).
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(e: PointerEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [open])
+  // Outside click + Escape (an onBlur close would swallow the selects inside).
+  useDismissable(
+    open,
+    useCallback(() => setOpen(false), []),
+    rootRef
+  )
 
   function choose(styleId: string | null) {
     onSelect(styleId)
@@ -998,18 +984,25 @@ function Dropdown({
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  useDismissable(
+    open,
+    useCallback(() => setOpen(false), []),
+    rootRef
+  )
+
   return (
-    <div className="relative">
-      <Button
-        variant={variant}
-        size="sm"
-        onClick={() => setOpen((v) => !v)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-      >
+    <div className="relative" ref={rootRef}>
+      <Button variant={variant} size="sm" onClick={() => setOpen((v) => !v)}>
         {icon} {label}
       </Button>
       {open && (
-        <div className="absolute left-0 z-20 mt-1 min-w-48 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">
+        <div
+          // Dismissal is the container's job now, so items can close it on a
+          // plain click instead of racing an onBlur timer with onMouseDown.
+          onClick={() => setOpen(false)}
+          className="absolute left-0 z-20 mt-1 min-w-48 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl"
+        >
           {children}
         </div>
       )}
@@ -1028,10 +1021,7 @@ function DropdownItem({
 }) {
   return (
     <button
-      onMouseDown={(e) => {
-        e.preventDefault()
-        onClick()
-      }}
+      onClick={onClick}
       className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-neutral-200 hover:bg-neutral-800"
     >
       {icon} {children}

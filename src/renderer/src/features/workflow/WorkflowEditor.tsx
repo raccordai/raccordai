@@ -17,6 +17,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { FocusNodePayload, GraphNode } from '@shared/ipc/contracts'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
+import { useDismissable } from '@renderer/components/ui/useDismissable'
+import { useShortcut } from '@renderer/components/ui/useShortcut'
 import { invoke } from '@renderer/lib/ipc'
 import { ModelNode, AssetNode } from './nodes/ModelNode'
 import { NodeParamsPanel } from './NodeParamsPanel'
@@ -159,25 +161,10 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
     ['generations']
   ])
 
-  // Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z — skipped while typing in a field so text
+  // Undo/redo — useShortcut skips keystrokes aimed at a text field, so text
   // editing keeps its native undo.
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent): void {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
-      const target = e.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      ) {
-        return
-      }
-      e.preventDefault()
-      if (e.shiftKey) redoGraph({ videoId })
-      else undoGraph({ videoId })
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [videoId, undoGraph, redoGraph])
+  useShortcut('undo', () => undoGraph({ videoId }))
+  useShortcut('redo', () => redoGraph({ videoId }))
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -532,31 +519,13 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
     }
   }, [videoId, queryClient, toast, t])
 
-  // Cmd/Ctrl+C / Cmd/Ctrl+V on the canvas — skipped while typing and when the
-  // user is copying selected text (native copy keeps working).
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent): void {
-      if (!(e.metaKey || e.ctrlKey)) return
-      const key = e.key.toLowerCase()
-      if (key !== 'c' && key !== 'v') return
-      const target = e.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      ) {
-        return
-      }
-      if (key === 'c') {
-        if (window.getSelection()?.toString()) return
-        if (copySelection()) e.preventDefault()
-      } else {
-        e.preventDefault()
-        void pasteClipboard()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [copySelection, pasteClipboard])
+  // Copy/paste nodes on the canvas. Copy stands aside when the user is copying
+  // selected TEXT, so the native behaviour keeps working.
+  useShortcut('copyNodes', () => {
+    if (window.getSelection()?.toString()) return
+    copySelection()
+  })
+  useShortcut('pasteNodes', () => void pasteClipboard())
 
   /** Drop image/video/audio files on the canvas → import + asset node at the drop point. */
   const handleCanvasDrop = useCallback(
@@ -706,7 +675,8 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
                 id: 'import-json',
                 label: io.importing ? t('menu.importing') : t('menu.importWorkflow'),
                 onSelect: io.importWorkflow,
-                disabled: io.importing
+                disabled: io.importing,
+                shortcut: 'importWorkflow'
               }
             ]
           },
@@ -716,16 +686,47 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
               {
                 id: 'export-open',
                 label: t('menu.export'),
-                onSelect: () => setExportOpen(true)
+                onSelect: () => setExportOpen(true),
+                shortcut: 'exportWorkflow'
+              }
+            ]
+          },
+          {
+            id: 'view',
+            entries: [
+              {
+                id: 'tidy',
+                label: t('editor.tidy'),
+                onSelect: () => void handleTidy('LR'),
+                shortcut: 'tidy'
+              },
+              {
+                id: 'toggle-timeline',
+                label: timelineCollapsed ? t('editor.showTimeline') : t('editor.hideTimeline'),
+                onSelect: () => setTimelineCollapsed(!timelineCollapsed),
+                shortcut: 'toggleTimeline'
+              },
+              {
+                id: 'toggle-history',
+                label: t('editor.historyBtnTitle'),
+                onSelect: () => setHistoryOpen((v) => !v),
+                shortcut: 'toggleHistory'
               }
             ]
           }
         ]
       }
     ],
-    [t, io]
+    [t, io, handleTidy, timelineCollapsed, setTimelineCollapsed]
   )
   useAppMenus(menus)
+
+  // Every menu entry's binding, so the shortcut shown next to it actually works.
+  useShortcut('importWorkflow', () => void io.importWorkflow(), { enabled: !io.importing })
+  useShortcut('exportWorkflow', () => setExportOpen(true))
+  useShortcut('tidy', () => void handleTidy('LR'))
+  useShortcut('toggleTimeline', () => setTimelineCollapsed(!timelineCollapsed))
+  useShortcut('toggleHistory', () => setHistoryOpen((v) => !v))
 
   // Timeline / history toggles live in the title bar (icon-only, next to the
   // assistant) — the floating toolbar stays lean enough for 13" screens.
@@ -915,40 +916,24 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
 
       {/* Pane right-click: the add-node catalogue at the cursor, spawning at the click point. */}
       {paneMenu && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setPaneMenu(null)}
-            onContextMenu={(e) => {
-              e.preventDefault()
+        <PaneContextMenu x={paneMenu.x} y={paneMenu.y} onClose={() => setPaneMenu(null)}>
+          <AddNodePanel
+            onAdd={(modelId) => {
+              void nodeCreation.addNode(modelId, paneMenu.flow)
               setPaneMenu(null)
             }}
-          />
-          <div
-            className="fixed z-50"
-            style={{
-              left: Math.min(paneMenu.x, window.innerWidth - 340),
-              top: Math.min(paneMenu.y, window.innerHeight - 440)
+            onAddDesign={(recipeId, description) => {
+              void nodeCreation.addDesignNode(recipeId, description, paneMenu.flow)
+              setPaneMenu(null)
             }}
-          >
-            <AddNodePanel
-              onAdd={(modelId) => {
-                void nodeCreation.addNode(modelId, paneMenu.flow)
-                setPaneMenu(null)
-              }}
-              onAddDesign={(recipeId, description) => {
-                void nodeCreation.addDesignNode(recipeId, description, paneMenu.flow)
-                setPaneMenu(null)
-              }}
-              libraryAssets={nodeCreation.designAssets}
-              onAddFromLibrary={(asset) => {
-                void nodeCreation.addLibraryDesignNode(asset, paneMenu.flow)
-                setPaneMenu(null)
-              }}
-              onClose={() => setPaneMenu(null)}
-            />
-          </div>
-        </>
+            libraryAssets={nodeCreation.designAssets}
+            onAddFromLibrary={(asset) => {
+              void nodeCreation.addLibraryDesignNode(asset, paneMenu.flow)
+              setPaneMenu(null)
+            }}
+            onClose={() => setPaneMenu(null)}
+          />
+        </PaneContextMenu>
       )}
 
       {/* Node right-click: the header-icon actions, reachable without aiming. */}
@@ -1096,87 +1081,110 @@ function NodeContextMenu({
 }) {
   const { t } = useTranslation()
   const [replaceOpen, setReplaceOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  // Outside click + Escape, instead of a full-screen catcher that swallowed
+  // the click it was aimed at and ignored the keyboard entirely.
+  useDismissable(true, onClose, rootRef)
   const model = getModel(node.modelId)
   const isAsset = node.modelId === 'studio/asset'
   const targets = model ? MODELS.filter((m) => m.kind === model.kind && m.id !== model.id) : []
   const itemClass =
     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-neutral-200 hover:bg-neutral-800'
   return (
-    <>
-      <div
-        className="fixed inset-0 z-40"
-        onClick={onClose}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          onClose()
-        }}
-      />
-      <div
-        className="fixed z-50 w-60 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 py-1 shadow-xl"
-        style={{
-          left: Math.min(x, window.innerWidth - 260),
-          top: Math.min(y, window.innerHeight - 240)
-        }}
-      >
-        <div className="truncate border-b border-neutral-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-          {node.label ?? model?.label ?? node.modelId}
-        </div>
-        {!isAsset && (
-          <button
-            className={itemClass}
-            onClick={() => {
-              onRun()
-              onClose()
-            }}
-          >
-            <Play className="h-3.5 w-3.5 text-accent" /> {t('editor.ctxRun')}
-          </button>
-        )}
+    <div
+      ref={rootRef}
+      className="fixed z-50 w-60 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 py-1 shadow-xl"
+      style={{
+        left: Math.min(x, window.innerWidth - 260),
+        top: Math.min(y, window.innerHeight - 240)
+      }}
+    >
+      <div className="truncate border-b border-neutral-800 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+        {node.label ?? model?.label ?? node.modelId}
+      </div>
+      {!isAsset && (
         <button
           className={itemClass}
           onClick={() => {
-            onDuplicate()
+            onRun()
             onClose()
           }}
         >
-          <Copy className="h-3.5 w-3.5 text-neutral-400" /> {t('editor.ctxDuplicate')}
+          <Play className="h-3.5 w-3.5 text-accent" /> {t('editor.ctxRun')}
         </button>
-        {!isAsset && targets.length > 0 && (
-          <>
-            <button className={itemClass} onClick={() => setReplaceOpen((v) => !v)}>
-              <Replace className="h-3.5 w-3.5 text-neutral-400" /> {t('editor.ctxReplaceModel')}
-              {replaceOpen ? (
-                <ChevronDown className="ml-auto h-3 w-3 text-neutral-500" />
-              ) : (
-                <ChevronRight className="ml-auto h-3 w-3 text-neutral-500" />
-              )}
-            </button>
-            {replaceOpen &&
-              targets.map((m) => (
-                <button
-                  key={m.id}
-                  className={`${itemClass} pl-9 text-neutral-300`}
-                  onClick={() => {
-                    onReplace(m.id)
-                    onClose()
-                  }}
-                >
-                  {m.label}
-                </button>
-              ))}
-          </>
-        )}
-        <button
-          className={`${itemClass} hover:text-danger`}
-          onClick={() => {
-            onDelete()
-            onClose()
-          }}
-        >
-          <Trash2 className="h-3.5 w-3.5" /> {t('editor.ctxDelete')}
-        </button>
-      </div>
-    </>
+      )}
+      <button
+        className={itemClass}
+        onClick={() => {
+          onDuplicate()
+          onClose()
+        }}
+      >
+        <Copy className="h-3.5 w-3.5 text-neutral-400" /> {t('editor.ctxDuplicate')}
+      </button>
+      {!isAsset && targets.length > 0 && (
+        <>
+          <button className={itemClass} onClick={() => setReplaceOpen((v) => !v)}>
+            <Replace className="h-3.5 w-3.5 text-neutral-400" /> {t('editor.ctxReplaceModel')}
+            {replaceOpen ? (
+              <ChevronDown className="ml-auto h-3 w-3 text-neutral-500" />
+            ) : (
+              <ChevronRight className="ml-auto h-3 w-3 text-neutral-500" />
+            )}
+          </button>
+          {replaceOpen &&
+            targets.map((m) => (
+              <button
+                key={m.id}
+                className={`${itemClass} pl-9 text-neutral-300`}
+                onClick={() => {
+                  onReplace(m.id)
+                  onClose()
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+        </>
+      )}
+      <button
+        className={`${itemClass} hover:text-danger`}
+        onClick={() => {
+          onDelete()
+          onClose()
+        }}
+      >
+        <Trash2 className="h-3.5 w-3.5" /> {t('editor.ctxDelete')}
+      </button>
+    </div>
+  )
+}
+
+/** Positioned wrapper for the pane right-click catalogue — dismissal included. */
+function PaneContextMenu({
+  x,
+  y,
+  onClose,
+  children
+}: {
+  x: number
+  y: number
+  onClose: () => void
+  children: React.ReactNode
+}): React.JSX.Element {
+  const rootRef = useRef<HTMLDivElement>(null)
+  useDismissable(true, onClose, rootRef)
+  return (
+    <div
+      ref={rootRef}
+      className="fixed z-50"
+      style={{
+        left: Math.min(x, window.innerWidth - 340),
+        top: Math.min(y, window.innerHeight - 440)
+      }}
+    >
+      {children}
+    </div>
   )
 }
 
