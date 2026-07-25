@@ -21,6 +21,7 @@ import { Button } from '@renderer/components/ui/Button'
 import { useToast } from '@renderer/components/feedback/Feedback'
 import { MentionMenu, useMentionMenu, type MentionItem } from '@renderer/components/ui/MentionMenu'
 import { ASSISTANT_MODEL_SHORT } from '@renderer/features/settings/AssistantModelSwitcher'
+import { ChatMarkdown } from '@renderer/features/workflow/ChatMarkdown'
 import { invoke } from '@renderer/lib/ipc'
 import type { MentionToken } from '@renderer/lib/mentionToken'
 
@@ -291,10 +292,9 @@ export function ChatPanel({
           (chat.data?.partialText ? (
             // Streaming turn (§4.10 phase 6): the text grows in place, then the
             // finished transcript item replaces it.
-            <div className="px-1 text-sm leading-relaxed whitespace-pre-wrap text-neutral-200">
-              {chat.data.partialText}
+            <ChatMarkdown text={chat.data.partialText}>
               <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-accent align-middle" />
-            </div>
+            </ChatMarkdown>
           ) : (
             <div className="flex items-center gap-2 px-1 text-xs text-neutral-500">
               <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
@@ -473,11 +473,7 @@ function ChatItemView({
     )
   }
   if (item.type === 'assistant') {
-    return (
-      <div className="px-1 text-sm leading-relaxed whitespace-pre-wrap text-neutral-200">
-        {item.text}
-      </div>
-    )
+    return <ChatMarkdown text={item.text} />
   }
   // Compact tool chip.
   return (
