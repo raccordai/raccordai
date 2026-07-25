@@ -97,7 +97,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     id: 'product-commercial',
     label: 'Product commercial (3 shots + music)',
     description:
-      'A 24s product ad: hero product image, then three chained cinematic shots (reveal → detail → tagline), scored with an upbeat track.',
+      'A 24s product ad: one hero product image anchoring three cinematic shots cut together (reveal → detail → tagline), scored with an upbeat track.',
     styleId: 'commercial',
     slots: [SLOTS.product, SLOTS.setting, SLOTS.tagline],
     workflow: {
@@ -107,7 +107,8 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           key: 'hero-image',
           modelId: 'gpt-image-2-text-to-image',
           label: '00 — Hero product shot',
-          intent: 'The ad-ready hero image of the product, reused as the first frame of shot 1.',
+          intent:
+            'The ad-ready hero image of the product, anchoring the first frame of every shot.',
           position: { x: col(0), y: row(0) },
           params: {
             prompt:
@@ -141,12 +142,14 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           key: 'shot-2',
           modelId: 'bytedance/seedance-1.5-pro',
           label: 'Shot 02 — Detail',
-          intent: 'Macro orbital shot on the product details, continuous with shot 1.',
+          intent:
+            'Macro orbital shot on the product details — a cut to a new lens, re-anchored on the hero still.',
           position: { x: col(2), y: row(0) },
           params: {
             prompt:
-              'Macro orbital shot circling [PRODUCT], extreme close-up on its textures and materials, ' +
-              'shallow depth of field, satisfying slow motion.',
+              'Open on a macro orbital shot circling [PRODUCT], extreme close-up on its textures and materials, ' +
+              'shallow depth of field, satisfying slow motion. This is a cut to a new camera setup, ' +
+              'not a continuation of the previous shot.',
             aspect_ratio: '16:9',
             applyVideoStyle: true,
             resolution: '1080p',
@@ -166,7 +169,8 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           params: {
             prompt:
               'Slow pull-back from [PRODUCT] to a wide symmetrical composition with clean negative space on the right third, ' +
-              'lighting settling into an elegant final frame.',
+              'lighting settling into an elegant final frame. This is a cut to a new camera setup, ' +
+              'not a continuation of the previous shot.',
             aspect_ratio: '16:9',
             applyVideoStyle: true,
             resolution: '1080p',
@@ -196,9 +200,14 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
         }
       ],
       edges: [
+        // Every shot departs from the SAME clean hero still. Seedance 1.5 has no
+        // reference inputs — input_urls is a literal frame anchor — so the only
+        // way to keep the product identical without chaining a generated (and
+        // often degraded) last frame is to re-anchor each shot on the source
+        // image and let the prompt take the camera somewhere else.
         { from: 'hero-image', to: 'shot-1', input: 'input_urls', output: 'output' },
-        { from: 'shot-1', to: 'shot-2', input: 'input_urls', output: 'lastFrame' },
-        { from: 'shot-2', to: 'shot-3', input: 'input_urls', output: 'lastFrame' }
+        { from: 'hero-image', to: 'shot-2', input: 'input_urls', output: 'output' },
+        { from: 'hero-image', to: 'shot-3', input: 'input_urls', output: 'output' }
       ]
     }
   },
@@ -206,7 +215,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     id: 'anime-sequence',
     label: 'Anime sequence (keyframe + 3 shots + music)',
     description:
-      'A 24s anime scene: a key visual sets the character design (used as an @Image reference — it never appears on screen), then three chained Seedance 2 shots (establishing → action → emotion) with a J-pop orchestral track.',
+      'A 24s anime scene: a key visual sets the character design (used as an @Image reference — it never appears on screen), then three Seedance 2 shots cut together (establishing → action → emotion), each a new camera setup sharing that reference, with a J-pop orchestral track.',
     styleId: 'anime',
     slots: [SLOTS.character, SLOTS.place, SLOTS.action],
     workflow: {
@@ -254,12 +263,12 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           modelId: 'bytedance/seedance-2-fast',
           label: 'Shot 02 — Action',
           intent:
-            'The action beat of the scene, continuous with shot 1 (starts on its last frame @Image2).',
+            'The action beat of the scene — a hard cut to a new camera setup, identity carried by @Image1.',
           position: { x: col(2), y: row(0) },
           params: {
             prompt:
-              '@Image2 as the first frame (seamless continuation of the previous shot). ' +
               '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
+              'New camera setup: this is a cut, not a continuation of the previous shot. ' +
               'Shot 1: dynamic medium shot, [CHARACTER] [ACTION], sakuga-quality fluid animation on the movement, ' +
               'speed lines and dramatic camera tilt at the peak of the action. ' +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
@@ -277,12 +286,12 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           modelId: 'bytedance/seedance-2-fast',
           label: 'Shot 03 — Emotion',
           intent:
-            "Close-up emotional beat closing the scene (starts on shot 2's last frame @Image2).",
+            'Close-up emotional beat closing the scene — a hard cut to a tighter lens, identity carried by @Image1.',
           position: { x: col(3), y: row(0) },
           params: {
             prompt:
-              '@Image2 as the first frame (seamless continuation of the previous shot). ' +
               '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
+              'New camera setup: this is a cut, not a continuation of the previous shot. ' +
               "Shot 1: slow push-in close-up on [CHARACTER]'s face, hair moving in the breeze, golden-hour rim light, " +
               'a quiet emotional beat, eyes catching the light. ' +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
@@ -315,13 +324,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
         }
       ],
       edges: [
-        // Array order fixes the @Image numbering: the design reference is wired
-        // FIRST on every shot (@Image1), the previous clip's last frame second (@Image2).
+        // One shared reference (@Image1) on every shot — NOT a lastFrame chain.
+        // Chaining a generated closing frame into the next clip is what produces
+        // the glitchy pseudo-continuity; each shot is a deliberate cut instead,
+        // and identity is carried by the key visual all three shots share.
         { from: 'key-visual', to: 'shot-1', input: 'reference_image_urls', output: 'output' },
         { from: 'key-visual', to: 'shot-2', input: 'reference_image_urls', output: 'output' },
-        { from: 'shot-1', to: 'shot-2', input: 'reference_image_urls', output: 'lastFrame' },
-        { from: 'key-visual', to: 'shot-3', input: 'reference_image_urls', output: 'output' },
-        { from: 'shot-2', to: 'shot-3', input: 'reference_image_urls', output: 'lastFrame' }
+        { from: 'key-visual', to: 'shot-3', input: 'reference_image_urls', output: 'output' }
       ]
     }
   },
@@ -329,7 +338,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     id: 'storyboard-sequence',
     label: 'Storyboarded scene (character sheet + 9-panel storyboard + 3 shots + music)',
     description:
-      'The full pre-visualization pipeline: a character design sheet feeds a 9-panel storyboard grid (review the staging THERE, before any video credits are spent), then three chained Seedance 2 shots follow the storyboard panels in order — the sheet and the grid are wired as references, they never appear on screen.',
+      'The full pre-visualization pipeline: a character design sheet feeds a 9-panel storyboard grid (review the staging THERE, before any video credits are spent), then three Seedance 2 shots cut together follow the storyboard panels in order — the sheet and the grid are wired as references, they never appear on screen.',
     styleId: 'anime',
     slots: [SLOTS.character, SLOTS.place, SLOTS.action],
     workflow: {
@@ -398,13 +407,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           modelId: 'bytedance/seedance-2-fast',
           label: 'Shot 02 — Action (panels 4-6)',
           intent:
-            'Action beat following storyboard panels 4-6, continuous with shot 1 (starts on its last frame @Image3).',
+            'Action beat following storyboard panels 4-6 — a hard cut to a new camera setup, staged by @Image2.',
           position: { x: col(3), y: row(0) },
           params: {
             prompt:
-              '@Image3 as the first frame (seamless continuation of the previous shot). ' +
               '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
               '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 4-6. ' +
+              'New camera setup: this is a cut, not a continuation of the previous shot. ' +
               'Shot 1: dynamic medium shot, [CHARACTER] [ACTION], fluid animation on the movement, dramatic camera tilt at the peak of the action. ' +
               'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
@@ -422,13 +431,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           modelId: 'bytedance/seedance-2-fast',
           label: 'Shot 03 — Finale (panels 7-9)',
           intent:
-            "Emotional close-up finale following storyboard panels 7-9 (starts on shot 2's last frame @Image3).",
+            'Emotional close-up finale following storyboard panels 7-9 — a hard cut to a tighter lens, staged by @Image2.',
           position: { x: col(4), y: row(0) },
           params: {
             prompt:
-              '@Image3 as the first frame (seamless continuation of the previous shot). ' +
               '[CHARACTER] matches the character design @Image1 (reference only — never shown on screen). ' +
               '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 7-9. ' +
+              'New camera setup: this is a cut, not a continuation of the previous shot. ' +
               "Shot 1: slow push-in close-up on [CHARACTER]'s face, a quiet emotional beat closing the scene, eyes catching the light. " +
               'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
@@ -462,16 +471,16 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       ],
       edges: [
         // Array order fixes the @Image numbering on every shot: character sheet
-        // FIRST (@Image1), storyboard grid second (@Image2), continuity third (@Image3).
+        // FIRST (@Image1), storyboard grid second (@Image2). No lastFrame chain —
+        // the storyboard is what holds the scene together, and it does so without
+        // forcing each clip to open on the previous clip's degraded closing frame.
         { from: 'character-sheet', to: 'storyboard', input: 'input_urls', output: 'output' },
         { from: 'character-sheet', to: 'shot-1', input: 'reference_image_urls', output: 'output' },
         { from: 'storyboard', to: 'shot-1', input: 'reference_image_urls', output: 'output' },
         { from: 'character-sheet', to: 'shot-2', input: 'reference_image_urls', output: 'output' },
         { from: 'storyboard', to: 'shot-2', input: 'reference_image_urls', output: 'output' },
-        { from: 'shot-1', to: 'shot-2', input: 'reference_image_urls', output: 'lastFrame' },
         { from: 'character-sheet', to: 'shot-3', input: 'reference_image_urls', output: 'output' },
-        { from: 'storyboard', to: 'shot-3', input: 'reference_image_urls', output: 'output' },
-        { from: 'shot-2', to: 'shot-3', input: 'reference_image_urls', output: 'lastFrame' }
+        { from: 'storyboard', to: 'shot-3', input: 'reference_image_urls', output: 'output' }
       ]
     }
   },
@@ -479,7 +488,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     id: 'cinematic-sequence',
     label: 'Cinematic sequence (3 shots + score)',
     description:
-      'A 24s photorealistic film sequence: three chained shots (establishing → tracking → close-up) with an emotional film score.',
+      'A 24s photorealistic film sequence: three shots cut together (establishing → tracking → close-up) with an emotional film score.',
     styleId: 'cinematic-realism',
     slots: [SLOTS.subject, SLOTS.location, SLOTS.mood],
     workflow: {
@@ -508,7 +517,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           key: 'shot-2',
           modelId: 'bytedance/seedance-1.5-pro',
           label: 'Shot 02 — Tracking',
-          intent: 'Tracking shot following the subject, continuous with shot 1.',
+          intent: 'Tracking shot following the subject — a cut to a new camera setup.',
           position: { x: col(1), y: row(0) },
           params: {
             prompt:
@@ -561,10 +570,11 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           }
         }
       ],
-      edges: [
-        { from: 'shot-1', to: 'shot-2', input: 'input_urls', output: 'lastFrame' },
-        { from: 'shot-2', to: 'shot-3', input: 'input_urls', output: 'lastFrame' }
-      ]
+      // No edges: three self-contained shots cut together. Seedance 1.5 has no
+      // reference inputs, so chaining was the only "consistency" lever — and it
+      // bought a glitchy transition rather than a real match. Each prompt names
+      // [SUBJECT], [LOCATION] and [MOOD] instead, and the cuts read as cuts.
+      edges: []
     }
   },
   {
@@ -581,7 +591,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           key: 'product-image',
           modelId: 'gpt-image-2-text-to-image',
           label: '00 — Product visual',
-          intent: 'The vertical product visual used as first frame of the hook shot.',
+          intent: 'The vertical product visual used as @Image1 first frame on both shots.',
           position: { x: col(0), y: row(0) },
           params: {
             prompt:
@@ -650,8 +660,12 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
         }
       ],
       edges: [
+        // Both shots reference the SAME product visual as @Image1. Shot 2 used to
+        // take shot 1's last frame instead, which made the punchline open on a
+        // degraded frame — and its prompt still says "@Image1 as the first frame",
+        // so the reference has to stay the clean source image.
         { from: 'product-image', to: 'shot-1', input: 'reference_image_urls', output: 'output' },
-        { from: 'shot-1', to: 'shot-2', input: 'reference_image_urls', output: 'lastFrame' }
+        { from: 'product-image', to: 'shot-2', input: 'reference_image_urls', output: 'output' }
       ]
     }
   }

@@ -73,7 +73,7 @@ export const kling3: ModelDefinition<Params> = {
       maxCount: 1,
       frameAnchor: true,
       description:
-        "This image IS the opening frame (literal anchor — scene stills or the previous clip's lastFrame, never design sheets)."
+        "This image IS the opening frame (literal anchor — a clean scene still or hero shot; never design sheets, and never the previous clip's lastFrame: a generated closing frame is degraded and makes the cut glitch)."
     },
     {
       key: 'last_frame',
@@ -93,7 +93,7 @@ export const kling3: ModelDefinition<Params> = {
     'Duration is 3-15 seconds (default 5); `mode` picks the resolution tier (std=720p, pro=1080p, 4K=2160p); `sound` adds generated audio.\n' +
     'With a First frame connected, aspect_ratio is ignored (the video follows the image).\n' +
     'Kling elements (@name references) and multi-shot mode exist API-side but are not wired in Raccord yet — use Seedance 2 for reference-driven consistency.\n' +
-    "For continuity to the next clip: wire this node's `lastFrame` output into the next video node's frame input.",
+    "Between shots, CUT — do not chain. Wiring this node's `lastFrame` into the next clip's frame input makes the seam glitch (a generated closing frame is degraded); cut to a new camera setup instead, or re-anchor both shots on the same clean source still.",
   // Distilled from kie.ai's Kling 3.0 docs (docs.kie.ai/market/kling/kling-3-0).
   promptGuide: `CORE PRINCIPLE (kie.ai/Kling guidance):
   Be specific and descriptive: subject, motion, camera angle and scene composition, in natural

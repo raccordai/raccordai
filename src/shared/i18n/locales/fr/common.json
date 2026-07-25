@@ -114,7 +114,7 @@
     },
     "starterTitle": "Premier projet",
     "starterCreate": "Créer un projet d'exemple",
-    "starterCreateDesc": "Une pub produit prête à lancer : visuel héro, 3 plans enchaînés et musique, prompts déjà remplis.",
+    "starterCreateDesc": "Une pub produit prête à lancer : visuel héro, 3 plans montés cut et musique, prompts déjà remplis.",
     "starterCreating": "Création…",
     "starterEmpty": "Commencer vide",
     "starterEmptyDesc": "Ouvrir l'app sur la bibliothèque de projets.",
@@ -496,19 +496,19 @@
     },
     "product-commercial": {
       "name": "Pub produit",
-      "desc": "3 plans enchaînés + visuel héro + musique (24 s)"
+      "desc": "3 plans montés cut + visuel héro + musique (24 s)"
     },
     "anime-sequence": {
       "name": "Séquence animé",
-      "desc": "Key visual + 3 plans enchaînés + musique (24 s)"
+      "desc": "Key visual + 3 plans montés cut + musique (24 s)"
     },
     "storyboard-sequence": {
       "name": "Scène storyboardée",
-      "desc": "Planche perso + storyboard 9 cases + 3 plans enchaînés + musique (24 s)"
+      "desc": "Planche perso + storyboard 9 cases + 3 plans montés cut + musique (24 s)"
     },
     "cinematic-sequence": {
       "name": "Séquence cinéma",
-      "desc": "3 plans réalistes enchaînés + musique de film (24 s)"
+      "desc": "3 plans réalistes montés cut + musique de film (24 s)"
     },
     "vertical-social-ad": {
       "name": "Pub verticale 9:16",

@@ -24,6 +24,9 @@ MODEL TIERS (same syntax — pick by job):
 
 @ REFERENCES (the core of Seedance 2.0 — every connected source needs an explicit ROLE):
   - Slots: @Image1-@Image9, @Video1-@Video3, @Audio1-@Audio3 (numbered by connection order, ≤12 files total).
+  - Media limits (kie.ai): images jpeg/png/webp/bmp/tiff/gif, aspect ratio 0.4-2.5, 300-6000 px,
+    ≤30 MB each. Videos mp4/mov, 480p or 720p, 2-15 s each, ≤3 files and ≤15 s total. Audio wav/mp3,
+    2-15 s each, ≤3 files and ≤15 s total.
   - Assign roles verbatim: "@Image1 as the first frame", "@Image2 as the last frame",
     "reference @Video1 for camera movement and pacing", "use @Audio1 as background music",
     "Replace the woman in @Video1 with @Image1", "Extend @Video1 by 5 seconds".
@@ -49,12 +52,31 @@ MODEL TIERS (same syntax — pick by job):
 
 FRAME ANCHORS (First/Last frame handles — these images APPEAR on screen literally):
   - The First frame / Last frame inputs pin the clip's exact opening/closing image (scene stills,
-    hero shots, the previous clip's lastFrame — NEVER design sheets).
+    hero shots — NEVER design sheets).
   - In-between technique: wire BOTH first and last frame, then prompt:
     "Show me what happens in between. USE MULTIPLE CAMERA ANGLES." — generates the full multi-shot
     story connecting the two stills.
-  - Frame anchoring and multimodal @ references are mutually exclusive (official) — one mode per
-    run. Inside @ reference mode you can still pin a frame with "@Image1 as the first frame".
+  - THREE MUTUALLY EXCLUSIVE MODES (official kie.ai): first frame only / first + last frame /
+    multimodal @ references. Never combine them in one run. Inside @ reference mode you can still
+    pin a frame with "@Image1 as the first frame" — official docs present this as the way to get a
+    first/last-frame effect WITH references, and recommend the dedicated inputs only when the frame
+    match must be strictly guaranteed.
+
+CUTTING BETWEEN SHOTS (read this before wiring two clips together):
+  - DEFAULT: do NOT chain clips. Feeding clip N's closing frame into clip N+1 ("lastFrame chaining")
+    looks like continuity on paper and glitches in practice: the closing frame of a generated clip
+    is motion-blurred and compressed, so the next clip re-interprets a degraded still and the seam
+    pops — warping faces, sliding backgrounds, a visible hitch on the cut.
+  - Do this instead: treat every new clip as a CUT to a new camera setup — change the angle, the
+    lens or the axis, and say so in the prompt ("New camera setup: this is a cut, not a continuation
+    of the previous shot."). Carry consistency with SHARED REFERENCES — the same character sheet and
+    the same storyboard wired as @Image references on every shot — not with the previous frame.
+  - When continuity is genuinely required (a character speaking across two clips, an unbroken
+    move), use VIDEO EXTEND: wire the previous CLIP as @Video1 and describe what happens next. It
+    carries environment, appearance and voice; the closing still carries none of that.
+  - Anchoring several shots on the SAME clean source still (a hero product shot, a scene still) is
+    fine and often ideal — it is a pristine image, not a generated frame. That is re-anchoring, not
+    chaining.
 
 MULTI-SHOT (long clips — 10s+):
   Shot 1: [camera move] + [subject action/expression] + [location] + [audio].
@@ -75,10 +97,11 @@ DIALOGUE, AUDIO & LIP-SYNC:
   - The model scores everything by default — write "no music" explicitly if you want silence.
 
 VIDEO-TO-VIDEO RECIPES (connect an existing clip as @Video1):
-  - VIDEO EXTEND — the strongest continuity tool: connect the previous clip as @Video1 and describe
-    what happens next as "[cut]"-separated beats. Preserves environment, character appearance AND
-    voice — unlike lastFrame chaining, which only carries the closing image. Prefer it whenever a
-    character speaks across consecutive clips.
+  - VIDEO EXTEND — the ONLY reliable continuity tool: connect the previous clip as @Video1 and
+    describe what happens next as "[cut]"-separated beats. Preserves environment, character
+    appearance AND voice, where lastFrame chaining carries a single degraded still and glitches on
+    the seam (see CUTTING BETWEEN SHOTS). Use it whenever a character speaks across consecutive
+    clips or the motion must not break; otherwise just cut to a new angle.
   - CHARACTER SWAP: "Change the [subject] in @Video1 to the [subject] in @Image1." Re-shoots the
     exact same actions with the new character.
   - FIX THE SCENE: edits propagate across ALL shots of the referenced clip — objects, season, time

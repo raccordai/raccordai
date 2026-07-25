@@ -63,7 +63,7 @@ export const seedance2Fast: ModelDefinition<Params> = {
       maxCount: 1,
       frameAnchor: true,
       description:
-        "This image IS the opening frame (literal anchor — scene stills or the previous clip's lastFrame, never design sheets). Frame anchoring and @ references are mutually exclusive per run."
+        "This image IS the opening frame (literal anchor — a clean scene still or hero shot; never design sheets, and never the previous clip's lastFrame: a generated closing frame is degraded and makes the cut glitch). First frame only / first + last / @ references are three mutually exclusive modes per run."
     },
     {
       key: 'last_frame_url',
@@ -82,7 +82,7 @@ export const seedance2Fast: ModelDefinition<Params> = {
       maxCount: 9,
       referenceAlias: '@Image',
       description:
-        'Each connection is numbered @Image1, @Image2, … (max 9). References GUIDE the output (identity, style) and do NOT appear on screen — unless the prompt assigns a frame role: "@Image1 as the first frame".'
+        'Each connection is numbered @Image1, @Image2, … (max 9). References GUIDE the output (identity, style) and do NOT appear on screen — unless the prompt assigns a frame role: "@Image1 as the first frame". Wiring the SAME sheet on every shot is how you keep a subject consistent across cuts. jpeg/png/webp/bmp/tiff/gif, aspect ratio 0.4-2.5, 300-6000 px, ≤30 MB each.'
     },
     {
       key: 'reference_video_urls',
@@ -92,7 +92,7 @@ export const seedance2Fast: ModelDefinition<Params> = {
       maxCount: 3,
       referenceAlias: '@Video',
       description:
-        'Each connection is numbered @Video1, @Video2, @Video3. Combined length ≤ 15s. Also the channel for video extend, character swap and custom voice-over tracks.'
+        "Each connection is numbered @Video1, @Video2, @Video3. mp4/mov, 480p or 720p, 2-15s each, ≤15s combined, ≤50 MB each. This is the video-extend channel — the reliable way to continue a shot, unlike chaining the previous clip's lastFrame. Also character swap and custom voice-over tracks."
     },
     {
       key: 'reference_audio_urls',
@@ -101,7 +101,8 @@ export const seedance2Fast: ModelDefinition<Params> = {
       multiple: true,
       maxCount: 3,
       referenceAlias: '@Audio',
-      description: 'Each connection is numbered @Audio1, @Audio2, @Audio3. Combined length ≤ 15s.'
+      description:
+        'Each connection is numbered @Audio1, @Audio2, @Audio3. wav/mp3, 2-15s each, ≤15s combined, ≤15 MB each.'
     }
   ],
   outputs: [
@@ -113,7 +114,7 @@ export const seedance2Fast: ModelDefinition<Params> = {
     'References GUIDE the output without appearing on screen: this is THE model for character sheets, storyboards and style boards (on Seedance 1.5, connected images literally become frames). To show an image literally, use the First/Last frame anchor handles (mutually exclusive with @ references per run) — or give a reference a frame role: "@Image1 as the first frame".\n' +
     'ANIMATION verdict (300-generation test): Fast output is indistinguishable from full Seedance 2 — iterate and ship animation here; only the 720p cap differs (upscale externally, or switch the node to Seedance 2 for native 1080p/4k).\n' +
     'Examples: "reference @Video1\'s camera movement", "BGM references @Audio1", "Change the man in @Video1 to the robot in @Image1" (character swap), "Change the season in @Video1 to winter" (scene fix).\n' +
-    'Continuity: video extend (previous clip as @Video1 + "[cut]"-separated next beats) preserves set, identity AND voice — prefer it when characters speak; otherwise chain the previous node\'s `lastFrame` into First frame (or reference_image_urls + "@Image1 as the first frame").\n' +
+    'Between shots, CUT — do not chain. Wiring the previous node\'s `lastFrame` into this one makes the seam glitch (a generated closing frame is motion-blurred and compressed): change the camera setup instead and keep the SAME character sheet / storyboard wired as @ references on every shot. When continuity is truly required, use video extend (previous clip as @Video1 + "[cut]"-separated next beats) — it preserves set, identity AND voice.\n' +
     'For 10s+ outputs, use numbered shots ("Shot 1: ... Shot 2: Cut to ...") or "[cut]" beats — ByteDance flags exact timestamps (0–3s style) as unstable.\n' +
     'Total uploads cap: ≤ 12 files combined. Restriction: no realistic human faces in references (platform compliance).',
   promptGuide: SEEDANCE2_PROMPT_GUIDE,

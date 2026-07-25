@@ -114,7 +114,7 @@
     },
     "starterTitle": "First project",
     "starterCreate": "Create an example project",
-    "starterCreateDesc": "A product ad ready to run: hero visual, 3 chained shots and music, prompts already filled in.",
+    "starterCreateDesc": "A product ad ready to run: hero visual, 3 shots cut together and music, prompts already filled in.",
     "starterCreating": "Creating…",
     "starterEmpty": "Start empty",
     "starterEmptyDesc": "Open the app on the project library.",
@@ -496,19 +496,19 @@
     },
     "product-commercial": {
       "name": "Product ad",
-      "desc": "3 chained shots + hero visual + music (24s)"
+      "desc": "3 shots cut together + hero visual + music (24s)"
     },
     "anime-sequence": {
       "name": "Anime sequence",
-      "desc": "Key visual + 3 chained shots + music (24s)"
+      "desc": "Key visual + 3 shots cut together + music (24s)"
     },
     "storyboard-sequence": {
       "name": "Storyboarded scene",
-      "desc": "Character sheet + 9-panel storyboard + 3 chained shots + music (24s)"
+      "desc": "Character sheet + 9-panel storyboard + 3 shots cut together + music (24s)"
     },
     "cinematic-sequence": {
       "name": "Cinematic sequence",
-      "desc": "3 chained realistic shots + film score (24s)"
+      "desc": "3 realistic shots cut together + film score (24s)"
     },
     "vertical-social-ad": {
       "name": "Vertical social ad",

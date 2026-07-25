@@ -24,7 +24,9 @@ Typical session:
   2. docs "models" then docs "model:<id>" for the models you plan to use;
      read docs "prompting:<id>" BEFORE writing any prompt for that model.
      CRITICAL: image inputs are either frame ANCHORS (they appear on screen) or
-     REFERENCES (they guide without appearing) — docs "models" explains which is which
+     REFERENCES (they guide without appearing) — docs "models" explains which is which.
+     Equally critical: between two shots you CUT to a new angle — never chain one
+     clip's lastFrame into the next (it glitches); docs "models" has the recipes
   3. pick an art direction: docs "styles" → set_video_style. The style bible is
      appended to prompts AT RUN TIME for visual nodes whose params carry
      "applyVideoStyle": true (set it on the visual nodes you create; never paste
@@ -85,14 +87,24 @@ function modelsIndex(): string {
 
 CHOOSING A VIDEO MODEL — image inputs have TWO different semantics; mixing them up is the #1 workflow bug:
   - FRAME ANCHORS (seedance-1.5-pro "input_urls", grok "image_urls"): connected images APPEAR in the
-    video literally (first frame / first+last). Wire scene stills, hero shots and previous-clip last
-    frames here. NEVER a character sheet, storyboard or style board — it would show up on screen.
+    video literally (first frame / first+last). Wire clean scene stills and hero shots here.
+    NEVER a character sheet, storyboard or style board — it would show up on screen.
   - REFERENCES (seedance-2-fast "reference_*"): connected sources GUIDE identity/style/motion and do
     NOT appear on screen, unless the prompt assigns a frame role ("@Image1 as the first frame").
     Character sheets, storyboards and style boards belong HERE, with an explicit role in the prompt.
+    On Seedance 2 the three modes — first frame only, first+last, @ references — are mutually
+    exclusive per run.
 Recipes:
-  - Continuity: previous clip's "lastFrame" output → next clip's image input. On 1.5/Grok it IS the
-    first frame; on Seedance 2 also write "@ImageN as the first frame" in the prompt.
+  - Between shots, CUT — do NOT chain. Wiring a clip's "lastFrame" into the next clip looks like
+    continuity and glitches in practice: a generated closing frame is motion-blurred and compressed,
+    so the next clip re-interprets a degraded still and the seam pops. Make every new clip a cut to a
+    new camera setup (say so in the prompt: "New camera setup: this is a cut, not a continuation")
+    and carry consistency through SHARED references instead.
+  - Real continuity, when it is genuinely required (a character speaking across two clips, an
+    unbroken move): video extend on Seedance 2 — previous CLIP into reference_video_urls (@Video1)
+    plus "[cut]"-separated next beats. It carries set, identity and voice; a closing still carries none.
+  - Re-anchoring is not chaining: pointing several shots at the SAME clean source still (hero shot,
+    scene still) is the right way to keep a subject identical on models without references (1.5, Grok).
   - Character consistency across shots: key visual → EVERY shot's reference_image_urls on Seedance 2
     ("[character] matches the design @Image1, reference only"); impossible on 1.5 (prompt-only).
   - Style consistency: set_video_style + "applyVideoStyle": true in every visual node's params — the

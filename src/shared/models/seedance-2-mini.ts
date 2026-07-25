@@ -63,7 +63,7 @@ export const seedance2Mini: ModelDefinition<Params> = {
       maxCount: 1,
       frameAnchor: true,
       description:
-        "This image IS the opening frame (literal anchor — scene stills or the previous clip's lastFrame, never design sheets). Frame anchoring and @ references are mutually exclusive per run."
+        "This image IS the opening frame (literal anchor — a clean scene still or hero shot; never design sheets, and never the previous clip's lastFrame: a generated closing frame is degraded and makes the cut glitch). First frame only / first + last / @ references are three mutually exclusive modes per run."
     },
     {
       key: 'last_frame_url',
@@ -82,7 +82,7 @@ export const seedance2Mini: ModelDefinition<Params> = {
       maxCount: 9,
       referenceAlias: '@Image',
       description:
-        'Each connection is numbered @Image1, @Image2, … (max 9). References GUIDE the output (identity, style) and do NOT appear on screen — unless the prompt assigns a frame role: "@Image1 as the first frame".'
+        'Each connection is numbered @Image1, @Image2, … (max 9). References GUIDE the output (identity, style) and do NOT appear on screen — unless the prompt assigns a frame role: "@Image1 as the first frame". Wiring the SAME sheet on every shot is how you keep a subject consistent across cuts. jpeg/png/webp/bmp/tiff/gif, aspect ratio 0.4-2.5, 300-6000 px, ≤30 MB each.'
     },
     {
       key: 'reference_video_urls',
@@ -92,7 +92,7 @@ export const seedance2Mini: ModelDefinition<Params> = {
       maxCount: 3,
       referenceAlias: '@Video',
       description:
-        'Each connection is numbered @Video1, @Video2, @Video3. Combined length ≤ 15s. Also the channel for video extend, character swap and custom voice-over tracks.'
+        "Each connection is numbered @Video1, @Video2, @Video3. mp4/mov, 480p or 720p, 2-15s each, ≤15s combined, ≤50 MB each. This is the video-extend channel — the reliable way to continue a shot, unlike chaining the previous clip's lastFrame. Also character swap and custom voice-over tracks."
     },
     {
       key: 'reference_audio_urls',
@@ -101,7 +101,8 @@ export const seedance2Mini: ModelDefinition<Params> = {
       multiple: true,
       maxCount: 3,
       referenceAlias: '@Audio',
-      description: 'Each connection is numbered @Audio1, @Audio2, @Audio3. Combined length ≤ 15s.'
+      description:
+        'Each connection is numbered @Audio1, @Audio2, @Audio3. wav/mp3, 2-15s each, ≤15s combined, ≤15 MB each.'
     }
   ],
   outputs: [

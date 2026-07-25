@@ -97,7 +97,7 @@ export const grokImagineI2V: ModelDefinition<Params> = {
     'In the motion prompt, reference each as `@image1 `, `@image2 `, … (lowercase, each followed by a space) — e.g. "@image1 slowly walks forward, wind in the hair".\n' +
     'Numbering follows connection order (shown in the UI). Connect at least one image.\n' +
     'Duration is 6-30 seconds (default 8). Keep `aspect_ratio` on `auto` to follow the source image (a fixed ratio only matters with several images).\n' +
-    "For continuity to the next clip: wire this node's `lastFrame` output into the next video node's image input (`image_urls` for another Grok, or `reference_image_urls` for Seedance 2).",
+    "Between shots, CUT — do not chain. Wiring this node's `lastFrame` into the next clip's image input makes the seam glitch (a generated closing frame is motion-blurred and compressed). Cut to a new camera setup instead, and keep subjects consistent by re-anchoring each shot on the SAME clean source image.",
   // Distilled from xAI's official docs (docs.x.ai) and xAI's Replicate model listing.
   promptGuide: `CORE PRINCIPLE (official xAI guidance):
   Describe the MOTION, not the scene — the connected image already provides the scene.

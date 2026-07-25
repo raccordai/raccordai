@@ -74,7 +74,7 @@ export const grokImagineT2V: ModelDefinition<Params> = {
     'Text-to-video: there is no source image, so the prompt must carry BOTH the scene (subject, setting, light) and the motion (action, camera). English only, max 5000 characters.\n' +
     'Duration is 6-30 seconds; audio is native (BGM, SFX, quoted dialogue lines in the prompt).\n' +
     'For an image-driven clip, use Grok Imagine — Image to Video instead.\n' +
-    "For continuity to the next clip: wire this node's `lastFrame` output into the next video node's image input.",
+    "Between shots, CUT — do not chain. Wiring this node's `lastFrame` into the next clip's image input makes the seam glitch (a generated closing frame is degraded); cut to a new camera setup instead.",
   // Distilled from xAI's official docs (docs.x.ai) — same engine family as the
   // image-to-video guide, minus the @image references (no image inputs here).
   promptGuide: `CORE PRINCIPLE:

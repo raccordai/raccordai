@@ -96,7 +96,8 @@ export const seedance15Pro: ModelDefinition<Params> = {
     'Seedance 1.5 Pro is a classic t2v/i2v model — no @ reference system. The prompt (3-2500 chars) drives everything: shot type, style, action, and spoken dialogue in quotes (e.g. the bartender says: "Welcome, friends!").\n' +
     'CRITICAL — `input_urls` are FRAME ANCHORS, not references: every connected image literally APPEARS in the video (1 image = first frame; 2 = first + last, great for controlled transitions). ' +
     'A character design sheet or storyboard wired here shows up on screen in the opening frames. When you need an image to GUIDE the output without appearing (character/style consistency), switch the node to Seedance 2 Fast and use its @Image references.\n' +
-    "For clip-to-clip continuity: wire the previous video node's `lastFrame` output into this node's `input_urls` so the clip starts exactly where the prior one ended — that IS the intended use of frame anchoring.\n" +
+    "Between shots, CUT — do not chain. Wiring the previous node's `lastFrame` into `input_urls` looks like continuity but glitches on the seam: the closing frame of a generated clip is motion-blurred and compressed, so this clip re-interprets a degraded still. Cut to a new camera setup instead, and say so in the prompt. To keep a subject identical across shots, re-anchor every shot on the SAME clean source still (a hero shot, a scene still) — a pristine image, not a generated frame.\n" +
+    '`input_urls` accepts at most 2 images (jpeg/png/webp, ≤10 MB each).\n' +
     'Enable `fixed_lens` for a locked-off static camera; leave it off for dynamic movement. `generate_audio` adds sound effects/dialogue at extra cost.',
   // Distilled from ByteDance's official prompt guide (BytePlus ModelArk doc 2168087),
   // cross-checked with fal.ai's and Replicate's Seedance 1.5 guides.
@@ -133,7 +134,9 @@ IMAGE ANCHORING (frame anchors — NOT references):
   2 images = first + last frame (controlled transitions). Use clear, well-lit faces in input images.
   Every connected image APPEARS on screen. Never anchor a character sheet, storyboard or style
   board — it becomes the opening frame. Reference-guided identity/style belongs to Seedance 2's
-  @Image system; on 1.5 the ONLY consistency levers are the prompt and lastFrame chaining.
+  @Image system; on 1.5 the consistency levers are the prompt and re-anchoring several shots on the
+  SAME clean source still. Do NOT chain clip to clip via lastFrame: a generated closing frame is
+  degraded, and the cut glitches. Cut to a new angle instead.
 
 PITFALLS:
   - Vague subjects ("a person walking in a city") produce generic output — spend words on wardrobe, action, sound.
