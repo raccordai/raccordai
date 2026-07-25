@@ -15,11 +15,16 @@ export interface GenerationSettledEvent {
 }
 
 const emitter = new EventEmitter()
+// A large batch waits on one listener per in-flight generation — the default
+// cap of 10 would spam MaxListenersExceededWarning.
+emitter.setMaxListeners(0)
 
 export function emitGenerationSettled(event: GenerationSettledEvent): void {
   emitter.emit('generationSettled', event)
 }
 
-export function onGenerationSettled(listener: (event: GenerationSettledEvent) => void): void {
+/** Subscribe; returns the unsubscribe (the batch engine adds/removes waiters). */
+export function onGenerationSettled(listener: (event: GenerationSettledEvent) => void): () => void {
   emitter.on('generationSettled', listener)
+  return () => emitter.off('generationSettled', listener)
 }

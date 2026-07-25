@@ -90,11 +90,17 @@ function lastToolResult(messages) {
 
 let step = 0
 const state = { projectId: null, videoId: null }
+/** §4.10 phase 2: the send must carry the <app-context> snapshot to the provider. */
+let sawAppContext = false
 
 function nextAssistantMessage(messages) {
   const prev = lastToolResult(messages)
-  if (prev?.projectId) state.projectId = prev.projectId
-  if (prev?.videoId) state.videoId = prev.videoId
+  // Registry tools return the created row: its `id` is the project/video id
+  // (step was already incremented when the tool_use went out).
+  if (prev && typeof prev.id === 'string') {
+    if (step === 1) state.projectId = prev.id
+    if (step === 2) state.videoId = prev.id
+  }
 
   const toolSteps = [
     () => ({ name: 'create_project', input: { name: PROJECT_NAME } }),
@@ -143,6 +149,16 @@ const server = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json')
     if (req.url?.startsWith('/claude/v1/messages')) {
       const messages = JSON.parse(body).messages ?? []
+      const firstUser = messages.find((m) => m.role === 'user')
+      const firstUserText = Array.isArray(firstUser?.content)
+        ? firstUser.content
+            .filter((b) => b?.type === 'text')
+            .map((b) => b.text)
+            .join('\n')
+        : String(firstUser?.content ?? '')
+      if (firstUserText.includes('<app-context>') && firstUserText.includes('route: /')) {
+        sawAppContext = true
+      }
       res.end(JSON.stringify(nextAssistantMessage(messages)))
       return
     }
@@ -211,9 +227,13 @@ async function main() {
   await win.locator('a').filter({ hasText: 'Projects' }).first().click()
   await win.waitForTimeout(600)
 
-  // Open the home assistant and ask for the project.
-  await win.getByRole('button', { name: 'Assistant' }).click()
-  await win.waitForTimeout(400)
+  // Open the global assistant sidebar (permanent header toggle). Its open
+  // state persists in localStorage, so it may already be open from a previous
+  // session — only click when the panel isn't there yet.
+  if ((await win.locator('aside textarea').count()) === 0) {
+    await win.getByRole('button', { name: 'Assistant' }).click()
+    await win.waitForTimeout(400)
+  }
   const draft = win.locator('aside textarea')
   await draft.fill("Crée-moi un projet d'animé de 2,5 minutes sur un chat samouraï.")
   await draft.press('Enter')
@@ -233,8 +253,11 @@ async function main() {
   )
   console.log('✓ rapport final de l’assistant affiché')
 
-  // Close the assistant panel — its transcript quotes the project/video names
-  // and would hijack the text-based locators below.
+  if (!sawAppContext) throw new Error('<app-context> block missing from the provider request')
+  console.log('✓ bloc <app-context> transmis au provider')
+
+  // Close the assistant sidebar (header toggle) — its transcript quotes the
+  // project/video names and would hijack the text-based locators below.
   await win.getByRole('button', { name: 'Assistant' }).click()
   await win.waitForTimeout(300)
 

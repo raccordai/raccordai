@@ -26,6 +26,7 @@ import { defaultParamsFor, getModel, videoDefaultParams } from '@shared/models'
 import { getStyle } from '@shared/styles/registry'
 import { Button } from '@renderer/components/ui/Button'
 import { Lightbox } from '@renderer/components/Lightbox'
+import { MentionMenu, useMentionMenu, type MentionItem } from '@renderer/components/ui/MentionMenu'
 import { VideoThumb } from '@renderer/components/VideoThumb'
 import { Label, Select, TextArea, TextField } from '@renderer/components/ui/Input'
 import { useConfirm } from '@renderer/components/feedback/Feedback'
@@ -331,6 +332,30 @@ function ModelNodeEditor({
     queryFn: () => invoke('generations:estimateCost', { nodeId: node.id })
   })
 
+  // "@" in the prompt opens the connected-input aliases (@Image1, @Video1…) —
+  // same autocomplete as the assistant input, fed by the alias registry above.
+  const [promptCaret, setPromptCaret] = useState(0)
+  const promptValue = (params.prompt as string | undefined) ?? ''
+  const aliasItems = useMemo<MentionItem[]>(
+    () =>
+      connections
+        .filter((c) => c.alias)
+        .map((c) => ({
+          id: c.edge.id,
+          label: c.alias as string,
+          description: c.source?.label ?? c.source?.key,
+          insert: c.alias as string,
+          section: t('editor.mentionInputs')
+        })),
+    [connections, t]
+  )
+  const promptMention = useMentionMenu({
+    value: promptValue,
+    caret: promptCaret,
+    triggers: [{ char: '@' }],
+    itemsFor: () => aliasItems
+  })
+
   // Image to feed the prompt refiner: the active generation if it's an image, else the latest successful image.
   const refinerImageUrl = useMemo(() => {
     if (model?.kind !== 'image' || !generations) return undefined
@@ -394,6 +419,17 @@ function ModelNodeEditor({
       el.focus()
       const pos = start + insert.length
       el.setSelectionRange(pos, pos)
+    })
+  }
+
+  function applyPromptMention(result: { value: string; caret: number }): void {
+    setField('prompt', result.value)
+    setPromptCaret(result.caret)
+    requestAnimationFrame(() => {
+      const el = promptRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(result.caret, result.caret)
     })
   }
 
@@ -561,14 +597,43 @@ function ModelNodeEditor({
         {model.paramFields.map((field) => (
           <div key={field.key}>
             <Label>{field.label}</Label>
-            {field.type === 'textarea' && (
+            {field.type === 'textarea' && field.key === 'prompt' && (
+              <div className="relative">
+                <TextArea
+                  ref={promptRef}
+                  value={promptValue}
+                  onChange={(e) => {
+                    setField('prompt', e.target.value)
+                    setPromptCaret(e.target.selectionStart ?? e.target.value.length)
+                  }}
+                  onSelect={(e) => setPromptCaret(e.currentTarget.selectionStart ?? 0)}
+                  onBlur={(e) => commit('prompt', e.target.value)}
+                  onKeyDown={(e) => promptMention.onKeyDown(e, applyPromptMention)}
+                  placeholder={field.description}
+                  rows={6}
+                />
+                {promptMention.open && (
+                  <div className="absolute inset-x-0 top-full z-30 mt-1">
+                    <MentionMenu
+                      items={promptMention.items}
+                      active={promptMention.active}
+                      onHover={promptMention.setActive}
+                      onPick={(item) => {
+                        const result = promptMention.select(item)
+                        if (result) applyPromptMention(result)
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+            {field.type === 'textarea' && field.key !== 'prompt' && (
               <TextArea
-                ref={field.key === 'prompt' ? promptRef : undefined}
                 value={(params[field.key] as string | undefined) ?? ''}
                 onChange={(e) => setField(field.key, e.target.value)}
                 onBlur={(e) => commit(field.key, e.target.value)}
                 placeholder={field.description}
-                rows={field.key === 'prompt' ? 6 : 3}
+                rows={3}
               />
             )}
             {field.type === 'text' && (

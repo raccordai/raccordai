@@ -26,7 +26,7 @@ export function Button({ variant = 'secondary', size = 'md', className = '', ...
   return (
     <button
       {...rest}
-      className={`inline-flex items-center rounded-md font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
+      className={`inline-flex items-center rounded-md font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50 ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
     />
   )
 }

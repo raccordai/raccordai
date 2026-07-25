@@ -8,12 +8,9 @@ import {
   FileImage,
   FileVideo,
   FolderInput,
-  History,
   Loader2,
   Maximize2,
   Music,
-  PanelBottom,
-  PanelBottomClose,
   Palette,
   PenTool,
   Plus,
@@ -50,10 +47,6 @@ interface Props {
   graph: { nodes: GraphNode[]; edges: GraphEdge[] }
   onTidy: (direction: LayoutDirection) => void
   onFit: () => void
-  timelineCollapsed: boolean
-  onToggleTimeline: () => void
-  historyOpen: boolean
-  onToggleHistory: () => void
   onRunAllVideos: () => void
   runningAllVideos: boolean
   videoNodeCount: number
@@ -65,10 +58,6 @@ export function WorkflowToolbar({
   graph,
   onTidy,
   onFit,
-  timelineCollapsed,
-  onToggleTimeline,
-  historyOpen,
-  onToggleHistory,
   onRunAllVideos,
   runningAllVideos,
   videoNodeCount
@@ -222,7 +211,7 @@ export function WorkflowToolbar({
           disabled={graph.nodes.length === 0}
           title={t('editor.tidyTitle')}
         >
-          <Sparkles className="h-3.5 w-3.5" /> {t('editor.tidy')}
+          <Sparkles className="h-3.5 w-3.5" />
         </Button>
         <Dropdown label="" icon={<ChevronDown className="h-3 w-3" />} variant="ghost">
           <DropdownItem
@@ -240,28 +229,7 @@ export function WorkflowToolbar({
         </Dropdown>
       </div>
       <Button variant="ghost" size="sm" onClick={onFit} title={t('editor.fitTitle')}>
-        <Maximize2 className="h-3.5 w-3.5" /> {t('editor.fit')}
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onToggleTimeline}
-        title={timelineCollapsed ? t('editor.showTimeline') : t('editor.hideTimeline')}
-      >
-        {timelineCollapsed ? (
-          <PanelBottom className="h-3.5 w-3.5" />
-        ) : (
-          <PanelBottomClose className="h-3.5 w-3.5" />
-        )}{' '}
-        {t('editor.timeline')}
-      </Button>
-      <Button
-        variant={historyOpen ? 'secondary' : 'ghost'}
-        size="sm"
-        onClick={onToggleHistory}
-        title={t('editor.historyBtnTitle')}
-      >
-        <History className="h-3.5 w-3.5" /> {t('editor.historyBtn')}
+        <Maximize2 className="h-3.5 w-3.5" />
       </Button>
     </div>
   )
@@ -763,7 +731,9 @@ function StyleMenu({
         title={t('editor.styleTitle')}
       >
         <Palette className="h-3.5 w-3.5" />{' '}
-        {current ? t(`styles.${current}.name` as never) : t('editor.style')}
+        <span className="max-w-28 truncate">
+          {current ? t(`styles.${current}.name` as never) : t('editor.style')}
+        </span>
       </Button>
       {open && (
         <div className="absolute left-0 z-20 mt-1 w-64 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">

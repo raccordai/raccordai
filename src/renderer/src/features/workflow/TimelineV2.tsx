@@ -485,259 +485,264 @@ export function TimelineV2({
   const activeClip = clips[engine.activeIdx]
 
   return (
-    <div className="island relative flex flex-col overflow-hidden" style={{ height }}>
-      {/* Resize handle: drag up to enlarge the timeline (and its player). */}
+    <div className="relative shrink-0" style={{ height }}>
+      {/* Resize handle: straddles the island's top edge (in the gap between the
+          two islands), so it never sits over the header's transport buttons —
+          an in-island strip used to swallow clicks on the play button. */}
       <div
         onPointerDown={startDrag}
-        className={`group absolute inset-x-0 top-0 z-30 h-2 cursor-row-resize ${
-          dragging ? 'bg-accent/15' : 'bg-transparent hover:bg-accent/10'
-        }`}
+        className="group absolute inset-x-0 -top-1.5 z-30 h-3 cursor-row-resize"
         title="Drag to resize the timeline"
       >
         <div
-          className={`mx-auto h-1 w-12 translate-y-0.5 rounded-full transition ${
+          className={`mx-auto mt-1 h-1 w-16 rounded-full transition ${
             dragging ? 'bg-accent' : 'bg-neutral-700 group-hover:bg-accent'
           }`}
         />
       </div>
-      {/* ── Header: transport controls + global clock ─────────────────────── */}
-      <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-1.5 text-[11px]">
-        <span className="flex items-center gap-1.5 font-semibold text-neutral-200">
-          <Film className="h-3.5 w-3.5 text-accent" /> Timeline
-        </span>
-        <span className="text-neutral-500">
-          {clips.length} clip{clips.length > 1 ? 's' : ''}
-        </span>
-        {anyRunning && (
-          <span className="flex items-center gap-1 text-warning">
-            <Loader2 className="h-3 w-3 animate-spin" /> generating
+      <div className="island flex h-full flex-col overflow-hidden">
+        {/* ── Header: transport controls + global clock ───────────────────── */}
+        <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-1.5 text-[11px]">
+          <span className="flex items-center gap-1.5 font-semibold text-neutral-200">
+            <Film className="h-3.5 w-3.5 text-accent" /> Timeline
           </span>
-        )}
-
-        <div className="mx-auto flex items-center gap-1">
-          <button
-            onClick={() => {
-              const prev = Math.max(0, engine.activeIdx - 1)
-              engine.seek(engine.starts[prev] ?? 0)
-            }}
-            className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-            title="Previous clip"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => (engine.playing ? engine.pause() : engine.play())}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-neutral-900 hover:bg-accent-hover"
-            aria-label={engine.playing ? 'Pause' : 'Play'}
-          >
-            {engine.playing ? (
-              <Pause className="h-3.5 w-3.5" />
-            ) : (
-              <Play className="h-3.5 w-3.5 pl-0.5" />
-            )}
-          </button>
-          <button
-            onClick={() => {
-              const next = Math.min(clips.length - 1, engine.activeIdx + 1)
-              engine.seek(engine.starts[next] ?? 0)
-            }}
-            className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-            title="Next clip"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-          <span className="ml-3 flex items-baseline gap-2 text-sm" data-timeline-clock>
-            <Timecode seconds={engine.globalTime} />
-            <span className="text-[10px] text-neutral-600">
-              / <Timecode seconds={engine.total} dimAll />
+          <span className="text-neutral-500">
+            {clips.length} clip{clips.length > 1 ? 's' : ''}
+          </span>
+          {anyRunning && (
+            <span className="flex items-center gap-1 text-warning">
+              <Loader2 className="h-3 w-3 animate-spin" /> generating
             </span>
-          </span>
-        </div>
-
-        <button
-          onClick={() => setCollapsed(true)}
-          className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-          title="Hide timeline"
-        >
-          <ChevronDown className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* ── Main row: gapless player + track ──────────────────────────────── */}
-      <div className="flex min-h-0 flex-1">
-        {/* Player: two stacked videos, the active one visible. Width follows the
-            timeline height (16:9), so resizing the island enlarges the player. */}
-        <div
-          className="video-stack relative aspect-video flex-shrink-0 cursor-pointer border-r border-neutral-800 bg-black"
-          onClick={() => (engine.playing ? engine.pause() : engine.play())}
-          title="Play / pause (click)"
-        >
-          <video
-            ref={engine.videoARef}
-            onEnded={engine.advance}
-            playsInline
-            className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'A' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-          />
-          <video
-            ref={engine.videoBRef}
-            onEnded={engine.advance}
-            playsInline
-            muted={engine.activeSlot === 'A'}
-            className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-          />
-          <audio ref={engine.audioRef} className="hidden" />
-          {!activeClip?.url && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-[11px] text-neutral-500">
-              {fallbackImages?.[activeClip?.node.id ?? ''] ? (
-                <img
-                  src={fallbackImages[activeClip?.node.id ?? '']}
-                  alt=""
-                  className="absolute inset-0 h-full w-full object-contain opacity-60"
-                />
-              ) : (
-                <>
-                  <AlertCircle className="h-4 w-4" />
-                  <span>No output for this clip yet</span>
-                </>
-              )}
-            </div>
           )}
-          {!engine.playing && activeClip?.url && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60">
-                <Play className="h-4 w-4 pl-0.5 text-white" />
-              </span>
-            </div>
-          )}
-        </div>
 
-        {/* Track: ruler + proportional clip blocks + playhead. */}
-        <div className="flex min-w-0 flex-1 flex-col px-3 py-2">
-          <div
-            ref={trackRef}
-            className="relative min-h-0 flex-1 cursor-crosshair select-none"
-            onPointerDown={(e) => {
-              scrubbing.current = true
-              document.body.style.userSelect = 'none'
-              engine.seek(timeAtPointer(e.clientX))
-            }}
-          >
-            {/* Ruler */}
-            <div className="absolute inset-x-0 top-0 h-5 border-b border-neutral-800 text-[9px] text-neutral-600">
-              {engine.total > 0 &&
-                rulerTicks(engine.total).map((t) => (
-                  <span
-                    key={t}
-                    className="absolute top-0 border-l border-neutral-800 pl-1 leading-5"
-                    style={{ left: `${(t / engine.total) * 100}%` }}
-                  >
-                    {formatSeconds(t)}
-                  </span>
-                ))}
-            </div>
-
-            {/* Clip blocks (video track) */}
-            <div
-              className="absolute inset-x-0 top-6 flex"
-              style={{ bottom: audioClips.length > 0 ? 38 : 0 }}
+          <div className="mx-auto flex items-center gap-1">
+            <button
+              onClick={() => {
+                const prev = Math.max(0, engine.activeIdx - 1)
+                engine.seek(engine.starts[prev] ?? 0)
+              }}
+              className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+              title="Previous clip"
             >
-              {clips.map((clip, i) => {
-                const width = engine.total > 0 ? (engine.durationOf(clip) / engine.total) * 100 : 0
-                const isActive = i === engine.activeIdx
-                const still = fallbackImages?.[clip.node.id]
-                return (
-                  <div
-                    key={clip.node.id}
-                    className={`group relative mr-px min-w-0 overflow-hidden rounded-md border ${
-                      isActive ? 'border-accent' : 'border-neutral-800'
-                    } ${clip.url ? 'bg-neutral-900' : 'bg-neutral-900/40'}`}
-                    style={{ width: `${width}%` }}
-                    data-timeline-clip={i}
-                    onPointerDown={(e) => {
-                      // Let the track scrub handler run too, but focus/select this node.
-                      e.stopPropagation()
-                      scrubbing.current = true
-                      document.body.style.userSelect = 'none'
-                      engine.seek(timeAtPointer(e.clientX))
-                      onFocusNode?.(clip.node.id)
-                    }}
-                  >
-                    {clip.url ? (
-                      <VideoThumb
-                        src={clip.url}
-                        overlay={false}
-                        className="pointer-events-none h-full w-full object-cover opacity-70 group-hover:opacity-100"
-                      />
-                    ) : still ? (
-                      <img
-                        src={still}
-                        alt=""
-                        className="pointer-events-none h-full w-full object-cover opacity-40"
-                      />
-                    ) : null}
-                    <div className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 to-transparent px-1.5 pt-3 pb-0.5 text-[9px] text-neutral-200">
-                      {clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key}
-                      <span className="ml-1 text-neutral-400">{fmt(engine.durationOf(clip))}</span>
-                    </div>
-                    {!clip.url && (
-                      <div className="absolute inset-0 flex items-center justify-center text-[9px] text-neutral-600">
-                        {anyRunning ? 'generating…' : 'empty'}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => (engine.playing ? engine.pause() : engine.play())}
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-neutral-900 hover:bg-accent-hover"
+              aria-label={engine.playing ? 'Pause' : 'Play'}
+            >
+              {engine.playing ? (
+                <Pause className="h-3.5 w-3.5" />
+              ) : (
+                <Play className="h-3.5 w-3.5 pl-0.5" />
+              )}
+            </button>
+            <button
+              onClick={() => {
+                const next = Math.min(clips.length - 1, engine.activeIdx + 1)
+                engine.seek(engine.starts[next] ?? 0)
+              }}
+              className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+              title="Next clip"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            <span className="ml-3 flex items-baseline gap-2 text-sm" data-timeline-clock>
+              <Timecode seconds={engine.globalTime} />
+              <span className="text-[10px] text-neutral-600">
+                / <Timecode seconds={engine.total} dimAll />
+              </span>
+            </span>
+          </div>
 
-            {/* Audio track */}
-            {audioClips.length > 0 && (
-              <div className="absolute inset-x-0 bottom-0 flex h-8">
-                {audioClips.map((clip, i) => {
+          <button
+            onClick={() => setCollapsed(true)}
+            className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            title="Hide timeline"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* ── Main row: gapless player + track ──────────────────────────────── */}
+        <div className="flex min-h-0 flex-1">
+          {/* Player: two stacked videos, the active one visible. Width follows the
+            timeline height (16:9), so resizing the island enlarges the player. */}
+          <div
+            className="video-stack relative aspect-video flex-shrink-0 cursor-pointer border-r border-neutral-800 bg-black"
+            onClick={() => (engine.playing ? engine.pause() : engine.play())}
+            title="Play / pause (click)"
+          >
+            <video
+              ref={engine.videoARef}
+              onEnded={engine.advance}
+              playsInline
+              className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'A' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+            />
+            <video
+              ref={engine.videoBRef}
+              onEnded={engine.advance}
+              playsInline
+              muted={engine.activeSlot === 'A'}
+              className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+            />
+            <audio ref={engine.audioRef} className="hidden" />
+            {!activeClip?.url && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-[11px] text-neutral-500">
+                {fallbackImages?.[activeClip?.node.id ?? ''] ? (
+                  <img
+                    src={fallbackImages[activeClip?.node.id ?? '']}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-contain opacity-60"
+                  />
+                ) : (
+                  <>
+                    <AlertCircle className="h-4 w-4" />
+                    <span>No output for this clip yet</span>
+                  </>
+                )}
+              </div>
+            )}
+            {!engine.playing && activeClip?.url && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60">
+                  <Play className="h-4 w-4 pl-0.5 text-white" />
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Track: ruler + proportional clip blocks + playhead. */}
+          <div className="flex min-w-0 flex-1 flex-col px-3 py-2">
+            <div
+              ref={trackRef}
+              className="relative min-h-0 flex-1 cursor-crosshair select-none"
+              onPointerDown={(e) => {
+                scrubbing.current = true
+                document.body.style.userSelect = 'none'
+                engine.seek(timeAtPointer(e.clientX))
+              }}
+            >
+              {/* Ruler */}
+              <div className="absolute inset-x-0 top-0 h-5 border-b border-neutral-800 text-[9px] text-neutral-600">
+                {engine.total > 0 &&
+                  rulerTicks(engine.total).map((t) => (
+                    <span
+                      key={t}
+                      className="absolute top-0 border-l border-neutral-800 pl-1 leading-5"
+                      style={{ left: `${(t / engine.total) * 100}%` }}
+                    >
+                      {formatSeconds(t)}
+                    </span>
+                  ))}
+              </div>
+
+              {/* Clip blocks (video track) */}
+              <div
+                className="absolute inset-x-0 top-6 flex"
+                style={{ bottom: audioClips.length > 0 ? 38 : 0 }}
+              >
+                {clips.map((clip, i) => {
                   const width =
-                    engine.total > 0
-                      ? Math.min(
-                          (engine.durationOf(clip) / engine.total) * 100,
-                          100 - ((engine.audioStarts[i] ?? 0) / engine.total) * 100
-                        )
-                      : 0
+                    engine.total > 0 ? (engine.durationOf(clip) / engine.total) * 100 : 0
+                  const isActive = i === engine.activeIdx
+                  const still = fallbackImages?.[clip.node.id]
                   return (
                     <div
                       key={clip.node.id}
-                      className={`relative mr-px flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[10px] ${
-                        clip.url
-                          ? 'border-highlight-soft/40 bg-highlight-soft/15 text-highlight-soft'
-                          : 'border-neutral-800 bg-neutral-900/40 text-neutral-600'
-                      }`}
-                      style={{ width: `${Math.max(width, 0)}%` }}
+                      className={`group relative mr-px min-w-0 overflow-hidden rounded-md border ${
+                        isActive ? 'border-accent' : 'border-neutral-800'
+                      } ${clip.url ? 'bg-neutral-900' : 'bg-neutral-900/40'}`}
+                      style={{ width: `${width}%` }}
+                      data-timeline-clip={i}
                       onPointerDown={(e) => {
+                        // Let the track scrub handler run too, but focus/select this node.
                         e.stopPropagation()
+                        scrubbing.current = true
+                        document.body.style.userSelect = 'none'
+                        engine.seek(timeAtPointer(e.clientX))
                         onFocusNode?.(clip.node.id)
                       }}
-                      title={clip.node.label ?? getModel(clip.node.modelId)?.label}
                     >
-                      <Music className="h-3 w-3 flex-shrink-0" />
-                      <span className="truncate">
+                      {clip.url ? (
+                        <VideoThumb
+                          src={clip.url}
+                          overlay={false}
+                          className="pointer-events-none h-full w-full object-cover opacity-70 group-hover:opacity-100"
+                        />
+                      ) : still ? (
+                        <img
+                          src={still}
+                          alt=""
+                          className="pointer-events-none h-full w-full object-cover opacity-40"
+                        />
+                      ) : null}
+                      <div className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 to-transparent px-1.5 pt-3 pb-0.5 text-[9px] text-neutral-200">
                         {clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key}
-                      </span>
-                      <span className="ml-auto flex-shrink-0 opacity-70">
-                        {fmt(engine.durationOf(clip))}
-                      </span>
+                        <span className="ml-1 text-neutral-400">
+                          {fmt(engine.durationOf(clip))}
+                        </span>
+                      </div>
+                      {!clip.url && (
+                        <div className="absolute inset-0 flex items-center justify-center text-[9px] text-neutral-600">
+                          {anyRunning ? 'generating…' : 'empty'}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
               </div>
-            )}
 
-            {/* Playhead */}
-            {engine.total > 0 && (
-              <div
-                className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-highlight"
-                style={{ left: `${(engine.globalTime / engine.total) * 100}%` }}
-                data-timeline-playhead
-              >
-                <div className="absolute -top-0.5 -left-[5px] h-0 w-0 border-x-[5px] border-t-[6px] border-x-transparent border-t-highlight" />
-              </div>
-            )}
+              {/* Audio track */}
+              {audioClips.length > 0 && (
+                <div className="absolute inset-x-0 bottom-0 flex h-8">
+                  {audioClips.map((clip, i) => {
+                    const width =
+                      engine.total > 0
+                        ? Math.min(
+                            (engine.durationOf(clip) / engine.total) * 100,
+                            100 - ((engine.audioStarts[i] ?? 0) / engine.total) * 100
+                          )
+                        : 0
+                    return (
+                      <div
+                        key={clip.node.id}
+                        className={`relative mr-px flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[10px] ${
+                          clip.url
+                            ? 'border-highlight-soft/40 bg-highlight-soft/15 text-highlight-soft'
+                            : 'border-neutral-800 bg-neutral-900/40 text-neutral-600'
+                        }`}
+                        style={{ width: `${Math.max(width, 0)}%` }}
+                        onPointerDown={(e) => {
+                          e.stopPropagation()
+                          onFocusNode?.(clip.node.id)
+                        }}
+                        title={clip.node.label ?? getModel(clip.node.modelId)?.label}
+                      >
+                        <Music className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">
+                          {clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key}
+                        </span>
+                        <span className="ml-auto flex-shrink-0 opacity-70">
+                          {fmt(engine.durationOf(clip))}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Playhead */}
+              {engine.total > 0 && (
+                <div
+                  className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-highlight"
+                  style={{ left: `${(engine.globalTime / engine.total) * 100}%` }}
+                  data-timeline-playhead
+                >
+                  <div className="absolute -top-0.5 -left-[5px] h-0 w-0 border-x-[5px] border-t-[6px] border-x-transparent border-t-highlight" />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

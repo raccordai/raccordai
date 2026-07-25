@@ -6,13 +6,6 @@ import { invoke } from '@renderer/lib/ipc'
  * Backed by the main-process run engine since phase 3.
  */
 
-export function runNode(args: {
-  nodeId: string
-  reuseSatisfied?: boolean
-}): Promise<{ generationId: string; kieTaskId: string }> {
-  return invoke('generations:run', args)
-}
-
 export function refreshStatus(args: { nodeId: string }): Promise<{ status: string }> {
   return invoke('generations:refreshStatus', args)
 }

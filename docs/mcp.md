@@ -50,16 +50,29 @@ the style's _bible_ paragraph to every visual prompt (cross-shot consistency).
 Everything lives in `src/main/mcp/`:
 
 - `registry.ts` — **the extension point**. One capability = one `AgentTool`
-  entry (name, short description, JSON Schema, `execute()` calling the main
-  services, `mutates` to refresh the UI). The server publishes the registry
-  as-is: nothing else to touch.
+  entry (name, short description, JSON Schema, `scope`, `risk`, `execute()`
+  calling the main services). The server publishes the registry as-is, and the
+  embedded assistant consumes the SAME registry through
+  `src/main/services/chatToolAdapter.ts`: nothing else to touch.
 - `docs.ts` — the in-band documentation topics.
 - `server.ts` — MCP plumbing (stateless, one instance per request, JSON
   responses). Almost never changes.
 
+Every tool declares two fields (invariant-tested in `registry.test.ts`):
+
+- `scope`: `'video'` (takes a `videoId`), `'project'` (takes a `projectId`) or
+  `'global'` (neither, or addresses rows by their own globally-unique ids).
+  The chat adapter injects the session's ids for video-bound sessions; MCP
+  clients always pass them explicitly.
+- `risk`: `'read'` (no state change), `'write'`, `'destructive'` (permanent
+  data loss) or `'spending'` (calls kie.ai, costs credits). Non-`read` tools
+  refresh the app UI after running. **Destructive tools are approval-gated on
+  the chat surface** (an action card + `confirm: true` re-call); MCP clients
+  remain the human's own agent and execute directly.
+
 Rules to preserve: short descriptions (depth goes in `docs`), explicit ids in
-the schemas (an MCP client has no "current video"), `mutates: true` on
-everything that writes.
+the schemas (an MCP client has no "current video"), and settings/backup stay
+out of the registry — an LLM loop must not touch API keys or relaunch the app.
 
 ## Verifying
 

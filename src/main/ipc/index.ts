@@ -18,6 +18,7 @@ import * as library from '../services/library'
 import * as projects from '../services/projects'
 import { kieGetCredits, kieTestApiKey } from '../services/kie'
 import * as notificationsService from '../services/notifications'
+import * as runBatchService from '../services/runBatch'
 import * as renderService from '../services/render'
 import * as runEngine from '../services/runEngine'
 import * as settingsService from '../services/settings'
@@ -184,6 +185,15 @@ export function registerIpcHandlers(): void {
   handle('generations:run', ({ nodeId, reuseSatisfied }) =>
     runEngine.runNode(nodeId, reuseSatisfied ?? false)
   )
+  handle('generations:planRun', ({ videoId, targetNodeIds, reuseTargets }) =>
+    runBatchService.planBatch(videoId, targetNodeIds, reuseTargets)
+  )
+  // Resolves once the whole batch settled — the renderer's spinner awaits it.
+  handle(
+    'generations:runBatch',
+    ({ videoId, targetNodeIds, reuseTargets }) =>
+      runBatchService.startBatch({ videoId, targetNodeIds, reuseTargets }).done
+  )
   handle('generations:refreshStatus', ({ nodeId }) => runEngine.refreshStatus(nodeId))
   handle('generations:cancel', ({ nodeId }) => runEngine.cancelGeneration(nodeId))
   handle('generations:setLastFrame', ({ generationId, jpegBase64 }) =>
@@ -287,8 +297,10 @@ export function registerIpcHandlers(): void {
   handle('render:cancel', ({ videoId }) => renderService.cancelRender(videoId))
 
   handle('chat:get', ({ videoId }) => chatService.getChatState(videoId))
-  handle('chat:send', ({ videoId, projectId, text, images }) =>
-    chatService.sendChatMessage(videoId, projectId, text, images)
+  handle('chat:send', ({ videoId, projectId, text, images, context }) =>
+    chatService.sendChatMessage(videoId, projectId, text, images, context)
   )
   handle('chat:clear', ({ videoId }) => chatService.clearChat(videoId))
+  handle('chat:listSessions', () => chatService.listSessions())
+  handle('chat:listTools', () => chatService.listAssistantTools())
 }

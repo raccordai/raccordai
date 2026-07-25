@@ -1,12 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link, Outlet, createRootRoute, useRouterState } from '@tanstack/react-router'
-import { KeyRound, Settings } from 'lucide-react'
+import { Link, Outlet, createRootRoute, useRouter, useRouterState } from '@tanstack/react-router'
+import { KeyRound, MessageSquare, Settings } from 'lucide-react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HeaderActions, MenuBar, MenuBarProvider } from '@renderer/components/menubar/MenuBar'
 import { FeedbackProvider } from '@renderer/components/feedback/Feedback'
 import { HeaderCredits } from '@renderer/components/HeaderCredits'
+import { Button } from '@renderer/components/ui/Button'
+import { AssistantSidebar } from '@renderer/features/assistant/AssistantSidebar'
+import { toggleAssistant, useAssistant } from '@renderer/features/assistant/assistantStore'
 import { FirstRunOverlay } from '@renderer/features/onboarding/FirstRunOverlay'
 import { invoke } from '@renderer/lib/ipc'
+import type { NavigatePayload } from '@shared/ipc/contracts'
 
 export const Route = createRootRoute({
   component: RootLayout
@@ -14,6 +19,27 @@ export const Route = createRootRoute({
 
 function RootLayout(): React.JSX.Element {
   const { t } = useTranslation()
+  const router = useRouter()
+
+  // The assistant's open_video tool pushes a route for the app to follow.
+  useEffect(() => {
+    return window.api.on('event:navigate', (payload) => {
+      const path = (payload as NavigatePayload)?.path
+      if (typeof path === 'string' && path.startsWith('/')) router.history.push(path)
+    })
+  }, [router])
+
+  // Global assistant shortcut — ⌘J (mac) / Ctrl+J.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault()
+        toggleAssistant()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   return (
     <MenuBarProvider>
@@ -25,6 +51,7 @@ function RootLayout(): React.JSX.Element {
             <div className="flex-1" />
             <HeaderCredits />
             <HeaderActions />
+            <AssistantToggle />
             <Link
               to="/settings"
               className="rounded-md p-1.5 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
@@ -34,13 +61,32 @@ function RootLayout(): React.JSX.Element {
             </Link>
           </header>
           <MissingKeyBanner />
-          <main className="min-h-0 flex-1 overflow-y-auto">
-            <Outlet />
-          </main>
+          <div className="flex min-h-0 flex-1">
+            <AssistantSidebar />
+            <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+              <Outlet />
+            </main>
+          </div>
         </div>
         <FirstRunOverlay />
       </FeedbackProvider>
     </MenuBarProvider>
+  )
+}
+
+/** Permanent header toggle for the global assistant sidebar (§4.10 phase 1). */
+function AssistantToggle(): React.JSX.Element {
+  const { t } = useTranslation()
+  const { open } = useAssistant()
+  return (
+    <Button
+      variant={open ? 'secondary' : 'ghost'}
+      size="sm"
+      onClick={toggleAssistant}
+      title={t('chat.toggleTitle')}
+    >
+      <MessageSquare className="h-4 w-4" />
+    </Button>
   )
 }
 

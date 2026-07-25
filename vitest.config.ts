@@ -27,13 +27,19 @@ export default defineConfig({
         'src/main/services/graphHistory.ts',
         'src/main/services/genQueue.ts',
         'src/main/services/renderPlan.ts',
+        'src/main/services/runPlanner.ts',
         'src/main/services/chatStore.ts',
+        'src/main/services/chatCompaction.ts',
+        'src/main/services/chatContext.ts',
+        'src/main/services/chatToolAdapter.ts',
         'src/main/services/chatOpenAIFormat.ts',
+        'src/main/services/chatStream.ts',
         'src/main/services/assets.ts',
         'src/main/services/backup.ts',
         'src/main/media/files.ts',
         'src/renderer/src/lib/relativeTime.ts',
-        'src/renderer/src/lib/formatSeconds.ts'
+        'src/renderer/src/lib/formatSeconds.ts',
+        'src/renderer/src/lib/mentionToken.ts'
       ],
       // config.ts is a bare constant — nothing to test.
       exclude: ['**/*.test.ts', 'src/shared/config.ts'],

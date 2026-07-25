@@ -15,7 +15,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { FocusNodePayload, GraphEdge, GraphNode } from '@shared/ipc/contracts'
+import type { FocusNodePayload, GraphNode } from '@shared/ipc/contracts'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { invoke } from '@renderer/lib/ipc'
 import { ModelNode, AssetNode } from './nodes/ModelNode'
@@ -23,14 +23,15 @@ import { NodeParamsPanel } from './NodeParamsPanel'
 import { useCollapsed } from './timelineHooks'
 import { TimelineV2 } from './TimelineV2'
 import { HistoryPanel } from './HistoryPanel'
-import { ChatPanel } from './ChatPanel'
 import {
   Anchor,
   ChevronDown,
   ChevronRight,
   Copy,
+  History,
   Image as ImageIcon,
-  MessageSquare,
+  PanelBottom,
+  PanelBottomClose,
   Play,
   Replace,
   Trash2
@@ -38,14 +39,16 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@renderer/components/ui/Button'
 import { useAppMenus, useHeaderActions, type AppMenu } from '@renderer/components/menubar/MenuBar'
+import { openAssistant } from '@renderer/features/assistant/assistantStore'
+import { resetEditorContext, setEditorContext } from '@renderer/features/assistant/appContextStore'
 import { WorkflowToolbar, AddNodePanel } from './Toolbar'
-import { RENDER_PRESETS, useWorkflowIO, type RenderPreset } from './useWorkflowIO'
+import { ExportDialog } from './ExportDialog'
+import { useWorkflowIO } from './useWorkflowIO'
 import { WorkflowGraphContext, edgeAliases, type WorkflowGraph } from './workflowContext'
 import { autoLayoutPositions, resolveOverlaps, type LayoutDirection } from './autoLayout'
 import { useLastFrameExtractor } from './useLastFrameExtractor'
 import { graphKeys, useGraph, useIpcMutation, useProjectAssets } from './data'
 import { useNodeCreation } from './useNodeCreation'
-import { runNode } from './generationRuntime'
 import { MODELS, getModel } from '@shared/models'
 
 const NODE_TYPES = {
@@ -178,30 +181,16 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
-  /** Draft injected into the chat input (e.g. "fix this failed prompt"). */
-  const [chatPrefill, setChatPrefill] = useState<string | null>(null)
+  /** "Fix with the assistant" buttons → global sidebar with a prepared draft. */
   const askAssistant = useCallback((text: string) => {
-    setChatPrefill(text)
-    setChatOpen(true)
+    openAssistant(text)
   }, [])
 
-  // Assistant toggle lives in the title bar, next to the settings gear.
-  useHeaderActions(
-    useMemo(
-      () => (
-        <Button
-          variant={chatOpen ? 'secondary' : 'ghost'}
-          size="sm"
-          onClick={() => setChatOpen((v) => !v)}
-          title={t('editor.assistantTitle')}
-        >
-          <MessageSquare className="h-3.5 w-3.5" /> {t('editor.assistant')}
-        </Button>
-      ),
-      [chatOpen, t]
-    )
-  )
+  // Feed the assistant's per-send <app-context> snapshot (§4.10 phase 2).
+  useEffect(() => {
+    setEditorContext({ selectedNodeId })
+  }, [selectedNodeId])
+  useEffect(() => resetEditorContext, [])
   const [timelineCollapsed, setTimelineCollapsed] = useCollapsed()
   /** True while a "generate all videos" batch run is in flight. */
   const [runningAll, setRunningAll] = useState(false)
@@ -634,148 +623,47 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   )
 
   /**
-   * Smart per-node run: gathers every upstream dependency that lacks a usable
-   * output, then runs the whole subgraph dependency-aware. A node starts as soon
-   * as its OWN direct parents have finished — independent branches run in
-   * parallel (two images feeding the same node generate concurrently, they don't
-   * wait on each other). The explicit target always runs fresh; dependencies
-   * reuse any in-flight/finished generation (race-safe, server-side) so a shared
-   * upstream isn't generated once per consumer. Asset nodes are skipped.
+   * Smart per-node run — planned AND executed in the main process since §4.10
+   * phase 4 (`generations:planRun` / `generations:runBatch`): dependency-aware,
+   * shared upstreams generate once, independent branches in parallel, targets
+   * regenerate unless `reuseTargets` (batch mode). The renderer keeps exactly
+   * two concerns: the §4.4 cost gate (modal below) and failure feedback.
    */
   const runNodes = useCallback(
     async (targetNodeIds: string[], opts?: { reuseTargets?: boolean }) => {
-      if (!graph || targetNodeIds.length === 0) return
-      // When `reuseTargets` is set (batch runs), targets with a successful output
-      // are skipped instead of regenerated — no credits burned re-running clips
-      // that are already done. The single-node run leaves it false: an explicit
-      // click on one node always regenerates it.
+      if (targetNodeIds.length === 0) return
       const reuseTargets = opts?.reuseTargets ?? false
-      const targetSet = new Set<string>(targetNodeIds)
-      const nodesById = new Map<string, GraphNode>(graph.nodes.map((n) => [n.id, n]))
-      const incomingByNode = new Map<string, GraphEdge[]>()
-      for (const e of graph.edges) {
-        const arr = incomingByNode.get(e.targetNodeId) ?? []
-        arr.push(e)
-        incomingByNode.set(e.targetNodeId, arr)
-      }
+      const plan = await invoke('generations:planRun', { videoId, targetNodeIds, reuseTargets })
 
-      // Walk upstream from every target, collecting all transitive dependencies.
-      const visited = new Set<string>()
-      function visit(id: string) {
-        if (visited.has(id)) return
-        visited.add(id)
-        for (const e of incomingByNode.get(id) ?? []) visit(e.sourceNodeId)
-      }
-      for (const id of targetNodeIds) visit(id)
-
-      // ── Cost preview ──────────────────────────────────────────────────────
-      // Mirror of the reuse rules below: which nodes will actually claim a new
-      // generation. Multi-node runs get a per-node breakdown + total + balance
+      // Cost gate: multi-node runs get a per-node breakdown + total + balance
       // before any credit is spent; "don't ask under X" short-circuits it.
-      const planned: GraphNode[] = []
-      for (const id of visited) {
-        const node = nodesById.get(id)
-        if (!node || node.modelId === 'studio/asset') continue
-        const reuse = !targetSet.has(id) || reuseTargets
-        if (reuse && node.selectedGenerationId) {
-          const sel = await invoke('generations:get', {
-            generationId: node.selectedGenerationId
-          })
-          if (sel?.status === 'success') continue
-        }
-        planned.push(node)
-      }
-      if (planned.length >= 2) {
-        const rows = await Promise.all(
-          planned.map(async (node) => ({
-            id: node.id,
-            label: node.label ?? node.key,
-            credits: await invoke('generations:estimateCost', { nodeId: node.id })
-              .then((r) => r.credits)
-              .catch(() => null)
-          }))
-        )
-        const total = rows.reduce((sum, r) => sum + (r.credits ?? 0), 0)
+      if (plan.rows.length >= 2) {
         const skipUnder = Number(localStorage.getItem(COST_SKIP_KEY) ?? '0')
-        if (!(skipUnder > 0 && total <= skipUnder)) {
+        if (!(skipUnder > 0 && plan.total <= skipUnder)) {
           const balance = await invoke('kie:credits')
             .then((r) => r.credits)
             .catch(() => null)
           const accepted = await new Promise<boolean>((resolve) =>
-            setCostPreview({ rows, total, balance, resolve })
+            setCostPreview({
+              rows: plan.rows.map((r) => ({ id: r.nodeId, label: r.label, credits: r.credits })),
+              total: plan.total,
+              balance,
+              resolve
+            })
           )
           setCostPreview(null)
           if (!accepted) return
         }
       }
 
-      // Memoised per-node run: awaits the node's direct parents (in parallel),
-      // then runs it once. Memoising means a shared upstream is launched a single
-      // time even when several consumers depend on it; running parents via
-      // Promise.all is what parallelises independent branches. A single shared
-      // map across all targets means shared dependencies of two videos generate
-      // once, not once per video.
-      const runPromises = new Map<string, Promise<void>>()
-      const runWithDeps = (id: string): Promise<void> => {
-        const existing = runPromises.get(id)
-        if (existing) return existing
-        const node = nodesById.get(id)
-        const parentIds = (incomingByNode.get(id) ?? [])
-          .map((e) => e.sourceNodeId)
-          .filter((pid) => visited.has(pid))
-        const p = (async () => {
-          await Promise.all(parentIds.map(runWithDeps))
-          if (!node || node.modelId === 'studio/asset') return
-
-          // Dependencies always reuse; targets reuse only in batch mode.
-          const reuse = !targetSet.has(id) || reuseTargets
-          // Already-satisfied nodes are skipped (no churned credits).
-          if (reuse && node.selectedGenerationId) {
-            const sel = await invoke('generations:get', {
-              generationId: node.selectedGenerationId
-            })
-            if (sel?.status === 'success') return
-          }
-
-          const { generationId } = await runNode({
-            nodeId: id,
-            reuseSatisfied: reuse
-          })
-          await waitForGeneration(generationId)
-
-          const finished = await invoke('generations:get', { generationId })
-          if (finished?.status !== 'success') {
-            throw new Error(
-              `Node "${node.label ?? node.key}" did not complete successfully — stopping.`
-            )
-          }
-        })()
-        runPromises.set(id, p)
-        return p
-      }
-
-      // Run every target concurrently. One failing branch is surfaced but doesn't
-      // abort the others — the rest of the videos still get their shot.
-      let failedCount = 0
-      await Promise.all(
-        targetNodeIds.map((id) =>
-          runWithDeps(id).catch((err) => {
-            failedCount++
-            const message = err instanceof Error ? err.message : String(err)
-            console.error('Run failed:', message)
-            toast.error(message)
-          })
-        )
-      )
-      // One OS summary once the whole batch has settled ("4 succeeded, 1 failed").
-      if (targetNodeIds.length >= 2) {
-        void invoke('notifications:batchSummary', {
-          succeeded: targetNodeIds.length - failedCount,
-          failed: failedCount
-        }).catch(() => {})
+      const res = await invoke('generations:runBatch', { videoId, targetNodeIds, reuseTargets })
+      if (res.failed > 0) {
+        const message = t('editor.batchFailed', { count: res.failed })
+        setEditorContext({ lastError: message })
+        toast.error(message)
       }
     },
-    [graph, toast]
+    [videoId, toast, t]
   )
 
   const handleRunNode = useCallback((targetNodeId: string) => runNodes([targetNodeId]), [runNodes])
@@ -802,7 +690,9 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   )
 
   // "Fichier" menu in the app menu bar — import/export live there, not in the toolbar.
+  // Export is a single entry opening the guided dialog (one card per format).
   const io = useWorkflowIO(videoId, graph?.nodes ?? [])
+  const [exportOpen, setExportOpen] = useState(false)
   const menus = useMemo<AppMenu[]>(
     () => [
       {
@@ -824,40 +714,10 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
             id: 'export',
             entries: [
               {
-                id: 'export-json',
-                label: io.exporting ? t('editor.exporting') : t('menu.exportWorkflow'),
-                onSelect: io.exportJson,
-                disabled: !io.canExport || io.exporting
-              },
-              {
-                id: 'export-fcpxml',
-                label: io.exportingZip ? t('editor.fcpxmlBundling') : t('menu.exportFcpxml'),
-                onSelect: io.exportFcpxmlZip,
-                disabled: !io.canExportFcpxml || io.exportingZip
-              },
-              {
-                id: 'export-media-zip',
-                label: io.exportingMedia ? t('editor.fcpxmlBundling') : t('menu.exportMediaZip'),
-                onSelect: io.exportMediaZip,
-                disabled: !io.canExportFcpxml || io.exportingMedia
-              },
-              {
-                id: 'export-mp4',
-                label: io.renderingMp4 ? t('editor.rendering') : t('menu.exportMp4'),
-                onSelect: () => io.exportMp4(),
-                disabled: !io.canExportFcpxml || io.renderingMp4
-              },
-              // Per-destination presets — fixed output dims via the render
-              // pipeline's resolution override (§4.5 follow-up).
-              ...(Object.keys(RENDER_PRESETS) as RenderPreset[]).map((preset) => ({
-                id: `export-mp4-${preset.replace(':', '-')}`,
-                label: t('menu.exportMp4Preset', {
-                  preset,
-                  dims: `${RENDER_PRESETS[preset].width}×${RENDER_PRESETS[preset].height}`
-                }),
-                onSelect: () => io.exportMp4(preset),
-                disabled: !io.canExportFcpxml || io.renderingMp4
-              }))
+                id: 'export-open',
+                label: t('menu.export'),
+                onSelect: () => setExportOpen(true)
+              }
             ]
           }
         ]
@@ -866,6 +726,37 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
     [t, io]
   )
   useAppMenus(menus)
+
+  // Timeline / history toggles live in the title bar (icon-only, next to the
+  // assistant) — the floating toolbar stays lean enough for 13" screens.
+  const headerActions = useMemo(
+    () => (
+      <>
+        <Button
+          variant={timelineCollapsed ? 'ghost' : 'secondary'}
+          size="sm"
+          onClick={() => setTimelineCollapsed(!timelineCollapsed)}
+          title={timelineCollapsed ? t('editor.showTimeline') : t('editor.hideTimeline')}
+        >
+          {timelineCollapsed ? (
+            <PanelBottom className="h-4 w-4" />
+          ) : (
+            <PanelBottomClose className="h-4 w-4" />
+          )}
+        </Button>
+        <Button
+          variant={historyOpen ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setHistoryOpen((v) => !v)}
+          title={t('editor.historyBtnTitle')}
+        >
+          <History className="h-4 w-4" />
+        </Button>
+      </>
+    ),
+    [t, timelineCollapsed, setTimelineCollapsed, historyOpen]
+  )
+  useHeaderActions(headerActions)
 
   // Keep the ref in sync so node data callbacks always invoke the latest handler.
   useEffect(() => {
@@ -947,27 +838,11 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
               graph={graphValue}
               onTidy={handleTidy}
               onFit={() => fitView({ padding: 0.2, duration: 300 })}
-              timelineCollapsed={timelineCollapsed}
-              onToggleTimeline={() => setTimelineCollapsed(!timelineCollapsed)}
-              historyOpen={historyOpen}
-              onToggleHistory={() => setHistoryOpen((v) => !v)}
               onRunAllVideos={handleRunAllVideos}
               runningAllVideos={runningAll}
               videoNodeCount={videoNodeCount}
             />
           </div>
-
-          {chatOpen && (
-            <div className="absolute top-16 bottom-3 left-3 z-30 flex flex-col items-stretch">
-              <ChatPanel
-                videoId={videoId}
-                projectId={projectId}
-                prefill={chatPrefill}
-                onPrefillConsumed={() => setChatPrefill(null)}
-                onClose={() => setChatOpen(false)}
-              />
-            </div>
-          )}
 
           {/* Also shown for renders launched by an agent through MCP — progress
               events arrive regardless of who started the render. */}
@@ -1111,6 +986,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
           }}
         />
       )}
+      {exportOpen && <ExportDialog io={io} onClose={() => setExportOpen(false)} />}
     </WorkflowGraphContext.Provider>
   )
 }
@@ -1363,18 +1239,4 @@ function FrameAnchorModal({ guard }: { guard: AnchorGuardState }) {
       </div>
     </div>
   )
-}
-
-/**
- * Step-by-step sequencer helper: polls the generation row and resolves as soon
- * as it reaches a terminal state (success/failed). Hard caps at 10 min.
- */
-async function waitForGeneration(generationId: string): Promise<void> {
-  const start = Date.now()
-  for (;;) {
-    const gen = await invoke('generations:get', { generationId })
-    if (gen?.status === 'success' || gen?.status === 'failed') return
-    if (Date.now() - start > 10 * 60 * 1000) return
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-  }
 }

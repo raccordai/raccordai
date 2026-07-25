@@ -1,8 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import { MODELS, getModel } from '@shared/models'
 import { getStyle } from '@shared/styles/registry'
 import {
   HOME_CHAT_ID,
+  type AppContext,
   type ChatImage,
   type ChatItem,
   type ChatPlan,
@@ -10,20 +10,35 @@ import {
 } from '@shared/ipc/contracts'
 import { onGenerationSettled } from '../bus'
 import { broadcastChatUpdate, broadcastWorkflowChanged } from '../events'
-import { DOC_TOPICS, getDoc } from '../mcp/docs'
-import { deleteChatSession, loadChatSession, saveChatSession } from './chatStore'
+import { AGENT_TOOLS } from '../mcp/registry'
+import { startBatch, videoNodeTargets } from './runBatch'
+import {
+  SUMMARY_SYSTEM,
+  needsCompaction,
+  reassembleHistory,
+  renderForSummary,
+  splitForCompaction,
+  stripImageBlocks
+} from './chatCompaction'
+import { formatAppContext } from './chatContext'
+import { SseParser, createAnthropicAccumulator, createResponsesAccumulator } from './chatStream'
+import { deleteChatSession, listChatSessions, loadChatSession, saveChatSession } from './chatStore'
 import * as assets from './assets'
+import {
+  APPROVAL_REQUIRED_RESULT,
+  approvalGate,
+  injectBindingIds,
+  toAnthropicTools
+} from './chatToolAdapter'
 import {
   fromResponsesOutput,
   toResponsesInput,
   toResponsesTools,
   type ResponsesOutputItem
 } from './chatOpenAIFormat'
-import * as generations from './generations'
 import * as graph from './graph'
 import { KIE_BASE } from './kie'
 import * as projects from './projects'
-import { runNode } from './runEngine'
 import { getAssistantModel, getKieApiKey, getLocale } from './settings'
 import * as videos from './videos'
 
@@ -38,7 +53,9 @@ import * as videos from './videos'
  * telemetry headers with "403 Your request was blocked".
  */
 
-const MAX_ITERATIONS = 15
+// Full-project deliveries chain many tool calls even with batching (§4.10
+// phase 4 raised it from 15); the settle wake-up remains the completion path.
+const MAX_ITERATIONS = 24
 
 /** kie.ai OpenAI-Responses proxy path per GPT model (Claude ids use /claude/v1/messages). */
 const OPENAI_RESPONSES_PATHS: Record<string, string> = {
@@ -51,22 +68,26 @@ const SYSTEM = `You are the embedded assistant of Raccord, a node-based AI video
 The user is looking at a workflow graph for one video. Nodes are AI model invocations (image/video/audio generation) or project assets ('studio/asset' nodes whose params hold an assetId). Edges wire a source node's output into a target node's input: \`input\` is the target model's input field name (e.g. "image_urls"), \`output\` is "output" (main result) or "lastFrame" (last frame of a video). Running a node calls the kie.ai API and costs money.
 
 How to work:
+- User messages may start with an <app-context> block injected by the app (the user did not write it and does not see it): a snapshot of what they are looking at at send time. The current selection is where the user is looking — "this node" means selectedNodeId, and lastGenerationError is the failure they most recently saw. Use it silently; never quote the block back.
+- focus_node centers the editor on a node (and selects it) — use it so the user sees the node you are talking about. open_video switches the whole app to another video's editor; only navigate when it helps the user follow, and say you did.
 - Call get_workflow first whenever the current graph matters; call list_models before choosing model ids or param names — never guess them.
 - The user watches the graph update live as you use tools, so keep narration brief.
 - Prefer creating structure (nodes, connections, prompts) directly; ask before running generations (they cost money) unless the user explicitly asked to generate, and ask before deleting several nodes.
 - Position nodes on a left-to-right flow (x: 0, 420, 840…; y spaced by ~350) so the graph stays readable.
 - import_workflow with replace=true erases the existing graph — only with explicit user consent.
+- Destructive tools (remove_node, delete_video, delete_project, delete_asset) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call.
 - When you launch run_node, the app automatically wakes you with a message once that generation finishes (success or failure) — you can tell the user you'll report back, then end your turn. Never poll get_generations to wait.
-- The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a character/décor/prop sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through import_asset_from_url the same way.
+- To generate SEVERAL shots, prefer ONE run_batch call (targetNodeIds, or all_videos: true for every video node) over chained run_node calls: it runs the whole subgraph dependency-aware — shared upstreams generate once, independent branches in parallel, already-satisfied nodes are reused — and wakes you as each generation settles.
+- The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a character/décor/prop sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.
 - Plan before building: on any multi-shot build, call present_plan (structured shots + models + estimated credits + total) BEFORE import_workflow, and before launching a batch of runs whose total cost is significant. The user gets an approval card with Approve / Request changes — WAIT for their reply before executing. This is the validation gate before spending credits (the conversational sibling of the storyboard review).
 
 You are also the film director. When the user asks for a video (an ad, an anime scene, a realistic sequence…), don't just wire nodes — direct:
 1. Establish the brief from the user's request: subject, intent, tone, duration, aspect ratio. Ask only what you truly cannot infer; propose tasteful defaults for the rest.
-2. Pick an art direction: read_docs "styles", choose the closest style template, call set_video_style so it sticks to the video. The app then appends the style bible to prompts AT RUN TIME for every visual node whose params carry "applyVideoStyle": true (templates and design recipes set it; nodes created without explicit params get it by default). When you write params yourself (add_node / update_node / import_workflow), set "applyVideoStyle": true on visual nodes and keep the prompt shot-specific — NEVER paste the style bible into a prompt (it would be duplicated at run and freeze the art direction).
-3. For a standard shape of video (product ad, anime scene, cinematic sequence, vertical social ad), start from a blueprint: read_docs "templates" then "template:<id>", fill the [SLOTS] with the user's subject, import_workflow — then refine per shot.
+2. Pick an art direction: docs "styles", choose the closest style template, call set_video_style so it sticks to the video. The app then appends the style bible to prompts AT RUN TIME for every visual node whose params carry "applyVideoStyle": true (templates and design recipes set it; nodes created without explicit params get it by default). When you write params yourself (add_node / update_node / import_workflow), set "applyVideoStyle": true on visual nodes and keep the prompt shot-specific — NEVER paste the style bible into a prompt (it would be duplicated at run and freeze the art direction).
+3. For a standard shape of video (product ad, anime scene, cinematic sequence, vertical social ad), start from a blueprint: docs "templates" then "template:<id>", fill the [SLOTS] with the user's subject, import_workflow — then refine per shot.
 4. Break the video into shots (2-4s of intent each): establishing → action → emotion/punchline. Chain clips by wiring each video node's lastFrame output into the next node's image input so every cut is seamless.
-5. Pre-visualize before spending video credits (Seedance 2): read_docs "designs" — design sheets (character/décor/prop) first, then one "storyboard" node per scene: a 9-panel grid built FROM the sheets (gpt-image-2-image-to-image) showing the scene beat by beat. Check the project library BEFORE generating a sheet: assets with designId/designSubject (see get_workflow, or search_assets) are published design sheets — reuse one for the same subject via a studio/asset node (reference inputs only, never a frame anchor) instead of regenerating it. And once the user approves a freshly generated sheet, publish_design it so the whole project can reuse it. The user reviews the staging on the grid, THEN you wire it as a reference on the scene's shots ("@ImageN is the 9-panel storyboard — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom"; the character sheet stays its own reference, and each shot's prompt says which panels it covers). MANDATORY on every storyboard-driven shot prompt, or the model may render the grid itself in the video: append "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout". The storyboard encodes composition — keep the video prompts about motion: camera, rhythm, transitions.
-6. Before writing ANY prompt, read_docs "prompting:<model id>" and follow that model's grammar exactly (camera vocabulary, dialogue syntax, @references, shot markers). Write prompts in English; per-shot: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
+5. Pre-visualize before spending video credits (Seedance 2): docs "designs" — design sheets (character/décor/prop) first, then one "storyboard" node per scene: a 9-panel grid built FROM the sheets (gpt-image-2-image-to-image) showing the scene beat by beat. Check the project library BEFORE generating a sheet: assets with designId/designSubject (see get_workflow, or search_assets) are published design sheets — reuse one for the same subject via a studio/asset node (reference inputs only, never a frame anchor) instead of regenerating it. And once the user approves a freshly generated sheet, publish_design it so the whole project can reuse it. The user reviews the staging on the grid, THEN you wire it as a reference on the scene's shots ("@ImageN is the 9-panel storyboard — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom"; the character sheet stays its own reference, and each shot's prompt says which panels it covers). MANDATORY on every storyboard-driven shot prompt, or the model may render the grid itself in the video: append "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout". The storyboard encodes composition — keep the video prompts about motion: camera, rhythm, transitions.
+6. Before writing ANY prompt, docs "prompting:<model id>" and follow that model's grammar exactly (camera vocabulary, dialogue syntax, @references, shot markers). Write prompts in English; per-shot: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
 7. Score last: add a Suno node once the shots exist, matching the style's music hint; wire it into Seedance reference_audio_urls when the model supports it.
 8. Report the estimated credit cost before proposing to run anything; propose running the cheap design/storyboard images first so the user validates the staging before any video shot.`
 
@@ -76,279 +97,75 @@ Raccord hierarchy: Project → Videos (one workflow graph each) + Assets. Nodes 
 
 Every graph tool here takes an explicit videoId — always pass the id of the video you created or selected (list_videos to find one). The user sees the app update live as you work; keep narration brief.
 
+User messages may start with an <app-context> block injected by the app (the user did not write it and does not see it): a snapshot of what they are looking at at send time — route, projectId/videoId when they are inside a project or video, selectedNodeId, lastGenerationError. When it names a project or video, that is the one "this project"/"this video" refers to — use those ids directly instead of asking. Use it silently; never quote the block back. open_video switches the app to a video's editor (do it when you finish building one so the user lands on the result); focus_node centers the editor on a node of the video being viewed.
+
+Destructive tools (remove_node, delete_video, delete_project, delete_asset) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call.
+
 How to deliver a full project:
 1. Brief: subject, tone, duration, aspect ratio. Turn the duration into a shot plan: clips are 4-12s (8s is the sweet spot), so a 2.5-minute piece is ~18-19 shots — organize them as scenes of 3-4 shots (establishing → action → emotion). Ask only what you truly cannot infer.
 2. create_project (short name from the subject), then create_video. Prefer ONE video for the whole piece (the timeline chains its clips); split into several videos only if the user asks for separate sequences.
-3. read_docs "models" FIRST — the frame-anchor vs reference distinction decides your wiring: character sheets/storyboards go to Seedance 2 reference_image_urls (with an explicit role in the prompt, they never appear on screen); Seedance 1.5 / Grok image inputs literally BECOME frames. read_docs "styles" → set_video_style; the style bible is appended automatically at run time to every visual node whose params carry "applyVideoStyle": true — set that flag on the visual nodes you create and NEVER paste the bible into a prompt. For standard shapes, scale a template (read_docs "template:<id>") to the requested duration. On an existing project, search_assets first: published design sheets (designId/designSubject set) are reused via studio/asset nodes (reference inputs only) instead of regenerating them; publish_design a newly approved sheet so later videos can reuse it.
-4. Build the graph in ONE import_workflow call (nodes + edges, left-to-right positions x: 0, 420, 840…, y by scene ~350): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (read_docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); lastFrame chaining with "@Image3 as the first frame" (seamless cuts); one Suno music node per video matching the style's music hint.
-5. read_docs "prompting:<model id>" before writing ANY prompt. English prompts: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
-6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. Same gate before launching any significant batch of runs (run_node costs money — when you do launch one, the app wakes you automatically on completion, never poll).
+3. docs "models" FIRST — the frame-anchor vs reference distinction decides your wiring: character sheets/storyboards go to Seedance 2 reference_image_urls (with an explicit role in the prompt, they never appear on screen); Seedance 1.5 / Grok image inputs literally BECOME frames. docs "styles" → set_video_style; the style bible is appended automatically at run time to every visual node whose params carry "applyVideoStyle": true — set that flag on the visual nodes you create and NEVER paste the bible into a prompt. For standard shapes, scale a template (docs "template:<id>") to the requested duration. On an existing project, search_assets first: published design sheets (designId/designSubject set) are reused via studio/asset nodes (reference inputs only) instead of regenerating them; publish_design a newly approved sheet so later videos can reuse it.
+4. Build the graph in ONE import_workflow call (nodes + edges, left-to-right positions x: 0, 420, 840…, y by scene ~350): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); lastFrame chaining with "@Image3 as the first frame" (seamless cuts); one Suno music node per video matching the style's music hint.
+5. docs "prompting:<model id>" before writing ANY prompt. English prompts: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
+6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. Same gate before launching any significant batch of runs (they cost money). To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll.
 
-The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a design sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through import_asset_from_url the same way.`
+The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a design sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.`
 
 // ── Tool definitions ─────────────────────────────────────────────────────────
+// The graph/project/asset tools come from THE agent-tool registry
+// (mcp/registry.ts) through the chat adapter: a per-video session drops the
+// explicit videoId/projectId params (the executor injects them), the home
+// session keeps them required. Only the two tools that need the chat session
+// itself (transcript/attachments) are defined here — by design MCP has no
+// equivalent.
 
-const TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'get_workflow',
-    description:
-      "Read the current workflow graph: nodes (id, key, modelId, label, intent, params, whether they already have a successful output), edges, and the project's asset library.",
-    input_schema: { type: 'object', properties: {}, additionalProperties: false }
-  },
-  {
-    name: 'list_models',
-    description:
-      'List every available AI model with its id, kind, description, input handles (name, accepted media, required, reference alias) and parameter fields. Call this before creating nodes.',
-    input_schema: { type: 'object', properties: {}, additionalProperties: false }
-  },
-  {
-    name: 'add_node',
-    description:
-      'Create a node in the workflow. Use a modelId from list_models, or "studio/asset" with params {"assetId": …} for an asset node.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        modelId: { type: 'string' },
-        label: { type: 'string', description: 'Short display label, e.g. "Shot 01 — The harbor"' },
-        intent: { type: 'string', description: 'Expected result, shown next to the output' },
-        params: { type: 'object', description: 'Model params (see list_models paramFields)' },
-        x: { type: 'number' },
-        y: { type: 'number' }
+const PRESENT_PLAN_TOOL: Anthropic.Tool = {
+  name: 'present_plan',
+  description:
+    'Present a structured production plan for user approval BEFORE building a multi-shot graph (import_workflow) or launching a costly run batch: per-shot label/description/model/estimated credits + total. Rendered as an approval card with Approve / Request changes buttons — end your turn and WAIT for the user’s reply.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      shots: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            label: { type: 'string', description: 'e.g. "Shot 01 — The harbor"' },
+            description: { type: 'string', description: 'What happens in this shot' },
+            modelId: { type: 'string' },
+            estCredits: { type: 'number', description: 'Estimated kie.ai credits for this shot' },
+            panels: { type: 'string', description: 'Storyboard panels covered, e.g. "1-3"' }
+          },
+          required: ['label', 'description', 'modelId']
+        }
       },
-      required: ['modelId']
-    }
-  },
-  {
-    name: 'update_node',
-    description: 'Update a node’s label, intent and/or params (params replace the whole object).',
-    input_schema: {
-      type: 'object',
-      properties: {
-        nodeId: { type: 'string' },
-        label: { type: 'string' },
-        intent: { type: 'string' },
-        params: { type: 'object' }
-      },
-      required: ['nodeId']
-    }
-  },
-  {
-    name: 'connect_nodes',
-    description:
-      'Wire a source node output into a target node input. `input` must be one of the target model’s input handle keys; `output` is "output" (default) or "lastFrame".',
-    input_schema: {
-      type: 'object',
-      properties: {
-        sourceNodeId: { type: 'string' },
-        targetNodeId: { type: 'string' },
-        input: { type: 'string' },
-        output: { type: 'string' }
-      },
-      required: ['sourceNodeId', 'targetNodeId', 'input']
-    }
-  },
-  {
-    name: 'remove_node',
-    description: 'Delete a node, its connections and its generations. Destructive.',
-    input_schema: {
-      type: 'object',
-      properties: { nodeId: { type: 'string' } },
-      required: ['nodeId']
-    }
-  },
-  {
-    name: 'import_workflow',
-    description:
-      'Bulk-create a whole graph from workflow JSON (version 1): {"version":1,"nodes":[{"key","modelId","label"?,"intent"?,"position":{"x","y"},"params"}],"edges":[{"from","to","input","output"?}]}. Keys are your own stable ids referenced by edges. replace=true erases the current graph first.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        json: { type: 'string', description: 'The workflow JSON as a string' },
-        replace: { type: 'boolean' }
-      },
-      required: ['json', 'replace']
-    }
-  },
-  {
-    name: 'run_node',
-    description:
-      'Launch the generation of a node (calls kie.ai — costs money; upstream inputs must already have outputs). Returns a generationId; completion arrives asynchronously.',
-    input_schema: {
-      type: 'object',
-      properties: { nodeId: { type: 'string' } },
-      required: ['nodeId']
-    }
-  },
-  {
-    name: 'get_generations',
-    description: 'List a node’s generations with status (running/success/failed) and media URL.',
-    input_schema: {
-      type: 'object',
-      properties: { nodeId: { type: 'string' } },
-      required: ['nodeId']
-    }
-  },
-  {
-    name: 'read_docs',
-    description: `Raccord reference documentation, on demand. Topics: ${DOC_TOPICS}. Read "prompting:<model id>" BEFORE writing prompts for a model; "styles" for art directions; "templates" / "template:<id>" for ready-to-import blueprints.`,
-    input_schema: {
-      type: 'object',
-      properties: { topic: { type: 'string' } },
-      required: ['topic']
-    }
-  },
-  {
-    name: 'set_video_style',
-    description:
-      'Attach a style template (see read_docs "styles") to the current video — its style bible is appended at run time to every visual node whose params carry "applyVideoStyle": true. Pass null to clear.',
-    input_schema: {
-      type: 'object',
-      properties: { styleId: { type: ['string', 'null'] } },
-      required: ['styleId']
-    }
-  },
-  {
-    name: 'search_assets',
-    description:
-      'Search the project’s asset library by name, key, description or tag. Published design sheets carry designId/designSubject — reuse them via a studio/asset node (reference inputs only) instead of regenerating a sheet for the same subject.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search terms (AND, accent-insensitive)' }
-      },
-      required: ['query']
-    }
-  },
-  {
-    name: 'publish_design',
-    description:
-      'Publish a design node’s successful generation into the project’s asset library as a reusable design sheet (its design category and subject are copied from the node). Do this once the user approves a sheet, so other videos of the project can reuse it.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        generationId: { type: 'string' },
-        name: { type: 'string', description: 'Library display name (e.g. the character’s name)' },
-        description: { type: 'string', description: 'What the sheet depicts — shown to AIs' }
-      },
-      required: ['generationId', 'name']
-    }
-  },
-  {
-    name: 'present_plan',
-    description:
-      'Present a structured production plan for user approval BEFORE building a multi-shot graph (import_workflow) or launching a costly run batch: per-shot label/description/model/estimated credits + total. Rendered as an approval card with Approve / Request changes buttons — end your turn and WAIT for the user’s reply.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        shots: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              label: { type: 'string', description: 'e.g. "Shot 01 — The harbor"' },
-              description: { type: 'string', description: 'What happens in this shot' },
-              modelId: { type: 'string' },
-              estCredits: { type: 'number', description: 'Estimated kie.ai credits for this shot' },
-              panels: { type: 'string', description: 'Storyboard panels covered, e.g. "1-3"' }
-            },
-            required: ['label', 'description', 'modelId']
-          }
-        },
-        style: { type: 'string', description: 'Style template id/label the plan commits to' },
-        totalCredits: { type: 'number', description: 'Estimated grand total in kie.ai credits' }
-      },
-      required: ['shots']
-    }
-  },
-  {
-    name: 'save_attachment_as_asset',
-    description:
-      'Save an image the user attached to their message into the project’s asset library (index 0 = first image of the most recent message with attachments). Optional designId/designSubject markers publish it as a reusable design sheet.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        index: { type: 'number', description: '0-based attachment index (default 0)' },
-        name: { type: 'string', description: 'Library display name' },
-        description: { type: 'string', description: 'What the media depicts — shown to AIs' },
-        designId: {
-          type: 'string',
-          description: 'Design category (character/decor/prop/styleframe/storyboard) when relevant'
-        },
-        designSubject: { type: 'string', description: 'The subject the sheet depicts' }
-      },
-      required: ['name']
-    }
-  },
-  {
-    name: 'import_asset_from_url',
-    description:
-      'Download a remote media URL (image/video/audio) into the project’s asset library, so it can be wired via a studio/asset node. Give it a descriptive name and an AI-facing description.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'Public URL of the media to download' },
-        name: { type: 'string', description: 'Display name (default: URL filename)' },
-        description: { type: 'string', description: 'What the media depicts — shown to AIs' }
-      },
-      required: ['url']
-    }
+      style: { type: 'string', description: 'Style template id/label the plan commits to' },
+      totalCredits: { type: 'number', description: 'Estimated grand total in kie.ai credits' }
+    },
+    required: ['shots']
   }
-]
+}
 
-// ── Home-session toolset ─────────────────────────────────────────────────────
-// Project-level tools, plus the graph tools with an explicit required videoId
-// (the home session is not bound to a video).
-
-const PROJECT_TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'list_projects',
-    description: 'List every project (id, name).',
-    input_schema: { type: 'object', properties: {}, additionalProperties: false }
-  },
-  {
-    name: 'create_project',
-    description: 'Create a project. Returns its projectId.',
-    input_schema: {
-      type: 'object',
-      properties: { name: { type: 'string' } },
-      required: ['name']
-    }
-  },
-  {
-    name: 'list_videos',
-    description: 'List the videos of a project (id, name).',
-    input_schema: {
-      type: 'object',
-      properties: { projectId: { type: 'string' } },
-      required: ['projectId']
-    }
-  },
-  {
-    name: 'create_video',
-    description: 'Create a video (one workflow graph) in a project. Returns its videoId.',
-    input_schema: {
-      type: 'object',
-      properties: { projectId: { type: 'string' }, name: { type: 'string' } },
-      required: ['projectId', 'name']
-    }
+const SAVE_ATTACHMENT_TOOL: Anthropic.Tool = {
+  name: 'save_attachment_as_asset',
+  description:
+    'Save an image the user attached to their message into the project’s asset library (index 0 = first image of the most recent message with attachments). Optional designId/designSubject markers publish it as a reusable design sheet.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      index: { type: 'number', description: '0-based attachment index (default 0)' },
+      name: { type: 'string', description: 'Library display name' },
+      description: { type: 'string', description: 'What the media depicts — shown to AIs' },
+      designId: {
+        type: 'string',
+        description: 'Design category (character/decor/prop/styleframe/storyboard) when relevant'
+      },
+      designSubject: { type: 'string', description: 'The subject the sheet depicts' }
+    },
+    required: ['name']
   }
-]
-
-/** Tools whose scope is a whole video: the home variant requires a videoId param. */
-const VIDEO_SCOPED_TOOLS = new Set([
-  'get_workflow',
-  'add_node',
-  'connect_nodes',
-  'import_workflow',
-  'set_video_style'
-])
-
-/** Tools whose scope is a whole project: the home variant requires a projectId param. */
-const PROJECT_SCOPED_TOOLS = new Set([
-  'search_assets',
-  'save_attachment_as_asset',
-  'import_asset_from_url'
-])
+}
 
 function withProjectIdParam(tool: Anthropic.Tool): Anthropic.Tool {
   const schema = tool.input_schema as { properties?: Record<string, unknown>; required?: string[] }
@@ -365,31 +182,27 @@ function withProjectIdParam(tool: Anthropic.Tool): Anthropic.Tool {
   }
 }
 
-function withVideoIdParam(tool: Anthropic.Tool): Anthropic.Tool {
-  const schema = tool.input_schema as { properties?: Record<string, unknown>; required?: string[] }
-  return {
-    ...tool,
-    input_schema: {
-      ...tool.input_schema,
-      properties: {
-        videoId: { type: 'string', description: 'The video whose graph this acts on' },
-        ...(schema.properties ?? {})
-      },
-      required: ['videoId', ...(schema.required ?? [])]
-    } as Anthropic.Tool['input_schema']
-  }
-}
-
-const TOOLS_HOME: Anthropic.Tool[] = [
-  ...PROJECT_TOOLS,
-  ...TOOLS.map((t) =>
-    VIDEO_SCOPED_TOOLS.has(t.name)
-      ? withVideoIdParam(t)
-      : PROJECT_SCOPED_TOOLS.has(t.name)
-        ? withProjectIdParam(t)
-        : t
-  )
+/** Per-video session: registry tools with the session ids implicit. */
+const TOOLS: Anthropic.Tool[] = [
+  ...toAnthropicTools(AGENT_TOOLS, true),
+  PRESENT_PLAN_TOOL,
+  SAVE_ATTACHMENT_TOOL
 ]
+
+/** Home session: explicit ids everywhere (not bound to a video). */
+const TOOLS_HOME: Anthropic.Tool[] = [
+  ...toAnthropicTools(AGENT_TOOLS, false),
+  PRESENT_PLAN_TOOL,
+  withProjectIdParam(SAVE_ATTACHMENT_TOOL)
+]
+
+/** Assistant capabilities for the chat input's "/" action menu. */
+export function listAssistantTools(): { name: string; description: string }[] {
+  return TOOLS_HOME.map((tool) => ({
+    name: tool.name,
+    description: `${(tool.description ?? '').split('. ')[0] ?? ''}`.replace(/\.?$/, '.')
+  }))
+}
 
 // ── Tool execution against the local services ────────────────────────────────
 
@@ -416,18 +229,14 @@ function resolveProjectId(input: Record<string, unknown>, ctx: ToolCtx): string 
   throw new Error('This tool needs a "projectId".')
 }
 
-/** Explicit videoId param (home session) or the session's bound video. */
-function resolveVideoId(input: Record<string, unknown>, ctx: ToolCtx): string {
-  const explicit =
-    typeof input['videoId'] === 'string' && input['videoId'] !== ''
-      ? (input['videoId'] as string)
-      : null
-  const id = explicit ?? ctx.videoId
-  if (!id)
-    throw new Error(
-      'This tool needs a "videoId" — create a video first or find one with list_videos.'
-    )
-  return id
+/** Session binding for the adapter's id injection (null = home session). */
+function bindingFor(ctx: ToolCtx): { videoId: string; projectId: string } | null {
+  if (!ctx.videoId) return null
+  return {
+    videoId: ctx.videoId,
+    projectId:
+      sessions.get(ctx.sessionKey)?.projectId ?? videos.getVideo(ctx.videoId)?.projectId ?? ''
+  }
 }
 
 async function executeTool(
@@ -442,231 +251,6 @@ async function executeTool(
   item?: ChatItem
 }> {
   switch (name) {
-    case 'list_projects': {
-      const rows = projects.listProjects().map((p) => ({ id: p.id, name: p.name }))
-      return { result: JSON.stringify(rows), mutatedVideoId: null, label: 'Read projects' }
-    }
-    case 'create_project': {
-      const project = projects.createProject(String(input['name']))
-      return {
-        result: JSON.stringify({ projectId: project.id }),
-        mutatedVideoId: '',
-        label: `Project created · ${project.name}`
-      }
-    }
-    case 'list_videos': {
-      const rows = videos
-        .listVideos(String(input['projectId']))
-        .map((v) => ({ id: v.id, name: v.name }))
-      return { result: JSON.stringify(rows), mutatedVideoId: null, label: 'Read videos' }
-    }
-    case 'create_video': {
-      const video = videos.createVideo(String(input['projectId']), String(input['name']))
-      return {
-        result: JSON.stringify({ videoId: video.id }),
-        mutatedVideoId: '',
-        label: `Video created · ${video.name}`
-      }
-    }
-    case 'get_workflow': {
-      const videoId = resolveVideoId(input, ctx)
-      const video = videos.getVideo(videoId)
-      if (!video) throw new Error(`Unknown video: ${videoId}`)
-      const { nodes, edges } = graph.listGraph(videoId)
-      const gens = generations.listGenerationsForVideo(videoId)
-      const styleId = video.styleId ?? null
-      const style = styleId ? getStyle(styleId) : undefined
-      const payload = {
-        // The video's active art direction — appended at run time to prompts of
-        // nodes whose params carry applyVideoStyle: true (never baked into prompts).
-        style: style
-          ? {
-              id: style.id,
-              label: style.label,
-              styleBible: style.styleBible,
-              imageFragment: style.imageFragment,
-              videoFragment: style.videoFragment,
-              musicHint: style.musicHint,
-              avoid: style.avoid,
-              recommendedParams: style.recommendedParams
-            }
-          : null,
-        nodes: nodes.map((n) => ({
-          id: n.id,
-          key: n.key,
-          modelId: n.modelId,
-          label: n.label,
-          intent: n.intent,
-          position: n.position,
-          params: n.params,
-          hasSuccessfulOutput: gens.some((g) => g.nodeId === n.id && g.status === 'success')
-        })),
-        edges: edges.map((e) => ({
-          id: e.id,
-          from: e.sourceNodeId,
-          to: e.targetNodeId,
-          input: e.targetHandle,
-          output: e.sourceHandle
-        })),
-        assets: assets.listAssets(video.projectId).map((a) => ({
-          id: a.id,
-          key: a.key,
-          name: a.name,
-          kind: a.kind,
-          description: a.description,
-          // Set on published design sheets — reference-only, never a frame anchor.
-          designId: a.designId,
-          designSubject: a.designSubject
-        }))
-      }
-      return { result: JSON.stringify(payload), mutatedVideoId: null, label: 'Read workflow' }
-    }
-    case 'list_models': {
-      const payload = MODELS.map((m) => ({
-        id: m.id,
-        kind: m.kind,
-        label: m.label,
-        description: m.description,
-        // Declarative use-case tags — match them against the user's brief.
-        recommendedFor: m.recommendedFor,
-        inputs: m.inputs.map((h) => ({
-          key: h.key,
-          accepts: h.accepts,
-          required: h.required ?? false,
-          multiple: h.multiple ?? false,
-          referenceAlias: h.referenceAlias
-        })),
-        outputs: m.outputs.map((o) => o.key),
-        paramFields: m.paramFields.map((f) => ({
-          key: f.key,
-          type: f.type,
-          default: f.defaultValue,
-          options: f.options?.map((o) => o.value),
-          description: f.description
-        })),
-        promptingNotes: m.promptingNotes,
-        // Long-form guide served on demand — read it before writing prompts for this model.
-        promptGuideTopic: m.promptGuide ? `prompting:${m.id}` : undefined
-      }))
-      return { result: JSON.stringify(payload), mutatedVideoId: null, label: 'Read models' }
-    }
-    case 'add_node': {
-      const videoId = resolveVideoId(input, ctx)
-      const node = graph.createNode({
-        videoId,
-        modelId: String(input['modelId']),
-        position: { x: Number(input['x'] ?? 0), y: Number(input['y'] ?? 0) },
-        label: input['label'] ? String(input['label']) : undefined,
-        intent: input['intent'] ? String(input['intent']) : undefined,
-        params: input['params']
-      })
-      const model = getModel(node.modelId)
-      return {
-        result: JSON.stringify({ nodeId: node.id, key: node.key }),
-        mutatedVideoId: videoId,
-        label: `Node created · ${node.label ?? model?.label ?? node.modelId}`
-      }
-    }
-    case 'update_node': {
-      const nodeId = String(input['nodeId'])
-      if (input['label'] !== undefined) graph.updateNodeLabel(nodeId, String(input['label']))
-      if (input['intent'] !== undefined) graph.updateNodeIntent(nodeId, String(input['intent']))
-      if (input['params'] !== undefined) graph.updateNodeParams(nodeId, input['params'])
-      return { result: '{"ok":true}', mutatedVideoId: ctx.videoId ?? '', label: 'Node updated' }
-    }
-    case 'connect_nodes': {
-      const videoId = resolveVideoId(input, ctx)
-      const edge = graph.connectNodes({
-        videoId,
-        sourceNodeId: String(input['sourceNodeId']),
-        sourceHandle: input['output'] ? String(input['output']) : 'output',
-        targetNodeId: String(input['targetNodeId']),
-        targetHandle: String(input['input'])
-      })
-      return {
-        result: JSON.stringify({ edgeId: edge.id }),
-        mutatedVideoId: videoId,
-        label: 'Edge created'
-      }
-    }
-    case 'remove_node': {
-      graph.removeNode(String(input['nodeId']))
-      return { result: '{"ok":true}', mutatedVideoId: ctx.videoId ?? '', label: 'Node removed' }
-    }
-    case 'import_workflow': {
-      const videoId = resolveVideoId(input, ctx)
-      const res = graph.importWorkflow(videoId, String(input['json']), Boolean(input['replace']))
-      return {
-        result: JSON.stringify(res),
-        mutatedVideoId: videoId,
-        label: `Workflow imported · ${res.nodeCount} nodes, ${res.edgeCount} edges`
-      }
-    }
-    case 'run_node': {
-      const res = await runNode(String(input['nodeId']))
-      sessionFor(ctx.sessionKey).watched.add(res.generationId)
-      return {
-        result: JSON.stringify(res),
-        mutatedVideoId: ctx.videoId ?? '',
-        label: 'Generation started'
-      }
-    }
-    case 'get_generations': {
-      const rows = generations.listGenerationsForNode(String(input['nodeId'])).map((g) => ({
-        id: g.id,
-        status: g.status,
-        url: g.resultUrl,
-        error: g.errorMessage
-      }))
-      return { result: JSON.stringify(rows), mutatedVideoId: null, label: 'Read generations' }
-    }
-    case 'read_docs': {
-      const topic = String(input['topic'])
-      return { result: getDoc(topic), mutatedVideoId: null, label: `Read docs · ${topic}` }
-    }
-    case 'set_video_style': {
-      const videoId = resolveVideoId(input, ctx)
-      const styleId = input['styleId'] == null ? null : String(input['styleId'])
-      videos.setVideoStyle(videoId, styleId)
-      const label = styleId ? (getStyle(styleId)?.label ?? styleId) : 'none'
-      return { result: '{"ok":true}', mutatedVideoId: videoId, label: `Style · ${label}` }
-    }
-    case 'search_assets': {
-      const explicit =
-        typeof input['projectId'] === 'string' && input['projectId'] !== ''
-          ? (input['projectId'] as string)
-          : null
-      const projectId = explicit ?? videos.getVideo(resolveVideoId(input, ctx))?.projectId
-      if (!projectId) throw new Error('This tool needs a "projectId".')
-      const rows = assets.searchAssets(projectId, String(input['query'])).map((a) => ({
-        id: a.id,
-        key: a.key,
-        name: a.name,
-        kind: a.kind,
-        description: a.description,
-        tags: a.tags,
-        designId: a.designId,
-        designSubject: a.designSubject
-      }))
-      return { result: JSON.stringify(rows), mutatedVideoId: null, label: 'Read assets' }
-    }
-    case 'publish_design': {
-      const asset = await assets.promoteGeneration(
-        String(input['generationId']),
-        String(input['name']),
-        input['description'] ? String(input['description']) : undefined
-      )
-      return {
-        result: JSON.stringify({
-          assetId: asset.id,
-          key: asset.key,
-          designId: asset.designId,
-          designSubject: asset.designSubject
-        }),
-        mutatedVideoId: ctx.videoId ?? '',
-        label: `Design published · ${asset.name}`
-      }
-    }
     case 'present_plan': {
       const rawShots = Array.isArray(input['shots']) ? input['shots'] : []
       const plan: ChatPlan = {
@@ -742,22 +326,151 @@ async function executeTool(
         label: `Asset saved · ${asset.name}`
       }
     }
-    case 'import_asset_from_url': {
-      const projectId = resolveProjectId(input, ctx)
-      const asset = await assets.importAssetFromUrl(
-        projectId,
-        String(input['url']),
-        input['name'] ? String(input['name']) : undefined,
-        input['description'] ? String(input['description']) : undefined
-      )
+    // The chat variant of the registry's run_batch (§4.10 phase 4): every
+    // generation the batch claims enters session.watched as it starts, so the
+    // existing settle wake-up drains the whole batch — the tool itself
+    // returns immediately (the assistant never polls).
+    case 'run_batch': {
+      const tool = AGENT_TOOLS.find((t) => t.name === name)!
+      const args = injectBindingIds(tool, input, bindingFor(ctx))
+      const videoId = String(args['videoId'] ?? '')
+      if (!videoId) throw new Error('run_batch needs a "videoId".')
+      const targets = args['all_videos']
+        ? videoNodeTargets(videoId)
+        : Array.isArray(args['targetNodeIds'])
+          ? (args['targetNodeIds'] as unknown[]).map(String)
+          : []
+      if (targets.length === 0) {
+        throw new Error('Pass targetNodeIds, or all_videos: true on a graph with video nodes.')
+      }
+      const session = sessionFor(ctx.sessionKey)
+      const { planned } = startBatch({
+        videoId,
+        targetNodeIds: targets,
+        reuseTargets: true,
+        onGenerationStarted: (_nodeId, generationId) => {
+          session.watched.add(generationId)
+          persistSession(ctx.sessionKey, session)
+        }
+      })
       return {
-        result: JSON.stringify({ assetId: asset.id, key: asset.key, kind: asset.kind }),
-        mutatedVideoId: ctx.videoId ?? '',
-        label: `Asset imported · ${asset.name}`
+        result: JSON.stringify({
+          planned,
+          note: 'The batch runs dependency-aware in the background; you are woken automatically as each generation settles — never poll get_generations to wait.'
+        }),
+        mutatedVideoId: videoId,
+        label: `Batch started · ${planned.length} nodes`
       }
     }
+    default: {
+      // Everything else IS the registry (§4.10 phase 3): one execution path
+      // shared with MCP, plus the chat-only concerns — session-id injection,
+      // the destructive-approval gate, transcript labels and run watching.
+      const tool = AGENT_TOOLS.find((t) => t.name === name)
+      if (!tool) throw new Error(`Unknown tool: ${name}`)
+      const args = injectBindingIds(tool, input, bindingFor(ctx))
+      const gate = approvalGate(tool, args)
+      if (!gate.approved) {
+        const label = describeDestructiveAction(name, gate.args)
+        return {
+          result: APPROVAL_REQUIRED_RESULT,
+          mutatedVideoId: null,
+          label,
+          item: { type: 'action', name, label }
+        }
+      }
+      const result = await tool.execute(gate.args)
+      // Generations launched from the chat are watched: the engine's settle
+      // event wakes the conversation up (never poll).
+      if (name === 'run_node') {
+        sessionFor(ctx.sessionKey).watched.add((result as { generationId: string }).generationId)
+      }
+      return {
+        result: typeof result === 'string' ? result : JSON.stringify(result ?? { ok: true }),
+        mutatedVideoId:
+          tool.risk === 'read' ? null : String(gate.args['videoId'] ?? ctx.videoId ?? ''),
+        label: (CHAT_LABELS[name] ?? (() => name.replace(/_/g, ' ')))(gate.args, result)
+      }
+    }
+  }
+}
+
+/** Transcript chip labels for registry tools (fallback: the tool name). */
+const CHAT_LABELS: Record<string, (args: Record<string, unknown>, result: unknown) => string> = {
+  docs: (args) => `Read docs · ${String(args['topic'])}`,
+  list_models: () => 'Read models',
+  get_credits: () => 'Read credits',
+  list_projects: () => 'Read projects',
+  create_project: (_a, r) => `Project created · ${(r as { name?: string }).name ?? ''}`,
+  rename_project: (a) => `Project renamed · ${String(a['name'] ?? '')}`,
+  delete_project: () => 'Project deleted',
+  list_videos: () => 'Read videos',
+  create_video: (_a, r) => `Video created · ${(r as { name?: string }).name ?? ''}`,
+  rename_video: (a) => `Video renamed · ${String(a['name'] ?? '')}`,
+  delete_video: () => 'Video deleted',
+  open_video: () => 'Opened video',
+  focus_node: () => 'Focused node',
+  set_video_style: (a) => {
+    const styleId = a['styleId'] ? String(a['styleId']) : ''
+    return `Style · ${styleId ? (getStyle(styleId)?.label ?? styleId) : 'none'}`
+  },
+  set_video_defaults: () => 'Video defaults updated',
+  apply_video_defaults: (_a, r) =>
+    `Defaults applied · ${(r as { updated?: number }).updated ?? 0} nodes`,
+  get_workflow: () => 'Read workflow',
+  export_workflow: () => 'Workflow exported',
+  import_workflow: (_a, r) => {
+    const res = r as { nodeCount?: number; edgeCount?: number }
+    return `Workflow imported · ${res.nodeCount ?? 0} nodes, ${res.edgeCount ?? 0} edges`
+  },
+  add_node: (_a, r) => {
+    const node = r as { label?: string | null; modelId?: string }
+    return `Node created · ${node.label ?? node.modelId ?? ''}`
+  },
+  update_node: () => 'Node updated',
+  connect_nodes: () => 'Edge created',
+  remove_node: () => 'Node removed',
+  undo: () => 'Undo',
+  redo: () => 'Redo',
+  estimate_cost: (_a, r) => `Cost estimated · ${(r as { credits: number | null }).credits ?? '?'}`,
+  run_node: () => 'Generation started',
+  get_generations: () => 'Read generations',
+  select_generation: () => 'Generation selected',
+  cancel_generation: (_a, r) =>
+    (r as { cancelled?: boolean }).cancelled ? 'Generation cancelled' : 'Nothing to cancel',
+  refresh_generation_status: (_a, r) => `Status · ${(r as { status?: string }).status ?? '?'}`,
+  render_video: (_a, r) => `MP4 rendered · ${(r as { path?: string }).path ?? ''}`,
+  list_assets: () => 'Read assets',
+  search_assets: () => 'Read assets',
+  set_asset_tags: () => 'Tags updated',
+  add_asset_from_url: (_a, r) => `Asset imported · ${(r as { name?: string }).name ?? ''}`,
+  add_asset_from_file: (_a, r) => `Asset imported · ${(r as { name?: string }).name ?? ''}`,
+  update_asset: () => 'Asset updated',
+  delete_asset: () => 'Asset deleted',
+  publish_design: (_a, r) => `Design published · ${(r as { name?: string }).name ?? ''}`
+}
+
+/** Human-readable summary shown on the destructive-approval action card. */
+function describeDestructiveAction(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case 'delete_project': {
+      const project = projects.getProject(String(args['projectId'] ?? ''))
+      return `Delete project “${project?.name ?? String(args['projectId'] ?? '?')}”`
+    }
+    case 'delete_video': {
+      const video = videos.getVideo(String(args['videoId'] ?? ''))
+      return `Delete video “${video?.name ?? String(args['videoId'] ?? '?')}”`
+    }
+    case 'delete_asset': {
+      const asset = assets.getAsset(String(args['assetId'] ?? ''))
+      return `Delete asset “${asset?.name ?? String(args['assetId'] ?? '?')}”`
+    }
+    case 'remove_node': {
+      const ref = graph.getNodeRef(String(args['nodeId'] ?? ''))
+      return `Delete node “${ref?.label ?? String(args['nodeId'] ?? '?')}” (and its generations)`
+    }
     default:
-      throw new Error(`Unknown tool: ${name}`)
+      return name.replace(/_/g, ' ')
   }
 }
 
@@ -769,9 +482,35 @@ interface KieClaudeMessage {
   error?: { type?: string; message?: string }
 }
 
+/** Reads an SSE body, feeding each JSON `data:` payload to the callback. */
+async function readSse(res: Response, onEvent: (event: unknown) => void): Promise<void> {
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('SSE response has no body')
+  const decoder = new TextDecoder()
+  const parser = new SseParser()
+  const feed = (payloads: string[]): void => {
+    for (const payload of payloads) {
+      if (payload === '[DONE]') continue
+      try {
+        onEvent(JSON.parse(payload))
+      } catch {
+        // Keepalives / non-JSON noise.
+      }
+    }
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    feed(parser.push(decoder.decode(value, { stream: true })))
+  }
+  feed(parser.push(decoder.decode()))
+  feed(parser.flush())
+}
+
 async function kieClaudeCreate(
   apiKey: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  onTextDelta?: (delta: string) => void
 ): Promise<KieClaudeMessage> {
   const res = await fetch(`${KIE_BASE}/claude/v1/messages`, {
     method: 'POST',
@@ -782,6 +521,17 @@ async function kieClaudeCreate(
     },
     body: JSON.stringify(body)
   })
+  // §4.10 phase 6: the proxy streams (stream: true); a JSON body remains
+  // accepted as fallback (mocks, proxies that ignore the flag).
+  if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
+    const accumulator = createAnthropicAccumulator(onTextDelta)
+    await readSse(res, (event) => accumulator.push(event))
+    const message = accumulator.finish()
+    if (message.error) {
+      throw new Error(`kie.ai Claude stream failed: ${message.error.message ?? 'unknown error'}`)
+    }
+    return message
+  }
   const raw = await res.text()
   let json: KieClaudeMessage
   try {
@@ -806,7 +556,8 @@ async function kieResponsesCreate(
     system: string
     tools: Anthropic.Tool[]
     messages: Anthropic.MessageParam[]
-  }
+  },
+  onTextDelta?: (delta: string) => void
 ): Promise<KieClaudeMessage> {
   const res = await fetch(`${KIE_BASE}${path}`, {
     method: 'POST',
@@ -820,9 +571,21 @@ async function kieResponsesCreate(
       input: toResponsesInput(args.messages),
       tools: toResponsesTools(args.tools),
       tool_choice: 'auto',
-      stream: false
+      stream: true
     })
   })
+  // Streaming variant of the translator path (§4.10 phase 6): deltas surface
+  // incrementally, the terminal response.completed event carries the full
+  // output array — same shape as the non-streaming body.
+  if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
+    const accumulator = createResponsesAccumulator(onTextDelta)
+    await readSse(res, (event) => accumulator.push(event))
+    const final = accumulator.finish()
+    if (final.error) {
+      throw new Error(`kie.ai ${args.model} stream failed: ${final.error.message ?? 'unknown'}`)
+    }
+    return fromResponsesOutput(final.output)
+  }
   const raw = await res.text()
   let json: { output?: ResponsesOutputItem[]; error?: { message?: string } }
   try {
@@ -852,6 +615,11 @@ interface Session {
   watched: Set<string>
   /** Settle notes that arrived while the loop was busy. */
   pending: string[]
+  /** User sends that arrived while the loop was busy — drained in order at
+   *  the end of the turn (§4.10 phase 5: a busy session queues, never throws). */
+  pendingSends: { text: string; images: ChatImage[]; context?: AppContext }[]
+  /** Streaming text of the in-flight assistant turn (§4.10 phase 6). */
+  partial: string | null
 }
 
 const sessions = new Map<string, Session>()
@@ -870,7 +638,9 @@ function sessionFor(videoId: string): Session {
       error: null,
       projectId: persisted?.projectId ?? null,
       watched: new Set(persisted?.watched ?? []),
-      pending: []
+      pending: [],
+      pendingSends: [],
+      partial: null
     }
     sessions.set(videoId, session)
   }
@@ -895,8 +665,13 @@ function persistSession(videoId: string, session: Session): void {
 }
 
 export function getChatState(videoId: string): ChatState {
-  const { items, busy, error } = sessionFor(videoId)
-  return { items, busy, error }
+  const { items, busy, error, partial } = sessionFor(videoId)
+  return { items, busy, error, partialText: partial }
+}
+
+/** Persisted per-video threads for the sidebar's conversation switcher. */
+export function listSessions(): ReturnType<typeof listChatSessions> {
+  return listChatSessions()
 }
 
 export function clearChat(videoId: string): void {
@@ -927,24 +702,32 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
     const system = `${isHome ? SYSTEM_HOME : SYSTEM}\n\nAlways write your replies to the user in ${language} — the application's configured language — regardless of the language of tool results, prompts or documentation. (Generation prompts themselves stay in English.)`
     const tools = isHome ? TOOLS_HOME : TOOLS
     let lastMutatedVideoId: string | null = null
+    await maybeCompactHistory(sessionKey, session, kieKey, model)
+
+    // Incremental display (§4.10 phase 6): text deltas land in
+    // session.partial; broadcasts are throttled (the renderer refetches
+    // chat:get on every event). The finished blocks below replace the partial.
+    let lastPartialBroadcast = 0
+    const onTextDelta = (delta: string): void => {
+      session.partial = (session.partial ?? '') + delta
+      const now = Date.now()
+      if (now - lastPartialBroadcast >= 150) {
+        lastPartialBroadcast = now
+        broadcastChatUpdate(sessionKey)
+      }
+    }
+
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-      const responsesPath = OPENAI_RESPONSES_PATHS[model]
-      const response = responsesPath
-        ? await kieResponsesCreate(kieKey, responsesPath, {
-            model,
-            system,
-            tools,
-            messages: session.history
-          })
-        : await kieClaudeCreate(kieKey, {
-            model,
-            max_tokens: 16000,
-            // Explicit: kie.ai's proxy documents stream as defaulting to true.
-            stream: false,
-            system,
-            tools,
-            messages: session.history
-          })
+      session.partial = null
+      const response = await callProvider(
+        kieKey,
+        model,
+        system,
+        tools,
+        session.history,
+        onTextDelta
+      )
+      session.partial = null
 
       // Preserve the full content (incl. thinking blocks) in the history.
       session.history.push({ role: 'assistant', content: response.content })
@@ -995,15 +778,84 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
     session.error = err instanceof Error ? err.message : String(err)
   } finally {
     session.busy = false
+    session.partial = null
     persistSession(sessionKey, session)
     broadcastChatUpdate(sessionKey)
   }
 
   // Settle notes that arrived mid-turn: hand them to the model right away.
+  // (The recursive turn drains any queued sends at its own end.)
   if (session.pending.length > 0) {
     const notes = session.pending.splice(0)
     injectSettleNotes(sessionKey, session, notes)
     await runTurn(sessionKey, session)
+    return
+  }
+  // User sends queued while the turn ran (§4.10 phase 5): their transcript
+  // items were pushed at enqueue time — only the history entries land now.
+  if (session.pendingSends.length > 0) {
+    for (const send of session.pendingSends.splice(0)) {
+      pushUserHistory(session, send.text, send.images, send.context)
+    }
+    persistSession(sessionKey, session)
+    await runTurn(sessionKey, session)
+  }
+}
+
+/** One provider call — Claude proxy or OpenAI-Responses proxy per model id. */
+function callProvider(
+  kieKey: string,
+  model: string,
+  system: string,
+  tools: Anthropic.Tool[],
+  messages: Anthropic.MessageParam[],
+  onTextDelta?: (delta: string) => void
+): Promise<KieClaudeMessage> {
+  const responsesPath = OPENAI_RESPONSES_PATHS[model]
+  return responsesPath
+    ? kieResponsesCreate(kieKey, responsesPath, { model, system, tools, messages }, onTextDelta)
+    : kieClaudeCreate(
+        kieKey,
+        { model, max_tokens: 16000, stream: true, system, tools, messages },
+        onTextDelta
+      )
+}
+
+/**
+ * §4.10 phase 5 — when the serialized history outgrows the thresholds,
+ * summarize the oldest two-thirds (images stripped) into one
+ * <conversation-summary> block through the same provider path, keep the last
+ * third verbatim. A summarizer failure never blocks the turn.
+ */
+async function maybeCompactHistory(
+  sessionKey: string,
+  session: Session,
+  kieKey: string,
+  model: string
+): Promise<void> {
+  if (!needsCompaction(session.history)) return
+  const split = splitForCompaction(session.history)
+  if (!split) return
+  try {
+    const rendered = renderForSummary(stripImageBlocks(split.head))
+    const response = await callProvider(
+      kieKey,
+      model,
+      SUMMARY_SYSTEM,
+      [],
+      [{ role: 'user', content: rendered }]
+    )
+    const summary = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n')
+      .trim()
+    if (!summary) return
+    session.history = reassembleHistory(summary, split.tail)
+    persistSession(sessionKey, session)
+  } catch (err) {
+    // Uncompacted is degraded, not broken — keep the turn going.
+    console.error('[chat] history compaction failed:', err)
   }
 }
 
@@ -1045,31 +897,28 @@ onGenerationSettled((event) => {
   }
 })
 
-export async function sendChatMessage(
-  videoId: string,
-  projectId: string,
+/**
+ * Appends a user turn to the Anthropic history. The <app-context> snapshot
+ * goes to the model alone (persisted as-sent — it was true at that turn, so
+ * replays stay deterministic); attached images ride along as Anthropic image
+ * blocks (the OpenAI adapter converts them to input_image data URLs).
+ */
+function pushUserHistory(
+  session: Session,
   text: string,
-  images: ChatImage[] = []
-): Promise<ChatState> {
-  const session = sessionFor(videoId)
-  if (session.busy) throw new Error('Assistant is already working — wait for it to finish.')
-
-  session.projectId = projectId || null
-  session.items.push({
-    type: 'user',
-    text,
-    images: images.length
-      ? images.map((img) => `data:${img.mediaType};base64,${img.data}`)
-      : undefined
-  })
-  // Attached images ride along as Anthropic image blocks; the OpenAI adapter
-  // converts them to input_image data URLs for the GPT models.
+  images: ChatImage[],
+  context?: AppContext
+): void {
+  const contextBlock = formatAppContext(context)
   session.history.push({
     role: 'user',
     content:
-      images.length === 0
+      images.length === 0 && contextBlock === null
         ? text
         : [
+            ...(contextBlock !== null
+              ? [{ type: 'text', text: contextBlock } as Anthropic.TextBlockParam]
+              : []),
             ...images.map((img): Anthropic.ImageBlockParam => ({
               type: 'image',
               source: { type: 'base64', media_type: img.mediaType, data: img.data }
@@ -1077,6 +926,37 @@ export async function sendChatMessage(
             { type: 'text', text }
           ]
   })
+}
+
+export async function sendChatMessage(
+  videoId: string,
+  projectId: string,
+  text: string,
+  images: ChatImage[] = [],
+  context?: AppContext
+): Promise<ChatState> {
+  const session = sessionFor(videoId)
+  session.projectId = projectId || session.projectId
+
+  // The transcript shows only what the user typed (never the context block).
+  session.items.push({
+    type: 'user',
+    text,
+    images: images.length
+      ? images.map((img) => `data:${img.mediaType};base64,${img.data}`)
+      : undefined
+  })
+
+  // Busy session: queue instead of throwing (§4.10 phase 5) — the transcript
+  // shows the message immediately, its history entry lands when the current
+  // turn drains the queue.
+  if (session.busy) {
+    session.pendingSends.push({ text, images, context })
+    broadcastChatUpdate(videoId)
+    return getChatState(videoId)
+  }
+
+  pushUserHistory(session, text, images, context)
   persistSession(videoId, session)
   await runTurn(videoId, session)
   return getChatState(videoId)

@@ -1,5 +1,9 @@
 import { BrowserWindow } from 'electron'
-import type { FocusNodePayload, RenderProgressPayload } from '@shared/ipc/contracts'
+import type {
+  FocusNodePayload,
+  NavigatePayload,
+  RenderProgressPayload
+} from '@shared/ipc/contracts'
 
 /**
  * Main→renderer push events. The desktop replacement for Convex's reactive
@@ -56,5 +60,12 @@ export function broadcastQueueChanged(): void {
 export function broadcastFocusNode(payload: FocusNodePayload): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:focusNode', payload)
+  }
+}
+
+/** The assistant asks the app to navigate to a route (open_video tool). */
+export function broadcastNavigate(payload: NavigatePayload): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:navigate', payload)
   }
 }

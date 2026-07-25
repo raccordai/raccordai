@@ -125,6 +125,18 @@ function patchNode(nodeId: string, patch: Partial<NodeRow>): void {
     .run()
 }
 
+/** Node id → its video + label (focus_node tools); null when unknown. */
+export function getNodeRef(
+  nodeId: string
+): { id: string; videoId: string; label: string | null } | null {
+  const row = getDb()
+    .select({ id: nodes.id, videoId: nodes.videoId, label: nodes.label })
+    .from(nodes)
+    .where(eq(nodes.id, nodeId))
+    .get()
+  return row ?? null
+}
+
 export function updateNodeParams(nodeId: string, params: unknown): void {
   patchNodeWithHistory(nodeId, { params })
 }

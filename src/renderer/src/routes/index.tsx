@@ -1,15 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { Clapperboard, MessageSquare, Plus, Search } from 'lucide-react'
+import { Clapperboard, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { nameMatchesQuery } from '@shared/assets/search'
-import { HOME_CHAT_ID } from '@shared/ipc/contracts'
 import { LibraryCard } from '@renderer/components/LibraryCard'
 import { useConfirm } from '@renderer/components/feedback/Feedback'
-import { Button } from '@renderer/components/ui/Button'
-import { useHeaderActions } from '@renderer/components/menubar/MenuBar'
-import { ChatPanel } from '@renderer/features/workflow/ChatPanel'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
 
@@ -26,24 +22,6 @@ function LibraryPage(): React.JSX.Element {
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [query, setQuery] = useState('')
-  const [chatOpen, setChatOpen] = useState(false)
-
-  // Home assistant: project-level (create projects/videos, build workflows).
-  useHeaderActions(
-    useMemo(
-      () => (
-        <Button
-          variant={chatOpen ? 'secondary' : 'ghost'}
-          size="sm"
-          onClick={() => setChatOpen((v) => !v)}
-          title={t('editor.assistantTitle')}
-        >
-          <MessageSquare className="h-3.5 w-3.5" /> {t('editor.assistant')}
-        </Button>
-      ),
-      [chatOpen, t]
-    )
-  )
 
   const projects = useQuery({
     queryKey: ['projects', 'overview'],
@@ -181,17 +159,6 @@ function LibraryPage(): React.JSX.Element {
             </div>
           )}
         </>
-      )}
-
-      {chatOpen && (
-        <div className="fixed top-16 right-3 bottom-3 z-40 flex flex-col items-stretch">
-          <ChatPanel
-            videoId={HOME_CHAT_ID}
-            projectId=""
-            emptyText={t('chat.homeEmpty')}
-            onClose={() => setChatOpen(false)}
-          />
-        </div>
       )}
     </div>
   )

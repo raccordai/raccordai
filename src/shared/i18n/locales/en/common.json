@@ -11,11 +11,30 @@
     "file": "File",
     "importWorkflow": "Import a workflow (JSON)…",
     "importing": "Importing…",
-    "exportWorkflow": "Export workflow (JSON)",
-    "exportFcpxml": "Export timeline (FCPXML + media)…",
-    "exportMediaZip": "Export video clips (ZIP)…",
-    "exportMp4": "Export video (MP4)…",
-    "exportMp4Preset": "Export video as {{preset}} — {{dims}} (MP4)…"
+    "export": "Export…"
+  },
+  "exportDialog": {
+    "title": "Export",
+    "subtitle": "Pick a format depending on what you want to do with your video.",
+    "recommended": "Recommended",
+    "exportBtn": "Export",
+    "mp4Title": "Final video (MP4)",
+    "mp4Desc": "Stitches every timeline clip into a single video file, audio track included. Ready to watch and share.",
+    "mp4Hint": "You will choose where to save the file. Shots without a generated video fall back to their input image.",
+    "mp4Format": "Aspect ratio:",
+    "mp4FormatAuto": "Auto",
+    "mp4FormatAutoHint": "from the clips",
+    "clipsTitle": "Separate clips (ZIP)",
+    "clipsDesc": "Each shot as its own video file, numbered in timeline order (01, 02…). Handy for editing elsewhere or sharing shot by shot.",
+    "clipsHint": "Shots without a generated video are skipped.",
+    "fcpxmlTitle": "Editing (FCPXML + media)",
+    "fcpxmlDesc": "The timeline and all its media, ready to open in Final Cut Pro or DaVinci Resolve to polish the edit.",
+    "fcpxmlHint": "ZIP archive containing the .fcpxml file and its media.",
+    "jsonTitle": "Workflow (JSON)",
+    "jsonDesc": "The graph structure: nodes, prompts and settings, without the media. To back up, share or re-import into Raccord.",
+    "downloadsHint": "Saved to your Downloads folder.",
+    "needsClips": "First add at least one clip to the timeline (a video node in the graph).",
+    "needsNodes": "The graph is empty — nothing to export."
   },
   "home": {
     "title": "Technical foundation",
@@ -40,6 +59,13 @@
   },
   "chat": {
     "title": "Assistant",
+    "toggle": "Assistant",
+    "toggleTitle": "Show or hide the assistant (⌘J / Ctrl+J)",
+    "resizeHandle": "Resize the assistant panel",
+    "threadSwitcher": "Switch conversation",
+    "threadGlobal": "General conversation",
+    "threadLegacySection": "Legacy video threads",
+    "threadVideo": "Legacy video thread · {{name}}",
     "placeholder": "Ask for an action or a question…",
     "send": "Send",
     "clear": "Clear conversation",
@@ -53,6 +79,9 @@
     "adjustPromptPrefill": "The output of node “{{label}}” doesn't work for me: \n\nImprove the prompt accordingly, update the node, then relaunch the generation.",
     "planApproveMessage": "I approve the plan — go ahead.",
     "planChangesPrefill": "I'd like to change the plan: ",
+    "actionTitle": "Approval required",
+    "actionApproveMessage": "Approved — go ahead.",
+    "actionChangesPrefill": "Don't do that, instead: ",
     "plan": {
       "title_one": "Proposed plan — {{count}} shot",
       "title_other": "Proposed plan — {{count}} shots",
@@ -61,7 +90,10 @@
       "panels": "panels {{panels}}",
       "approve": "Approve",
       "requestChanges": "Request changes"
-    }
+    },
+    "menuActions": "Assistant actions",
+    "menuProjects": "Projects",
+    "menuReferences": "References & media"
   },
   "onboarding": {
     "skip": "Skip",
@@ -299,10 +331,10 @@
     "timeline": "Timeline",
     "showTimeline": "Show the timeline",
     "hideTimeline": "Hide the timeline",
+    "batchFailed_one": "One generation failed — check the failing node.",
+    "batchFailed_other": "{{count}} generations failed — check the failing nodes.",
     "historyBtn": "History",
     "historyBtnTitle": "Generation history (all nodes)",
-    "assistant": "Assistant",
-    "assistantTitle": "Assistant (chat)",
     "undo": "Undo the last change",
     "redo": "Redo the undone change",
     "replaceConfirm": "Replace the existing nodes, or merge the import into the current graph?",
@@ -365,7 +397,8 @@
       "dontAskUnder": "Don’t ask again under {{credits}} credits",
       "confirm_one": "Generate {{count}} node",
       "confirm_other": "Generate {{count}} nodes"
-    }
+    },
+    "mentionInputs": "Connected inputs"
   },
   "mcp": {
     "title": "MCP server",

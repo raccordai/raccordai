@@ -11,11 +11,30 @@
     "file": "Fichier",
     "importWorkflow": "Importer un workflow (JSON)…",
     "importing": "Import en cours…",
-    "exportWorkflow": "Exporter le workflow (JSON)",
-    "exportFcpxml": "Exporter la timeline (FCPXML + médias)…",
-    "exportMediaZip": "Exporter les clips vidéo (ZIP)…",
-    "exportMp4": "Exporter la vidéo (MP4)…",
-    "exportMp4Preset": "Exporter la vidéo en {{preset}} — {{dims}} (MP4)…"
+    "export": "Exporter…"
+  },
+  "exportDialog": {
+    "title": "Exporter",
+    "subtitle": "Choisissez un format selon ce que vous voulez faire de votre vidéo.",
+    "recommended": "Recommandé",
+    "exportBtn": "Exporter",
+    "mp4Title": "Vidéo finale (MP4)",
+    "mp4Desc": "Assemble tous les clips de la timeline en un seul fichier vidéo, piste audio comprise. Prêt à regarder et à partager.",
+    "mp4Hint": "Vous choisirez l'emplacement du fichier. Les plans sans vidéo générée sont remplacés par leur image d'entrée.",
+    "mp4Format": "Format d'image :",
+    "mp4FormatAuto": "Auto",
+    "mp4FormatAutoHint": "d'après les clips",
+    "clipsTitle": "Clips séparés (ZIP)",
+    "clipsDesc": "Chaque plan dans un fichier vidéo distinct, numéroté dans l'ordre de la timeline (01, 02…). Pratique pour monter ailleurs ou partager plan par plan.",
+    "clipsHint": "Les plans sans vidéo générée sont ignorés.",
+    "fcpxmlTitle": "Montage (FCPXML + médias)",
+    "fcpxmlDesc": "La timeline et tous ses médias, prêts à ouvrir dans Final Cut Pro ou DaVinci Resolve pour peaufiner le montage.",
+    "fcpxmlHint": "Archive ZIP contenant le fichier .fcpxml et ses médias.",
+    "jsonTitle": "Workflow (JSON)",
+    "jsonDesc": "La structure du graphe : nœuds, prompts et réglages, sans les médias. Pour sauvegarder, partager ou réimporter dans Raccord.",
+    "downloadsHint": "Téléchargé dans votre dossier Téléchargements.",
+    "needsClips": "Ajoutez d'abord au moins un clip à la timeline (un nœud vidéo dans le graphe).",
+    "needsNodes": "Le graphe est vide — rien à exporter."
   },
   "home": {
     "title": "Socle technique",
@@ -40,6 +59,13 @@
   },
   "chat": {
     "title": "Assistant",
+    "toggle": "Assistant",
+    "toggleTitle": "Afficher ou masquer l'assistant (⌘J / Ctrl+J)",
+    "resizeHandle": "Redimensionner le panneau de l'assistant",
+    "threadSwitcher": "Changer de conversation",
+    "threadGlobal": "Conversation générale",
+    "threadLegacySection": "Anciens fils vidéo",
+    "threadVideo": "Ancien fil vidéo · {{name}}",
     "placeholder": "Demander une action ou poser une question…",
     "send": "Envoyer",
     "clear": "Effacer la conversation",
@@ -53,6 +79,9 @@
     "adjustPromptPrefill": "Le résultat du nœud « {{label}} » ne me convient pas : \n\nAméliore le prompt en conséquence, mets à jour le nœud puis relance la génération.",
     "planApproveMessage": "J'approuve le plan — vas-y.",
     "planChangesPrefill": "Je voudrais modifier le plan : ",
+    "actionTitle": "Approbation requise",
+    "actionApproveMessage": "J'approuve — vas-y.",
+    "actionChangesPrefill": "Ne fais pas ça, plutôt : ",
     "plan": {
       "title_one": "Plan proposé — {{count}} plan",
       "title_other": "Plan proposé — {{count}} plans",
@@ -61,7 +90,10 @@
       "panels": "cases {{panels}}",
       "approve": "Approuver",
       "requestChanges": "Demander des changements"
-    }
+    },
+    "menuActions": "Actions de l'assistant",
+    "menuProjects": "Projets",
+    "menuReferences": "Références & médias"
   },
   "onboarding": {
     "skip": "Passer",
@@ -299,10 +331,10 @@
     "timeline": "Timeline",
     "showTimeline": "Afficher la timeline",
     "hideTimeline": "Masquer la timeline",
+    "batchFailed_one": "Une génération a échoué — voir le nœud en erreur.",
+    "batchFailed_other": "{{count}} générations ont échoué — voir les nœuds en erreur.",
     "historyBtn": "Historique",
     "historyBtnTitle": "Historique des générations (tous les nœuds)",
-    "assistant": "Assistant",
-    "assistantTitle": "Assistant (chat)",
     "undo": "Annuler la dernière modification",
     "redo": "Rétablir la modification annulée",
     "replaceConfirm": "Remplacer les nœuds existants, ou fusionner l’import dans le graphe actuel ?",
@@ -365,7 +397,8 @@
       "dontAskUnder": "Ne plus demander sous {{credits}} crédits",
       "confirm_one": "Générer {{count}} nœud",
       "confirm_other": "Générer {{count}} nœuds"
-    }
+    },
+    "mentionInputs": "Entrées connectées"
   },
   "mcp": {
     "title": "Serveur MCP",

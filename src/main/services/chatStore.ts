@@ -1,8 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { HOME_CHAT_ID, type ChatItem } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
-import { chatHomeSession, chatSessions } from '../db/schema'
+import { chatHomeSession, chatSessions, videos } from '../db/schema'
 
 /**
  * Persistence of assistant conversations (one row per video, plus one row for
@@ -74,6 +74,30 @@ export function saveChatSession(videoId: string, session: PersistedChatSession):
     .values(value)
     .onConflictDoUpdate({ target: chatSessions.videoId, set: value })
     .run()
+}
+
+/**
+ * Persisted per-video threads for the sidebar's conversation switcher (§4.10
+ * phase 5): legacy threads stay readable/resumable, new ones are no longer
+ * auto-created (the global thread is the default everywhere).
+ */
+export function listChatSessions(): {
+  videoId: string
+  projectId: string
+  videoName: string | null
+  updatedAt: number
+}[] {
+  return getDb()
+    .select({
+      videoId: chatSessions.videoId,
+      projectId: chatSessions.projectId,
+      videoName: videos.name,
+      updatedAt: chatSessions.updatedAt
+    })
+    .from(chatSessions)
+    .leftJoin(videos, eq(videos.id, chatSessions.videoId))
+    .orderBy(desc(chatSessions.updatedAt))
+    .all()
 }
 
 export function deleteChatSession(videoId: string): void {
