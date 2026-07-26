@@ -71,6 +71,8 @@ jobs:
 
       - run: pnpm build
 
-      # safeStorage has no keyring here — the harness launches Electron with
-      # --password-store=basic so the seeded kie key can be encrypted.
+      # No keyring on this box: the harness launches Electron with
+      # --password-store=basic AND sets RACCORD_E2E, which lets main fall back
+      # to safeStorage's in-memory password (dev builds only) so the seeded kie
+      # key can be stored at all.
       - run: xvfb-run --auto-servernum pnpm e2e

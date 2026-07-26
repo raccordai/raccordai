@@ -31,6 +31,11 @@ database, own media store, own single-instance lock) and its own local-API port
 written, so a spec needs no cleanup step and a crashed run leaves nothing
 behind but a temp directory.
 
+The launch also sets `RACCORD_E2E=1`, which lets an **unpackaged** app fall
+back to safeStorage's in-memory password (`src/main/index.ts`): without an OS
+keyring — headless Linux, i.e. CI — safeStorage refuses to encrypt and the
+seeded kie key could not be stored at all. A packaged build ignores it.
+
 ## Layout
 
 ```

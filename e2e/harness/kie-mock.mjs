@@ -232,6 +232,13 @@ export async function startKieMock(options = {}) {
     tasks,
     recorded,
     mediaUrl,
-    close: () => new Promise((resolve) => server.close(resolve))
+    // closeAllConnections is what makes this resolve: server.close() alone
+    // waits for the app's keep-alive sockets, so a leaked app instance would
+    // hang the teardown forever.
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections()
+        server.close(resolve)
+      })
   }
 }

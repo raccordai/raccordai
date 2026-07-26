@@ -38,16 +38,27 @@ if (!existsSync(join(root, 'out', 'main', 'index.js'))) {
 console.log('Generating media fixtures…')
 ensureFixtures()
 
+// Backstop: a spec that wedges (an app instance that won't die, a poller that
+// never settles) must not burn the whole CI job's budget in silence.
+const SPEC_TIMEOUT_MS = Number(process.env['E2E_SPEC_TIMEOUT_MS'] ?? 8 * 60 * 1000)
+
 const results = []
 for (const file of selected) {
-  const code = await new Promise((resolve) => {
+  const ok = await new Promise((resolve) => {
     const child = spawn(process.execPath, [join(specDir, file)], {
       cwd: root,
       stdio: 'inherit'
     })
-    child.on('exit', (exitCode) => resolve(exitCode ?? 1))
+    const timer = setTimeout(() => {
+      console.error(`\n✗ ${file} exceeded ${SPEC_TIMEOUT_MS / 1000}s — killing it.`)
+      child.kill('SIGKILL')
+    }, SPEC_TIMEOUT_MS)
+    child.on('exit', (exitCode) => {
+      clearTimeout(timer)
+      resolve(exitCode === 0)
+    })
   })
-  results.push({ file, ok: code === 0 })
+  results.push({ file, ok })
 }
 
 const failed = results.filter((r) => !r.ok)

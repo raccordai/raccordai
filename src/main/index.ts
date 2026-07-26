@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { BrowserWindow, app, dialog, shell } from 'electron'
+import { BrowserWindow, app, dialog, safeStorage, shell } from 'electron'
 import { openDatabase } from './db/client'
 import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocolHandler, registerMediaProtocolPrivileges } from './media/protocol'
@@ -17,6 +17,15 @@ import { initUpdater } from './services/updater'
 
 // Must run before app ready.
 registerMediaProtocolPrivileges()
+
+// A headless Linux box (the E2E CI job) has no keyring, so safeStorage finds no
+// OS password manager, refuses to encrypt, and the app cannot store an API key
+// at all. Only the E2E harness opts into Electron's in-memory password, and the
+// packaged guard makes it unreachable in a real install: user secrets always go
+// through the OS keychain. Must be called before ready.
+if (!app.isPackaged && process.platform === 'linux' && process.env['RACCORD_E2E'] === '1') {
+  safeStorage.setUsePlainTextEncryption(true)
+}
 
 function createWindow(): void {
   const window = new BrowserWindow({

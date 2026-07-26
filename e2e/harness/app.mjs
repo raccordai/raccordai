@@ -57,7 +57,10 @@ export async function launchApp({ kieBase, locale = 'en', apiKey = 'e2e-key' }) 
     env: {
       ...process.env,
       RACCORD_KIE_BASE: kieBase,
-      RACCORD_LOCAL_API_PORT: String(localApiPort)
+      RACCORD_LOCAL_API_PORT: String(localApiPort),
+      // Lets main opt into safeStorage's in-memory password where no OS
+      // keyring exists (headless Linux) — dev builds only, see src/main/index.ts.
+      RACCORD_E2E: '1'
     }
   })
 
@@ -73,28 +76,41 @@ export async function launchApp({ kieBase, locale = 'en', apiKey = 'e2e-key' }) 
   const win = await electronApp.firstWindow()
   win.on('console', (message) => record('renderer', message.text()))
   win.on('pageerror', (error) => record('renderer!', error.message))
-  await win.waitForLoadState('domcontentloaded')
-  await win.waitForFunction(() => Boolean(window.api))
 
   const invoke = (channel, input) =>
     win.evaluate(([c, i]) => window.api.invoke(c, i), [channel, input])
 
-  // Seed the settings a fresh profile lacks, then reload so the renderer starts
-  // from the seeded state (no first-run overlay, no missing-key banner).
-  await invoke('settings:setLocale', locale)
+  // Anything that throws between here and the return value would strand a live
+  // Electron process (the spec has no handle to close yet), and an orphan keeps
+  // its keep-alive sockets to the mock open — which is enough to hang the whole
+  // run. Own the teardown here instead.
   try {
-    await invoke('settings:setKieApiKey', { key: apiKey })
+    await win.waitForLoadState('domcontentloaded')
+    await win.waitForFunction(() => Boolean(window.api))
+
+    // Seed the settings a fresh profile lacks, then reload so the renderer
+    // starts from the seeded state (no first-run overlay, no missing-key banner).
+    await invoke('settings:setLocale', locale)
+    try {
+      await invoke('settings:setKieApiKey', { key: apiKey })
+    } catch (error) {
+      throw new Error(
+        'could not seed the kie.ai key — safeStorage refused to encrypt. Without an ' +
+          'OS keyring, main must call safeStorage.setUsePlainTextEncryption(true) ' +
+          '(gated on RACCORD_E2E in src/main/index.ts).',
+        { cause: error }
+      )
+    }
+    await invoke('settings:setOnboardingCompleted')
+    await win.reload()
+    await win.waitForLoadState('domcontentloaded')
+    await win.waitForFunction(() => Boolean(window.api))
   } catch (error) {
-    throw new Error(
-      'could not seed the kie.ai key — safeStorage refused to encrypt. ' +
-        'On a headless Linux box the app must be launched with --password-store=basic.',
-      { cause: error }
-    )
+    for (const line of logs.slice(-30)) console.error(`  ${line}`)
+    await electronApp.close().catch(() => {})
+    rmSync(userDataDir, { recursive: true, force: true })
+    throw error
   }
-  await invoke('settings:setOnboardingCompleted')
-  await win.reload()
-  await win.waitForLoadState('domcontentloaded')
-  await win.waitForFunction(() => Boolean(window.api))
 
   let rpcId = 0
 
