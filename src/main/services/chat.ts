@@ -12,6 +12,7 @@ import { onGenerationSettled } from '../bus'
 import { broadcastChatUpdate, broadcastWorkflowChanged } from '../events'
 import { AGENT_TOOLS } from '../mcp/registry'
 import { finalizeVideo, planBatch, planFinalize, startBatch, videoNodeTargets } from './runBatch'
+import { clampVariants } from './runPlanner'
 import {
   SUMMARY_SYSTEM,
   needsCompaction,
@@ -88,6 +89,7 @@ How to work:
 - When you launch run_node, the app automatically wakes you with a message once that generation finishes (success or failure) — you can tell the user you'll report back, then end your turn. Never poll get_generations to wait.
 - To generate SEVERAL shots, prefer ONE run_batch call (targetNodeIds, or all_videos: true for every video node) over chained run_node calls: it runs the whole subgraph dependency-aware — shared upstreams generate once, independent branches in parallel, already-satisfied nodes are reused — and wakes you as each generation settles.
 - Explore in draft, finalize once approved: draft mode (set_draft_mode) substitutes every run with the model's cheap draft equivalent (5–10× cheaper, generations stamped "draft") — propose it whenever the user is iterating. Once they approve the results, finalize_video re-runs the draft keepers on the REAL models and promotes them; call it with plan_only: true first and show the draft-vs-final cost.
+- When a direction is uncertain (a look to settle, a shot the user keeps rejecting), run_node/run_batch accept variants: 2–4 — N candidates of the SAME node generated in parallel, cost ×N, that the user arbitrates in the app's compare grid. Say what the multiplied cost is when you propose it, use it on ONE pivotal node rather than on a whole batch, and prefer draft mode for the exploration. Once they pick, select_generation records the keeper.
 - When the video has vision QC enabled, every successful image generation is auto-reviewed and your wake-up message carries the verdict: leave "pass" alone, and on "WARN" read the notes, look at the output and propose a concrete fix (edit node, new prompt, re-run). review_generation re-checks a single generation on demand.
 - The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a character/décor/prop sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.
 - Plan before building: on any multi-shot build, call present_plan (structured shots + models + estimated credits + total) BEFORE import_workflow. The user gets an approval card with Approve / Request changes — WAIT for their reply before building. present_plan is the gate on the PRODUCTION PLAN; the run-approval card is the gate on the SPEND. Don't present a plan again just to launch runs that are already gated — that would ask the user twice.
@@ -119,7 +121,7 @@ How to deliver a full project:
 4. Build the graph in ONE import_workflow call (nodes + edges; left-to-right positions x: 0, 420, 840…, y by scene ~350, or omit positions and let the app lay it out — never reuse one coordinate for several nodes): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); NO lastFrame chaining between shots — each shot is a CUT to a new camera setup sharing the same references (chaining a generated closing frame into the next clip glitches the seam), and real continuity, when needed, goes through video extend (previous clip into reference_video_urls); one Suno music node per video matching the style's music hint.
 4. Build the graph in ONE import_workflow call (nodes + edges, left-to-right positions x: 0, 420, 840…, y by scene ~350): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); NO lastFrame chaining between shots — each shot is a CUT to a new camera setup sharing the same references (chaining a generated closing frame into the next clip glitches the seam), and real continuity, when needed, goes through video extend (previous clip into reference_video_urls); one Suno music node per video matching the style's music hint.
 5. docs "prompting:<model id>" before writing ANY prompt. English prompts: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
-6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. That gate covers the PRODUCTION PLAN; the SPEND is gated separately by the run-approval card, so don't ask twice. To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll. For iteration-heavy work, propose draft mode (set_draft_mode: every run substituted with a cheap draft equivalent), then finalize_video (plan_only: true first for the draft-vs-final cost) re-runs the approved keepers on the real models; when vision QC is enabled, wake-up messages carry a pass/warn verdict per image generation — only dig into the warns.
+6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. That gate covers the PRODUCTION PLAN; the SPEND is gated separately by the run-approval card, so don't ask twice. To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll. For iteration-heavy work, propose draft mode (set_draft_mode: every run substituted with a cheap draft equivalent), then finalize_video (plan_only: true first for the draft-vs-final cost) re-runs the approved keepers on the real models; when vision QC is enabled, wake-up messages carry a pass/warn verdict per image generation — only dig into the warns. On a pivotal node whose direction is uncertain, variants: 2–4 on run_node/run_batch generates that many candidates in parallel (cost ×N, announce it) for the user to arbitrate in the compare grid.
 
 The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a design sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.`
 
@@ -380,10 +382,14 @@ async function executeTool(
         throw new Error('Pass targetNodeIds, or all_videos: true on a graph with video nodes.')
       }
       const session = sessionFor(ctx.sessionKey)
+      // §6.6: variants regenerate the targets on purpose — reusing a satisfied
+      // target would hand back zero candidates.
+      const variants = clampVariants(args['variants'] ?? 1)
       const { planned } = startBatch({
         videoId,
         targetNodeIds: targets,
-        reuseTargets: true,
+        reuseTargets: variants === 1,
+        variants,
         onGenerationStarted: (_nodeId, generationId) => {
           session.watched.add(generationId)
           persistSession(ctx.sessionKey, session)
@@ -395,7 +401,10 @@ async function executeTool(
           note: 'The batch runs dependency-aware in the background; you are woken automatically as each generation settles — never poll get_generations to wait.'
         }),
         mutatedVideoId: videoId,
-        label: `Batch started · ${planned.length} nodes`
+        label:
+          variants > 1
+            ? `Batch started · ${planned.length} nodes ×${variants}`
+            : `Batch started · ${planned.length} nodes`
       }
     }
     // Same watched-generation wiring for the finalize batch (§6.1): the settle
@@ -436,7 +445,11 @@ async function executeTool(
       // Generations launched from the chat are watched: the engine's settle
       // event wakes the conversation up (never poll).
       if (name === 'run_node') {
-        sessionFor(ctx.sessionKey).watched.add((result as { generationId: string }).generationId)
+        // Every variant is watched: the wake-up must fire for each candidate.
+        const session = sessionFor(ctx.sessionKey)
+        for (const id of (result as { generationIds: string[] }).generationIds) {
+          session.watched.add(id)
+        }
       }
       return {
         result: typeof result === 'string' ? result : JSON.stringify(result ?? { ok: true }),
@@ -491,7 +504,10 @@ const CHAT_LABELS: Record<string, (args: Record<string, unknown>, result: unknow
   undo: () => 'Undo',
   redo: () => 'Redo',
   estimate_cost: (_a, r) => `Cost estimated · ${(r as { credits: number | null }).credits ?? '?'}`,
-  run_node: () => 'Generation started',
+  run_node: (_a, r) => {
+    const count = (r as { generationIds?: string[] }).generationIds?.length ?? 1
+    return count > 1 ? `${count} variants started` : 'Generation started'
+  },
   get_generations: () => 'Read generations',
   select_generation: () => 'Generation selected',
   cancel_generation: (_a, r) =>
@@ -528,8 +544,14 @@ function describeAction(name: string, args: Record<string, unknown>): string {
     case 'run_node': {
       const nodeId = String(args['nodeId'] ?? '')
       const ref = graph.getNodeRef(nodeId)
-      const credits = generations.estimateNodeRunCredits(nodeId)
-      return `Run “${ref?.label ?? (nodeId || '?')}”${creditSuffix(credits)}`
+      // §6.6: the card must quote what the whole exploration costs, not one run.
+      const variants = clampVariants(args['variants'] ?? 1)
+      const perRun = generations.estimateNodeRunCredits(nodeId)
+      const label = ref?.label ?? (nodeId || '?')
+      const suffix = creditSuffix(perRun === null ? null : perRun * variants)
+      return variants > 1
+        ? `Run “${label}” ×${variants} variants${suffix}`
+        : `Run “${label}”${suffix}`
     }
     case 'run_batch': {
       const videoId = String(args['videoId'] ?? '')
@@ -538,8 +560,9 @@ function describeAction(name: string, args: Record<string, unknown>): string {
         : Array.isArray(args['targetNodeIds'])
           ? (args['targetNodeIds'] as unknown[]).map(String)
           : []
-      const plan = targets.length > 0 ? planBatch(videoId, targets, true) : null
-      const count = plan?.rows.length ?? targets.length
+      const variants = clampVariants(args['variants'] ?? 1)
+      const plan = targets.length > 0 ? planBatch(videoId, targets, variants === 1, variants) : null
+      const count = plan?.rows.reduce((sum, row) => sum + row.variants, 0) ?? targets.length
       return `Run ${count} generation${count === 1 ? '' : 's'}${creditSuffix(plan?.total)}`
     }
     case 'finalize_video': {

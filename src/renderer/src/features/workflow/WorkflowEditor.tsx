@@ -81,7 +81,7 @@ interface NodeClipboard {
 let nodeClipboard: NodeClipboard | null = null
 
 interface CostPreviewState {
-  rows: { id: string; label: string; credits: number | null }[]
+  rows: { id: string; label: string; credits: number | null; variants: number }[]
   total: number
   /** Current kie.ai balance, null when unreachable (no key, offline). */
   balance: number | null
@@ -599,14 +599,22 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
    * two concerns: the §4.4 cost gate (modal below) and failure feedback.
    */
   const runNodes = useCallback(
-    async (targetNodeIds: string[], opts?: { reuseTargets?: boolean }) => {
+    async (targetNodeIds: string[], opts?: { reuseTargets?: boolean; variants?: number }) => {
       if (targetNodeIds.length === 0) return
       const reuseTargets = opts?.reuseTargets ?? false
-      const plan = await invoke('generations:planRun', { videoId, targetNodeIds, reuseTargets })
+      const variants = opts?.variants
+      const plan = await invoke('generations:planRun', {
+        videoId,
+        targetNodeIds,
+        reuseTargets,
+        variants
+      })
 
-      // Cost gate: multi-node runs get a per-node breakdown + total + balance
-      // before any credit is spent; "don't ask under X" short-circuits it.
-      if (plan.rows.length >= 2) {
+      // Cost gate: anything claiming 2+ generations gets a per-node breakdown +
+      // total + balance before any credit is spent — including a single node run
+      // with variants (§6.6). "Don't ask under X" short-circuits it.
+      const plannedRuns = plan.rows.reduce((sum, row) => sum + row.variants, 0)
+      if (plannedRuns >= 2) {
         const skipUnder = Number(localStorage.getItem(COST_SKIP_KEY) ?? '0')
         if (!(skipUnder > 0 && plan.total <= skipUnder)) {
           const balance = await invoke('kie:credits')
@@ -614,7 +622,12 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
             .catch(() => null)
           const accepted = await new Promise<boolean>((resolve) =>
             setCostPreview({
-              rows: plan.rows.map((r) => ({ id: r.nodeId, label: r.label, credits: r.credits })),
+              rows: plan.rows.map((r) => ({
+                id: r.nodeId,
+                label: r.label,
+                credits: r.credits,
+                variants: r.variants
+              })),
               total: plan.total,
               balance,
               resolve
@@ -625,7 +638,12 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
         }
       }
 
-      const res = await invoke('generations:runBatch', { videoId, targetNodeIds, reuseTargets })
+      const res = await invoke('generations:runBatch', {
+        videoId,
+        targetNodeIds,
+        reuseTargets,
+        variants
+      })
       if (res.failed > 0) {
         const message = t('editor.batchFailed', { count: res.failed })
         setEditorContext({ lastError: message })
@@ -636,6 +654,12 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   )
 
   const handleRunNode = useCallback((targetNodeId: string) => runNodes([targetNodeId]), [runNodes])
+
+  /** §6.6 — N parallel candidates of one node, arbitrated in the grid compare. */
+  const handleRunVariants = useCallback(
+    (targetNodeId: string, variants: number) => runNodes([targetNodeId], { variants }),
+    [runNodes]
+  )
 
   // "Generate all videos": run every video node in the graph (with its upstream
   // deps), skipping any that already have a successful output.
@@ -885,6 +909,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
                   projectId={projectId}
                   onClose={() => setSelectedNodeId(null)}
                   onRun={() => handleRunNode(selectedNode.id)}
+                  onRunVariants={(count) => handleRunVariants(selectedNode.id, count)}
                   onAskAssistant={askAssistant}
                 />
               )}
@@ -1008,7 +1033,14 @@ function CostPreviewModal({ preview }: { preview: CostPreviewState }) {
         <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto">
           {preview.rows.map((row) => (
             <li key={row.id} className="flex items-baseline justify-between gap-3 text-xs">
-              <span className="min-w-0 flex-1 truncate text-neutral-300">{row.label}</span>
+              <span className="min-w-0 flex-1 truncate text-neutral-300">
+                {row.label}
+                {row.variants > 1 && (
+                  <span className="ml-1.5 rounded bg-accent/15 px-1 py-0.5 font-mono text-[10px] text-accent-soft">
+                    ×{row.variants}
+                  </span>
+                )}
+              </span>
               <span className="font-mono text-neutral-400">
                 {row.credits !== null
                   ? t('editor.costModal.credits', { credits: row.credits })
@@ -1047,7 +1079,10 @@ function CostPreviewModal({ preview }: { preview: CostPreviewState }) {
             {t('common.cancel')}
           </Button>
           <Button variant="primary" onClick={() => settle(true)} autoFocus>
-            {t('editor.costModal.confirm', { count: preview.rows.length })}
+            {/* Counted in generations, not nodes: 3 variants of one node are 3 runs. */}
+            {t('editor.costModal.confirm', {
+              count: preview.rows.reduce((sum, row) => sum + row.variants, 0)
+            })}
           </Button>
         </div>
       </div>

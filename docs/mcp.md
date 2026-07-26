@@ -53,6 +53,13 @@ and promotes them, `plan_only: true` for the draft-vs-final cost preview), and
 (automatic at settle when the video's QC option is on — verdict and notes come
 back in `get_generations`).
 
+Parallel exploration rides the run tools themselves: `run_node` and `run_batch`
+accept `variants: N` (2–4) to claim N candidates of the same node — one queue
+slot and one credit charge each, `run_node` returning every `generationIds`.
+Dependencies still generate once; only the explicit targets are multiplied. The
+user arbitrates the candidates in the app's compare grid, or an agent picks with
+`select_generation`.
+
 ## Extending the server
 
 Everything lives in `src/main/mcp/`:

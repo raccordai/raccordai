@@ -1,4 +1,5 @@
 import { MODELS } from '@shared/models'
+import { MAX_VARIANTS } from '@shared/config'
 import { getStyle } from '@shared/styles/registry'
 import { videoAspectRatioSchema, videoResolutionSchema } from '@shared/ipc/contracts'
 import { broadcastFocusNode, broadcastNavigate, broadcastWorkflowChanged } from '../events'
@@ -11,6 +12,7 @@ import { kieGetCredits } from '../services/kie'
 import * as renderService from '../services/render'
 import { finalizeVideo, planFinalize, startBatch, videoNodeTargets } from '../services/runBatch'
 import { cancelGeneration, refreshStatus, runNode } from '../services/runEngine'
+import { clampVariants } from '../services/runPlanner'
 import { reviewGeneration } from '../services/qc'
 import * as videos from '../services/videos'
 import { DOC_TOPICS, getDoc } from './docs'
@@ -518,16 +520,26 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'run_node',
     description:
-      'Launch a node’s generation (calls kie.ai — COSTS MONEY; upstream inputs must already have outputs). Asynchronous: returns a generationId; completion is reported via get_generations (the embedded assistant is woken automatically instead).',
-    inputSchema: obj({ nodeId: str() }, ['nodeId']),
+      'Launch a node’s generation (calls kie.ai — COSTS MONEY; upstream inputs must already have outputs). Asynchronous: returns a generationId; completion is reported via get_generations (the embedded assistant is woken automatically instead). Pass variants: N to explore N parallel candidates of the SAME node (cost ×N) and let the user pick.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        variants: {
+          type: 'number',
+          description: `Parallel candidates to generate for this node (1–${MAX_VARIANTS}, default 1 — the cost is multiplied accordingly)`
+        }
+      },
+      ['nodeId']
+    ),
     scope: 'global',
     risk: 'spending',
-    execute: ({ nodeId }) => runNode(String(nodeId))
+    execute: ({ nodeId, variants }) =>
+      runNode(String(nodeId), false, { variants: clampVariants(variants ?? 1) })
   },
   {
     name: 'run_batch',
     description:
-      'Run several nodes (or every video node) dependency-aware: shared upstreams generate once, independent branches in parallel, already-satisfied nodes are reused. COSTS MONEY. Returns the planned nodes; generations start and settle asynchronously (get_generations per node).',
+      'Run several nodes (or every video node) dependency-aware: shared upstreams generate once, independent branches in parallel, already-satisfied nodes are reused. COSTS MONEY. Returns the planned nodes; generations start and settle asynchronously (get_generations per node). variants: N generates N candidates per TARGET (dependencies still run once).',
     inputSchema: obj(
       {
         videoId: str(),
@@ -539,13 +551,17 @@ export const AGENT_TOOLS: AgentTool[] = [
         all_videos: {
           type: 'boolean',
           description: 'Target every video-model node of the graph instead'
+        },
+        variants: {
+          type: 'number',
+          description: `Parallel candidates per target node (1–${MAX_VARIANTS}, default 1 — the cost is multiplied accordingly)`
         }
       },
       ['videoId']
     ),
     scope: 'video',
     risk: 'spending',
-    execute: ({ videoId, targetNodeIds, all_videos }) => {
+    execute: ({ videoId, targetNodeIds, all_videos, variants }) => {
       const targets = all_videos
         ? videoNodeTargets(String(videoId))
         : Array.isArray(targetNodeIds)
@@ -554,10 +570,14 @@ export const AGENT_TOOLS: AgentTool[] = [
       if (targets.length === 0) {
         throw new Error('Pass targetNodeIds, or all_videos: true on a graph with video nodes.')
       }
+      const count = clampVariants(variants ?? 1)
       const { planned, done } = startBatch({
         videoId: String(videoId),
         targetNodeIds: targets,
-        reuseTargets: true
+        // Exploring variants means regenerating on purpose — reusing the
+        // satisfied target would return zero candidates.
+        reuseTargets: count === 1,
+        variants: count
       })
       void done
       return { planned }

@@ -22,6 +22,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DESIGN_RECIPES } from '@shared/designs/registry'
+import { MAX_VARIANTS } from '@shared/config'
 import type { GraphNode } from '@shared/ipc/contracts'
 import type { ModelDefinition } from '@shared/models'
 import { defaultParamsFor, getModel, videoDefaultParams } from '@shared/models'
@@ -41,17 +42,29 @@ import { promoteGeneration, refineImagePrompt } from './generationRuntime'
 /** Sensible extension fallback per media kind when the URL/MIME doesn't reveal one. */
 const FALLBACK_EXT: Record<string, string> = { image: 'png', video: 'mp4', audio: 'mp3' }
 
+/** §6.6 — the variant counts offered next to Generate (1 is the plain button). */
+const VARIANT_CHOICES = Array.from({ length: MAX_VARIANTS - 1 }, (_, i) => i + 2)
+
 interface Props {
   node: GraphNode
   projectId: string
   onClose: () => void
   /** Run this node (auto-runs any missing upstream dependencies first). */
   onRun: () => void
+  /** §6.6 — run this node N times in parallel and compare the candidates. */
+  onRunVariants?: (count: number) => void
   /** Opens the assistant with a prepared draft. */
   onAskAssistant?: (text: string) => void
 }
 
-export function NodeParamsPanel({ node, projectId, onClose, onRun, onAskAssistant }: Props) {
+export function NodeParamsPanel({
+  node,
+  projectId,
+  onClose,
+  onRun,
+  onRunVariants,
+  onAskAssistant
+}: Props) {
   const { t } = useTranslation()
   const confirmModal = useConfirm()
   const removeNode = useIpcMutation('nodes:remove', [graphKeys.graph(node.videoId)])
@@ -83,6 +96,7 @@ export function NodeParamsPanel({ node, projectId, onClose, onRun, onAskAssistan
       onClose={onClose}
       onDelete={handleDelete}
       onRun={onRun}
+      onRunVariants={onRunVariants}
       onAskAssistant={onAskAssistant}
     />
   )
@@ -279,12 +293,14 @@ function ModelNodeEditor({
   onClose,
   onDelete,
   onRun,
+  onRunVariants,
   onAskAssistant
 }: {
   node: GraphNode
   onClose: () => void
   onDelete: () => void
   onRun: () => void
+  onRunVariants?: (count: number) => void
   onAskAssistant?: (text: string) => void
 }) {
   const { t } = useTranslation()
@@ -301,8 +317,11 @@ function ModelNodeEditor({
     ['history']
   ])
   const generations = useNodeGenerations(node.id).data
-  /** Generation ids picked for the A/B compare (max 2 — the modal opens at 2). */
+  /** Generations picked for the compare grid (§6.6: 2 to MAX_VARIANTS candidates). */
   const [compareIds, setCompareIds] = useState<string[]>([])
+  /** The grid opens on demand — picking a 2nd candidate no longer forces it open,
+   *  since a variants run is usually arbitrated 3 or 4 at a time. */
+  const [compareOpen, setCompareOpen] = useState(false)
   const graph = useWorkflowGraph()
   const connections = useMemo(() => incomingConnectionsFor(node.id, graph), [node.id, graph])
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
@@ -469,6 +488,31 @@ function ModelNodeEditor({
       {estimatedCredits !== null && !isRunning && (
         <div className="text-center text-[10px] text-neutral-500">
           {t('editor.estimatedCost', { credits: estimatedCredits })}
+        </div>
+      )}
+      {/* Variants ×N (§6.6): parallel exploration in one gesture — N queue
+          slots, N candidates to arbitrate in the grid compare below. */}
+      {onRunVariants && (
+        <div className="flex items-center justify-center gap-1.5 pt-0.5">
+          <span className="text-[10px] text-neutral-500">{t('editor.variants.label')}</span>
+          {VARIANT_CHOICES.map((count) => (
+            <button
+              key={count}
+              onClick={() => onRunVariants(count)}
+              disabled={isRunning}
+              className="rounded border border-neutral-700 px-1.5 py-0.5 font-mono text-[10px] text-neutral-300 hover:border-accent hover:text-accent-soft disabled:opacity-40"
+              title={
+                estimatedCredits !== null
+                  ? t('editor.variants.runCost', {
+                      n: count,
+                      credits: Math.round(estimatedCredits * count)
+                    })
+                  : t('editor.variants.run', { n: count })
+              }
+            >
+              ×{count}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -734,9 +778,22 @@ function ModelNodeEditor({
           History
         </h3>
         {(generations?.filter((g) => g.status === 'success' && g.url).length ?? 0) >= 2 && (
-          <p className="mb-2 text-[10px] leading-snug text-neutral-500">
-            {compareIds.length === 1 ? t('editor.compare.pickSecond') : t('editor.compare.hint')}
-          </p>
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <p className="text-[10px] leading-snug text-neutral-500">
+              {compareIds.length === 1 ? t('editor.compare.pickSecond') : t('editor.compare.hint')}
+            </p>
+            {compareIds.length >= 2 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="flex-shrink-0"
+                onClick={() => setCompareOpen(true)}
+              >
+                <Columns2 className="h-3.5 w-3.5" />
+                {t('editor.compare.open', { n: compareIds.length })}
+              </Button>
+            )}
+          </div>
         )}
         {node.intent && (
           <div className="mb-2 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-[11px] text-neutral-300">
@@ -767,7 +824,8 @@ function ModelNodeEditor({
                         setCompareIds((prev) =>
                           prev.includes(g.id)
                             ? prev.filter((id) => id !== g.id)
-                            : [...prev.slice(-1), g.id]
+                            : // Sliding window: picking beyond the cap drops the oldest.
+                              [...prev.slice(-(MAX_VARIANTS - 1)), g.id]
                         )
                     : undefined
                 }
@@ -777,21 +835,27 @@ function ModelNodeEditor({
         )}
       </div>
 
-      {compareIds.length === 2 &&
+      {compareOpen &&
         (() => {
-          const [a, b] = compareIds.map((id) => generations?.find((g) => g.id === id))
-          if (!a || !b) return null
+          const picked = compareIds.flatMap((id) => {
+            const gen = generations?.find((g) => g.id === id)
+            return gen ? [gen] : []
+          })
+          if (picked.length < 2) return null
+          const close = (): void => {
+            setCompareOpen(false)
+            setCompareIds([])
+          }
           return (
             <CompareModal
-              a={a}
-              b={b}
+              gens={picked}
               kind={model.kind === 'video' ? 'video' : 'image'}
               activeId={node.selectedGenerationId}
               onUse={(id) => {
                 selectGen.mutate({ nodeId: node.id, generationId: id })
-                setCompareIds([])
+                close()
               }}
-              onClose={() => setCompareIds([])}
+              onClose={close}
             />
           )
         })()}
@@ -800,74 +864,81 @@ function ModelNodeEditor({
 }
 
 /**
- * A/B compare of two generations (§4.6) — the core iteration gesture: two
- * candidates side by side with synced playback (videos) or synced zoom/pan
- * (images), and "Use this" on each side.
+ * Compare grid (§4.6, generalized to N candidates by §6.6) — the core
+ * iteration gesture: 2 to MAX_VARIANTS candidates side by side with synced
+ * playback (videos) or synced zoom/pan (images), and "Use this" on each pane.
+ * Two panes lay out in a row; three or more wrap into a 2-column grid.
  */
 function CompareModal({
-  a,
-  b,
+  gens,
   kind,
   activeId,
   onUse,
   onClose
 }: {
-  a: GenRow
-  b: GenRow
+  gens: GenRow[]
   kind: 'image' | 'video'
   activeId: string | null
   onUse: (id: string) => void
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const videoRefs = [useRef<HTMLVideoElement | null>(null), useRef<HTMLVideoElement | null>(null)]
-  const scrollRefs = [useRef<HTMLDivElement | null>(null), useRef<HTMLDivElement | null>(null)]
+  // One ref slot per pane, indexed like `gens` (arrays, not fixed hooks: the
+  // pane count varies with how many candidates the user picked).
+  const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
+  const scrollRefs = useRef<(HTMLDivElement | null)[]>([])
   const syncingScroll = useRef(false)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [zoom, setZoom] = useState(1)
 
+  /** The pane every other one follows for playback and scrubbing. */
+  const leader = (): HTMLVideoElement | null => videoRefs.current[0] ?? null
+  const players = (): HTMLVideoElement[] =>
+    videoRefs.current.filter((el): el is HTMLVideoElement => el !== null)
+
   function togglePlay() {
-    const [l, r] = videoRefs.map((ref) => ref.current)
-    if (!l || !r) return
+    const els = players()
+    if (els.length === 0) return
     if (playing) {
-      l.pause()
-      r.pause()
+      for (const el of els) el.pause()
       setPlaying(false)
     } else {
-      r.currentTime = l.currentTime
-      void l.play()
-      void r.play()
+      const time = leader()?.currentTime ?? 0
+      for (const el of els) {
+        el.currentTime = Number.isFinite(el.duration) ? Math.min(time, el.duration) : time
+        void el.play()
+      }
       setPlaying(true)
     }
   }
 
-  /** Scrub both videos to the same fraction of their own duration-capped time. */
+  /** Scrub every video to the same fraction of the leader's duration (capped). */
   function scrub(fraction: number) {
-    const [l, r] = videoRefs.map((ref) => ref.current)
-    if (!l || !r || !Number.isFinite(l.duration)) return
-    const time = fraction * l.duration
-    l.currentTime = time
-    r.currentTime = Number.isFinite(r.duration) ? Math.min(time, r.duration) : time
+    const lead = leader()
+    if (!lead || !Number.isFinite(lead.duration)) return
+    const time = fraction * lead.duration
+    for (const el of players()) {
+      el.currentTime = Number.isFinite(el.duration) ? Math.min(time, el.duration) : time
+    }
     setProgress(fraction)
   }
 
-  /** Mirror one pane's scroll onto the other (synced pan while zoomed). */
+  /** Mirror one pane's scroll onto every other (synced pan while zoomed). */
   function syncScroll(from: number) {
     if (syncingScroll.current) return
-    const src = scrollRefs[from]?.current
-    const dst = scrollRefs[1 - from]?.current
-    if (!src || !dst) return
+    const src = scrollRefs.current[from]
+    if (!src) return
     syncingScroll.current = true
-    dst.scrollLeft = src.scrollLeft
-    dst.scrollTop = src.scrollTop
+    scrollRefs.current.forEach((dst, i) => {
+      if (!dst || i === from) return
+      dst.scrollLeft = src.scrollLeft
+      dst.scrollTop = src.scrollTop
+    })
     syncingScroll.current = false
   }
 
-  const sides: Array<{ gen: GenRow; index: number }> = [
-    { gen: a, index: 0 },
-    { gen: b, index: 1 }
-  ]
+  const sides = gens.map((gen, index) => ({ gen, index }))
 
   return (
     <div
@@ -882,7 +953,8 @@ function CompareModal({
       >
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-neutral-100">
-            <Columns2 className="h-4 w-4 text-accent" /> {t('editor.compare.title')}
+            <Columns2 className="h-4 w-4 text-accent" />{' '}
+            {t('editor.compare.title', { n: gens.length })}
           </h2>
           <button
             onClick={onClose}
@@ -893,15 +965,23 @@ function CompareModal({
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 gap-3">
+        {/* 2 candidates → one row; 3+ → a 2-column grid so each pane stays big. */}
+        <div
+          className={`grid min-h-0 flex-1 gap-3 ${gens.length === 2 ? 'grid-cols-2' : 'grid-cols-2 grid-rows-2'}`}
+        >
           {sides.map(({ gen, index }) => (
-            <div key={gen.id} className="flex min-w-0 flex-1 flex-col gap-2">
-              <div className="text-[10px] text-neutral-500">
+            <div key={gen.id} className="flex min-w-0 min-h-0 flex-col gap-2">
+              <div className="flex items-baseline gap-1.5 text-[10px] text-neutral-500">
+                <span className="rounded bg-neutral-800 px-1 font-mono text-neutral-300">
+                  {index + 1}
+                </span>
                 {new Date(gen.createdAt).toLocaleString()}
               </div>
               {kind === 'video' ? (
                 <video
-                  ref={videoRefs[index]}
+                  ref={(el) => {
+                    videoRefs.current[index] = el
+                  }}
                   src={gen.url ?? undefined}
                   muted
                   playsInline
@@ -920,7 +1000,9 @@ function CompareModal({
                 />
               ) : (
                 <div
-                  ref={scrollRefs[index]}
+                  ref={(el) => {
+                    scrollRefs.current[index] = el
+                  }}
                   onScroll={() => syncScroll(index)}
                   className="min-h-0 flex-1 overflow-auto rounded bg-neutral-950"
                 >

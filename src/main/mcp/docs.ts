@@ -43,7 +43,10 @@ Typical session:
      first for the draft-vs-final cost) re-runs the approved keepers on the
      real models. review_generation runs a vision QC (pass/warn + notes) on a
      successful image generation; with the video's QC option on it runs
-     automatically at every image settle.
+     automatically at every image settle. Unsure which direction to take?
+     run_node / run_batch accept variants: N (2–4) to generate N candidates of
+     the same node in parallel (cost ×N) — the user arbitrates them in the
+     app's compare grid, or select_generation picks the keeper.
 
 Conventions:
   - Position nodes left-to-right (x: 0, 420, 840…; y spaced ~350). Omitting positions is fine —

@@ -310,16 +310,22 @@
     "dropSkipped_one": "{{count}} fichier ignoré (type de média non pris en charge)",
     "dropSkipped_other": "{{count}} fichiers ignorés (type de média non pris en charge)",
     "compare": {
-      "title": "Comparer deux générations",
-      "hint": "Sélectionne deux générations avec le bouton ⫼ pour les comparer côte à côte.",
-      "pickSecond": "Sélectionne une seconde génération pour ouvrir la comparaison côte à côte.",
-      "toggle": "Sélectionner pour la comparaison côte à côte",
+      "title": "Comparer {{n}} générations",
+      "hint": "Sélectionne 2 à 4 générations avec le bouton ⫼, puis ouvre la grille de comparaison.",
+      "pickSecond": "Sélectionne au moins une seconde génération pour ouvrir la grille de comparaison.",
+      "toggle": "Sélectionner pour la grille de comparaison",
+      "open": "Comparer ({{n}})",
       "useThis": "Utiliser celle-ci",
       "active": "Active",
       "play": "Lecture",
       "pause": "Pause",
-      "scrub": "Naviguer dans les deux vidéos",
+      "scrub": "Naviguer dans toutes les vidéos",
       "zoom": "Zoom"
+    },
+    "variants": {
+      "label": "Variantes",
+      "run": "Générer {{n}} candidats en parallèle et les comparer",
+      "runCost": "Générer {{n}} candidats en parallèle et les comparer · ~{{credits}} crédits"
     },
     "generateVideos": "Générer les vidéos",
     "generating": "Génération…",
@@ -432,8 +438,8 @@
       "balance": "Solde : {{credits}} crédits",
       "overBalance": "au-delà de votre solde",
       "dontAskUnder": "Ne plus demander sous {{credits}} crédits",
-      "confirm_one": "Générer {{count}} nœud",
-      "confirm_other": "Générer {{count}} nœuds"
+      "confirm_one": "Générer {{count}} génération",
+      "confirm_other": "Générer {{count}} générations"
     },
     "mentionInputs": "Entrées connectées"
   },

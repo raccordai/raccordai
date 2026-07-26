@@ -189,17 +189,17 @@ export function registerIpcHandlers(): void {
     graph.setSelectedGeneration(nodeId, generationId)
   )
 
-  handle('generations:run', ({ nodeId, reuseSatisfied }) =>
-    runEngine.runNode(nodeId, reuseSatisfied ?? false)
+  handle('generations:run', ({ nodeId, reuseSatisfied, variants }) =>
+    runEngine.runNode(nodeId, reuseSatisfied ?? false, { variants })
   )
-  handle('generations:planRun', ({ videoId, targetNodeIds, reuseTargets }) =>
-    runBatchService.planBatch(videoId, targetNodeIds, reuseTargets)
+  handle('generations:planRun', ({ videoId, targetNodeIds, reuseTargets, variants }) =>
+    runBatchService.planBatch(videoId, targetNodeIds, reuseTargets, variants)
   )
   // Resolves once the whole batch settled — the renderer's spinner awaits it.
   handle(
     'generations:runBatch',
-    ({ videoId, targetNodeIds, reuseTargets }) =>
-      runBatchService.startBatch({ videoId, targetNodeIds, reuseTargets }).done
+    ({ videoId, targetNodeIds, reuseTargets, variants }) =>
+      runBatchService.startBatch({ videoId, targetNodeIds, reuseTargets, variants }).done
   )
   handle('generations:planFinalize', ({ videoId }) => runBatchService.planFinalize(videoId))
   handle('generations:reviewGeneration', ({ generationId }) =>

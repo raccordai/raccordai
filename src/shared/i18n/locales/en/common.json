@@ -310,16 +310,22 @@
     "dropSkipped_one": "{{count}} file skipped (unsupported media type)",
     "dropSkipped_other": "{{count}} files skipped (unsupported media type)",
     "compare": {
-      "title": "Compare two generations",
-      "hint": "Pick two generations with the ⫼ button to compare them side by side.",
-      "pickSecond": "Pick a second generation to open the side-by-side compare.",
-      "toggle": "Pick for side-by-side compare",
+      "title": "Compare {{n}} generations",
+      "hint": "Pick 2 to 4 generations with the ⫼ button, then open the compare grid.",
+      "pickSecond": "Pick at least a second generation to open the compare grid.",
+      "toggle": "Pick for the compare grid",
+      "open": "Compare ({{n}})",
       "useThis": "Use this",
       "active": "Active",
       "play": "Play",
       "pause": "Pause",
-      "scrub": "Scrub both videos",
+      "scrub": "Scrub every video",
       "zoom": "Zoom"
+    },
+    "variants": {
+      "label": "Variants",
+      "run": "Generate {{n}} candidates in parallel and compare them",
+      "runCost": "Generate {{n}} candidates in parallel and compare them · ~{{credits}} credits"
     },
     "generateVideos": "Generate videos",
     "generating": "Generating…",
@@ -432,8 +438,8 @@
       "balance": "Balance: {{credits}} credits",
       "overBalance": "over your balance",
       "dontAskUnder": "Don’t ask again under {{credits}} credits",
-      "confirm_one": "Generate {{count}} node",
-      "confirm_other": "Generate {{count}} nodes"
+      "confirm_one": "Generate {{count}} generation",
+      "confirm_other": "Generate {{count}} generations"
     },
     "mentionInputs": "Connected inputs"
   },

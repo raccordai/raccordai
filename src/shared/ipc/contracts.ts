@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MAX_VARIANTS } from '../config'
 
 /**
  * Single source of truth for the renderer <-> main boundary.
@@ -312,6 +313,23 @@ export const queueStateSchema = z.object({
 })
 export type QueueState = z.infer<typeof queueStateSchema>
 
+/**
+ * Variants ×N (§6.6) — parallel candidates claimed for one node. Omitted or 1
+ * means a plain single run; the cap keeps an exploration from silently
+ * multiplying the bill.
+ */
+export const variantsSchema = z.number().int().min(1).max(MAX_VARIANTS).optional()
+
+/** One line of the pre-run cost preview (§4.4), variants-aware since §6.6. */
+export const plannedRowSchema = z.object({
+  nodeId: z.string(),
+  label: z.string(),
+  /** Total for this node: per-run estimate × variants (null = no declared rates). */
+  credits: z.number().nullable(),
+  variants: z.number().int().min(1)
+})
+export type PlannedRow = z.infer<typeof plannedRowSchema>
+
 export const ipcContracts = {
   'app:getInfo': { input: z.void(), output: appInfoSchema },
   'settings:getLocale': { input: z.void(), output: localeSchema },
@@ -559,8 +577,18 @@ export const ipcContracts = {
   },
 
   'generations:run': {
-    input: z.object({ nodeId: z.string(), reuseSatisfied: z.boolean().optional() }),
-    output: z.object({ generationId: z.string(), kieTaskId: z.string() })
+    input: z.object({
+      nodeId: z.string(),
+      reuseSatisfied: z.boolean().optional(),
+      /** §6.6 — claim N parallel candidates instead of one. */
+      variants: variantsSchema
+    }),
+    output: z.object({
+      generationId: z.string(),
+      kieTaskId: z.string(),
+      /** Every candidate claimed by this run (one entry on a plain run). */
+      generationIds: z.array(z.string())
+    })
   },
   'generations:refreshStatus': {
     input: z.object({ nodeId: z.string() }),
@@ -593,12 +621,11 @@ export const ipcContracts = {
     input: z.object({
       videoId: z.string(),
       targetNodeIds: z.array(z.string()).min(1),
-      reuseTargets: z.boolean()
+      reuseTargets: z.boolean(),
+      variants: variantsSchema
     }),
     output: z.object({
-      rows: z.array(
-        z.object({ nodeId: z.string(), label: z.string(), credits: z.number().nullable() })
-      ),
+      rows: z.array(plannedRowSchema),
       total: z.number()
     })
   },
@@ -609,7 +636,8 @@ export const ipcContracts = {
     input: z.object({
       videoId: z.string(),
       targetNodeIds: z.array(z.string()).min(1),
-      reuseTargets: z.boolean()
+      reuseTargets: z.boolean(),
+      variants: variantsSchema
     }),
     output: z.object({
       succeeded: z.number().int().min(0),

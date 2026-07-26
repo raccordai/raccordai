@@ -6,11 +6,12 @@ S (< 1 day), M (a few days), L (a week+).
 North star: **be the most intuitive tool to create AI videos through
 workflows**. Everything shipped through July 2026 — onboarding + template
 slots, rendered MP4 export, generation feedback layer, video-level defaults +
-style-at-payload, graph ergonomics, assistant-first flows, and the full
-assistant sidebar (global shell, per-turn app context, unified tool registry
-with risk taxonomy, smart batch runs in main, global thread + compaction,
-SSE streaming, @-mentions) — is recorded in git history and CLAUDE.md; only
-open work remains below.
+style-at-payload, graph ergonomics, assistant-first flows, the full assistant
+sidebar (global shell, per-turn app context, unified tool registry with risk
+taxonomy, smart batch runs in main, global thread + compaction, SSE streaming,
+@-mentions) and the first three iteration-loop items (draft mode + finalize,
+vision QC on settle, variants ×N with the compare grid) — is recorded in git
+history and CLAUDE.md; only open work remains below.
 
 ## 1. Open-source hygiene — before publishing
 
@@ -83,43 +84,10 @@ nobody looks at the outputs except the user. Guiding metric for this whole
 section: **cost (credits + minutes) from brief to the first shot the user
 judges good**. Same shared constraints as §4.
 
-### 6.1 Draft mode — draft → final pipeline (M)
-
-Make exploring 5–10× cheaper by treating generations as drafts until the
-user finalizes.
-
-- `draftEquivalent?: { modelId, params? }` on `ModelDefinition` (seedance-2 →
-  seedance-2-fast, nano-banana-pro → nano-banana-2-lite, resolution floored);
-  registry test enforces the id exists in `MODELS` and the params pass the
-  target model's schema.
-- Video-level toggle (additive `videos.draft_mode` column, Style menu +
-  toolbar badge). Substitution happens in `prepareRun` — same mechanic as
-  style-at-payload: stored prompts/params stay untouched, the input snapshot
-  records the substituted model (deterministic retries), and the generation
-  row is stamped `draft` (additive column) so cards/timeline badge it.
-- **Finalize**: `runPlanner` plans every node whose selected generation is a
-  draft → cost preview (draft vs final estimate side by side) → re-run on
-  the real models via `runBatch`. Registry tools: `set_draft_mode`,
-  `finalize_video` (`risk: 'spending'`); both SYSTEM prompts teach
-  "explore in draft, finalize once approved".
-
-### 6.2 Vision QC on settle — the generation "linter" (M)
-
-The run engine knows a generation _succeeded_, never whether it is _good_ —
-QC is 100 % human today. Give the assistant eyes.
-
-- Opt-in per video (additive `videos.qc_enabled`). On a successful
-  `generationSettled`, run one cheap vision check through the existing kie
-  client: does the output match the prompt? is the character consistent with
-  the wired design-sheet references? does a storyboard have 9 legible panels
-  and no grid bleed-through?
-- Verdict stored additively (`generations.qc_verdict/qc_notes`), rendered as
-  a badge on generation cards (✓ / ⚠ + issues) with a "Fix with assistant"
-  prefill carrying the notes.
-- Registry tool `review_generation` (chat **and** MCP); batch summaries list
-  non-conforming shots; the wake-up note includes the verdict — enabling
-  "generate the whole film and only wake me for what's wrong". Synergy with
-  6.1: QC the drafts, finalize only what passes.
+Shipped: **6.1** draft mode + finalize, **6.2** vision QC on settle, **6.6**
+variants ×N + compare grid (details in CLAUDE.md). The numbering below is
+deliberately left as-is — code comments and docs reference these section
+numbers.
 
 ### 6.3 Regional feedback — the "select + fix" gesture (M/L)
 
@@ -164,15 +132,7 @@ speak before:
   confirm; exposed to the assistant/MCP as `lint_node` and folded into 6.2's
   QC report.
 
-### 6.6 Variants ×N (S)
-
-Parallel exploration is the norm in creative work; today it is N clicks and
-a manual compare. "Generate 3 variants" on a node → N queue slots, grid
-compare (extension of the shipped A/B modal) with one-click promote
-(`generations:select`). `run_node`/`run_batch` gain `variants?: number`
-(small cap; the cost preview multiplies accordingly).
-
-### 6.7 Later — ambient layer (L, after 6.1–6.3 are live)
+### 6.7 Later — ambient layer (L, after 6.3 is live)
 
 These feed on the signals the loop above produces; do not start them first.
 
@@ -188,9 +148,10 @@ These feed on the signals the loop above produces; do not start them first.
 
 ## Suggested order
 
-1. **Iteration loop** (§6): 6.1 draft mode then 6.2 vision QC — together
-   they change the economics and make `run_batch` genuinely autonomous;
-   6.6 variants is a cheap follow-up, 6.3/6.4/6.5 as they come.
+1. **Iteration loop** (§6), remaining items: 6.5 prompt lint (cheapest — it
+   folds into the QC report that already exists), then 6.3 regional feedback
+   (the gesture that turns the user's judgment into a reusable signal) and
+   6.4 checkpoints as they come.
 2. **OSS hygiene** (§1) — the blockers for a good first impression at
    publication.
 3. **Versioned E2E suite** (§2) — should land before contributors arrive;

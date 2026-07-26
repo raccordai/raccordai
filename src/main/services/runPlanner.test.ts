@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { planRun, type PlannerEdge, type PlannerNode } from './runPlanner'
+import { MAX_VARIANTS } from '@shared/config'
+import { clampVariants, planRun, type PlannerEdge, type PlannerNode } from './runPlanner'
 
 function node(id: string, modelId = 'model/x'): PlannerNode {
   return { id, modelId, label: `L-${id}`, key: `k-${id}` }
@@ -140,5 +141,78 @@ describe('planRun', () => {
       satisfiedNodeIds: []
     })
     expect(plan.order.find((e) => e.id === 'B')!.parents).toEqual(['A'])
+  })
+
+  // ── Variants ×N (§6.6) ────────────────────────────────────────────────────
+
+  it('claims one generation per node by default', () => {
+    const plan = planRun({
+      ...DIAMOND,
+      targetNodeIds: ['D'],
+      reuseTargets: false,
+      satisfiedNodeIds: []
+    })
+    expect(plan.planned.every((e) => e.runs === 1)).toBe(true)
+  })
+
+  it('multiplies the explicit targets only — dependencies still run once', () => {
+    const plan = planRun({
+      ...DIAMOND,
+      targetNodeIds: ['D'],
+      reuseTargets: false,
+      satisfiedNodeIds: [],
+      variants: 3
+    })
+    const byId = Object.fromEntries(plan.order.map((e) => [e.id, e]))
+    expect(byId['D']!.runs).toBe(3)
+    expect(byId['A']!.runs).toBe(1)
+    expect(byId['B']!.runs).toBe(1)
+    expect(byId['C']!.runs).toBe(1)
+  })
+
+  it('gives every explicit target its own N candidates', () => {
+    const plan = planRun({
+      ...DIAMOND,
+      targetNodeIds: ['B', 'C'],
+      reuseTargets: false,
+      satisfiedNodeIds: [],
+      variants: 2
+    })
+    const byId = Object.fromEntries(plan.order.map((e) => [e.id, e]))
+    expect([byId['B']!.runs, byId['C']!.runs]).toEqual([2, 2])
+    expect(byId['A']!.runs).toBe(1)
+  })
+
+  it('reports 0 runs for a node that is skipped, whatever the variant count', () => {
+    const plan = planRun({
+      ...DIAMOND,
+      targetNodeIds: ['D'],
+      reuseTargets: true,
+      satisfiedNodeIds: ['D'],
+      variants: 4
+    })
+    expect(plan.order.find((e) => e.id === 'D')!.runs).toBe(0)
+    expect(plan.planned.some((e) => e.id === 'D')).toBe(false)
+  })
+
+  it('clamps the variant count into [1, MAX_VARIANTS]', () => {
+    expect(clampVariants(undefined)).toBe(1)
+    expect(clampVariants(0)).toBe(1)
+    expect(clampVariants(-3)).toBe(1)
+    expect(clampVariants('nope')).toBe(1)
+    expect(clampVariants(2.7)).toBe(2)
+    expect(clampVariants(MAX_VARIANTS)).toBe(MAX_VARIANTS)
+    expect(clampVariants(99)).toBe(MAX_VARIANTS)
+  })
+
+  it('caps an over-large variant request instead of honouring it', () => {
+    const plan = planRun({
+      ...DIAMOND,
+      targetNodeIds: ['D'],
+      reuseTargets: false,
+      satisfiedNodeIds: [],
+      variants: 99
+    })
+    expect(plan.order.find((e) => e.id === 'D')!.runs).toBe(MAX_VARIANTS)
   })
 })

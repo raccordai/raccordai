@@ -15,6 +15,7 @@ import {
 } from '../events'
 import { mediaDirFor, mimeTypeFor } from '../media/files'
 import { GenerationQueue, isRetryableGenerationError, withRetry } from './genQueue'
+import { clampVariants } from './runPlanner'
 import {
   kieCreateSunoTask,
   kieCreateTask,
@@ -373,14 +374,18 @@ async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Prom
 
 // ── Claim (dedup) ────────────────────────────────────────────────────────────
 
-function claimRun(
-  nodeId: string,
-  videoId: string,
-  inputSnapshot: unknown,
-  reuseSatisfied: boolean,
-  creditsEstimated: number | null,
+function claimRun(args: {
+  nodeId: string
+  videoId: string
+  inputSnapshot: unknown
+  reuseSatisfied: boolean
+  creditsEstimated: number | null
   draft: boolean
-): { generationId: string; reused: boolean; kieTaskId: string | null } {
+  /** §6.6 variants: claim a fresh row even if the node already has runs in
+   *  flight — parallel candidates of the same node are the whole point. */
+  forceNew?: boolean
+}): { generationId: string; reused: boolean; kieTaskId: string | null } {
+  const { nodeId, videoId, inputSnapshot, creditsEstimated, draft } = args
   const db = getDb()
   const rows = db
     .select()
@@ -389,17 +394,19 @@ function claimRun(
     .orderBy(desc(generations.createdAt))
     .all()
 
-  const inFlight = rows.find((g) => g.status === 'running' || g.status === 'pending')
-  if (inFlight) return { generationId: inFlight.id, reused: true, kieTaskId: inFlight.kieTaskId }
+  if (!args.forceNew) {
+    const inFlight = rows.find((g) => g.status === 'running' || g.status === 'pending')
+    if (inFlight) return { generationId: inFlight.id, reused: true, kieTaskId: inFlight.kieTaskId }
 
-  if (reuseSatisfied) {
-    const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
-    const selected = node?.selectedGenerationId
-      ? rows.find((g) => g.id === node.selectedGenerationId)
-      : undefined
-    const success =
-      selected?.status === 'success' ? selected : rows.find((g) => g.status === 'success')
-    if (success) return { generationId: success.id, reused: true, kieTaskId: success.kieTaskId }
+    if (args.reuseSatisfied) {
+      const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
+      const selected = node?.selectedGenerationId
+        ? rows.find((g) => g.id === node.selectedGenerationId)
+        : undefined
+      const success =
+        selected?.status === 'success' ? selected : rows.find((g) => g.status === 'success')
+      if (success) return { generationId: success.id, reused: true, kieTaskId: success.kieTaskId }
+    }
   }
 
   const generationId = randomUUID()
@@ -748,8 +755,8 @@ async function submitGeneration(generationId: string, prep: PreparedRun): Promis
 export async function runNode(
   nodeId: string,
   reuseSatisfied = false,
-  opts?: { forceFinal?: boolean }
-): Promise<{ generationId: string; kieTaskId: string }> {
+  opts?: { forceFinal?: boolean; variants?: number }
+): Promise<{ generationId: string; kieTaskId: string; generationIds: string[] }> {
   // Fail fast on the one config error the user can fix immediately — every
   // other submission error surfaces asynchronously on the generation row.
   if (!getKieApiKey()) {
@@ -757,25 +764,56 @@ export async function runNode(
       "kie.ai API key is not configured. Add it in the app's Integrations section on the home page."
     )
   }
+  const variants = clampVariants(opts?.variants ?? 1)
   const prep = await prepareRun(nodeId, opts)
 
   const estimate = estimateCreditsFor(prep.modelId, prep.inputSnapshot.params)
-  const claim = claimRun(
+
+  // Variants ×N (§6.6): ONE prepare (so every candidate submits the byte-identical
+  // payload — including the same uploaded inputs) and N independent claims, each
+  // taking its own queue slot. Dedup is bypassed on purpose: parallel candidates
+  // of the same node are exactly what the user asked for.
+  if (variants > 1) {
+    const generationIds = Array.from(
+      { length: variants },
+      () =>
+        claimRun({
+          nodeId,
+          videoId: prep.videoId,
+          inputSnapshot: prep.inputSnapshot,
+          reuseSatisfied: false,
+          creditsEstimated: estimate,
+          draft: prep.draft,
+          forceNew: true
+        }).generationId
+    )
+    broadcastGenerationsChanged({ videoId: prep.videoId, nodeId })
+    for (const id of generationIds) queue.enqueue(id, () => submitGeneration(id, prep))
+    return { generationId: generationIds[0] as string, kieTaskId: '', generationIds }
+  }
+
+  const claim = claimRun({
     nodeId,
-    prep.videoId,
-    prep.inputSnapshot,
+    videoId: prep.videoId,
+    inputSnapshot: prep.inputSnapshot,
     reuseSatisfied,
-    estimate,
-    prep.draft
-  )
-  if (claim.reused) return { generationId: claim.generationId, kieTaskId: claim.kieTaskId ?? '' }
+    creditsEstimated: estimate,
+    draft: prep.draft
+  })
+  if (claim.reused) {
+    return {
+      generationId: claim.generationId,
+      kieTaskId: claim.kieTaskId ?? '',
+      generationIds: [claim.generationId]
+    }
+  }
   const generationId = claim.generationId
   broadcastGenerationsChanged({ videoId: prep.videoId, nodeId })
 
   // Queued: submission happens when a concurrency slot frees up. The task id
   // is therefore not known yet — callers track the generation id.
   queue.enqueue(generationId, () => submitGeneration(generationId, prep))
-  return { generationId, kieTaskId: '' }
+  return { generationId, kieTaskId: '', generationIds: [generationId] }
 }
 
 export async function refreshStatus(nodeId: string): Promise<{ status: string }> {
@@ -815,17 +853,21 @@ export async function refreshStatus(nodeId: string): Promise<{ status: string }>
   return { status: gen.status }
 }
 
+/**
+ * Cancels EVERY run in flight on the node — a variants batch (§6.6) puts N of
+ * them there and one Cancel click must stop the whole exploration, not peel
+ * candidates off one at a time.
+ */
 export function cancelGeneration(nodeId: string): { cancelled: boolean } {
-  const rows = getDb()
+  const inFlight = getDb()
     .select()
     .from(generations)
     .where(eq(generations.nodeId, nodeId))
     .orderBy(desc(generations.createdAt))
     .all()
-  const gen = rows.find((g) => g.status === 'running' || g.status === 'pending')
-  if (!gen) return { cancelled: false }
-  failGeneration(gen.id, 'Cancelled by user.')
-  return { cancelled: true }
+    .filter((g) => g.status === 'running' || g.status === 'pending')
+  for (const gen of inFlight) failGeneration(gen.id, 'Cancelled by user.')
+  return { cancelled: inFlight.length > 0 }
 }
 
 /** Attach the client-extracted last frame (JPEG) to a generation. */

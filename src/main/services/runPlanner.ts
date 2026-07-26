@@ -11,8 +11,19 @@
  *    in batch mode (`reuseTargets`) — a direct click always regenerates;
  *  - a node that reuses and is already satisfied is skipped (claims no new
  *    generation) but its ancestors remain in the walk: any of them lacking an
- *    output still runs (historical parity with the renderer orchestration).
+ *    output still runs (historical parity with the renderer orchestration);
+ *  - variants ×N (§6.6) multiply the EXPLICIT TARGETS only: dependencies are
+ *    shared context, generating them twice would just cost credits.
  */
+
+import { MAX_VARIANTS } from '@shared/config'
+
+/** Variant count coerced into [1, MAX_VARIANTS] (non-numbers → 1). */
+export function clampVariants(variants: unknown): number {
+  const n = Math.floor(Number(variants))
+  if (!Number.isFinite(n) || n < 1) return 1
+  return Math.min(n, MAX_VARIANTS)
+}
 
 export interface PlannerNode {
   id: string
@@ -32,6 +43,8 @@ export interface PlanEntry {
   label: string
   /** True when this node will claim a NEW generation. */
   run: boolean
+  /** How many generations it claims: 0 when it doesn't run, N on a variants target. */
+  runs: number
   /** `reuseSatisfied` flag to pass to the engine when running. */
   reuse: boolean
   /** Direct parents inside the walked set — the nodes to await before running. */
@@ -53,7 +66,10 @@ export function planRun(args: {
   reuseTargets: boolean
   /** Ids whose selected generation is already a success. */
   satisfiedNodeIds: Iterable<string>
+  /** §6.6 — parallel candidates claimed per explicit target (default 1). */
+  variants?: number
 }): RunPlan {
+  const variants = clampVariants(args.variants ?? 1)
   const nodesById = new Map(args.nodes.map((n) => [n.id, n]))
   const satisfied = new Set(args.satisfiedNodeIds)
   const targets = new Set(args.targetNodeIds)
@@ -80,10 +96,12 @@ export function planRun(args: {
 
     const isAsset = node.modelId === 'studio/asset'
     const reuse = !targets.has(id) || args.reuseTargets
+    const run = !isAsset && !(reuse && satisfied.has(id))
     order.push({
       id,
       label: node.label ?? node.key,
-      run: !isAsset && !(reuse && satisfied.has(id)),
+      run,
+      runs: run ? (targets.has(id) ? variants : 1) : 0,
       reuse,
       parents
     })
