@@ -8,6 +8,8 @@ import { toGeneration, withAssetUrl } from '../media/urls'
 import { getLocalApiStatus } from '../server'
 import * as graphHistory from '../services/graphHistory'
 import * as aiService from '../services/ai'
+import * as annotationsService from '../services/annotations'
+import * as checkpointsService from '../services/checkpoints'
 import * as backupService from '../services/backup'
 import * as updaterService from '../services/updater'
 import * as chatService from '../services/chat'
@@ -148,6 +150,7 @@ export function registerIpcHandlers(): void {
   handle('edges:connect', (input) => graph.connectNodes(input))
   handle('edges:disconnect', ({ edgeId }) => graph.disconnectEdge(edgeId))
   handle('edges:reorder', (input) => graph.reorderEdges(input))
+  handle('edges:rewire', ({ edgeId, targetHandle }) => graph.rewireEdge(edgeId, targetHandle))
 
   handle('history:state', ({ videoId }) => graphHistory.historyState(videoId))
   handle('history:undo', ({ videoId }) => {
@@ -204,6 +207,31 @@ export function registerIpcHandlers(): void {
   handle('generations:planFinalize', ({ videoId }) => runBatchService.planFinalize(videoId))
   handle('generations:reviewGeneration', ({ generationId }) =>
     qcService.reviewGeneration(generationId)
+  )
+
+  // §6.3 regional feedback
+  handle('annotations:list', ({ generationId }) => annotationsService.listAnnotations(generationId))
+  handle('annotations:add', (input) => annotationsService.addAnnotation(input))
+  handle('annotations:delete', ({ annotationId }) =>
+    annotationsService.deleteAnnotation(annotationId)
+  )
+  handle('annotations:createEditNode', ({ generationId }) =>
+    annotationsService.createEditNodeFromAnnotations(generationId)
+  )
+
+  // §6.4 checkpoints
+  handle('checkpoints:list', ({ videoId }) => checkpointsService.listCheckpoints(videoId))
+  handle('checkpoints:create', ({ videoId, name }) =>
+    checkpointsService.createCheckpoint(videoId, name)
+  )
+  handle('checkpoints:delete', ({ checkpointId }) =>
+    checkpointsService.deleteCheckpoint(checkpointId)
+  )
+  handle('checkpoints:diff', ({ checkpointId }) =>
+    checkpointsService.diffAgainstCurrent(checkpointId)
+  )
+  handle('checkpoints:restore', ({ checkpointId }) =>
+    checkpointsService.restoreCheckpoint(checkpointId)
   )
   handle('generations:finalizeVideo', ({ videoId }) => runBatchService.finalizeVideo(videoId).done)
   handle('generations:refreshStatus', ({ nodeId }) => runEngine.refreshStatus(nodeId))

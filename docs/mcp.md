@@ -53,6 +53,17 @@ and promotes them, `plan_only: true` for the draft-vs-final cost preview), and
 (automatic at settle when the video's QC option is on — verdict and notes come
 back in `get_generations`).
 
+Three free tools frame the spend (§6.3/6.4/6.5). `lint_node` applies the app's
+prompting doctrine before a run — reference wired but never addressed, design
+sheet on a frame anchor, storyboard shot without the anti-grid guard, param
+outside the model's enums — and each finding carries the fix an agent can apply
+itself. `get_annotations` returns the user's marks on an output (a region of the
+frame or a timecode, plus what they said), and `create_edit_node` turns them
+into a pre-wired `gpt-image-2-image-to-image` fix node. `create_checkpoint` /
+`diff_checkpoint` / `restore_checkpoint` capture, compare and roll back a whole
+graph — the restore is `risk: 'destructive'` (it deletes what was created since)
+and lands as ONE undo step.
+
 Parallel exploration rides the run tools themselves: `run_node` and `run_batch`
 accept `variants: N` (2–4) to claim N candidates of the same node — one queue
 slot and one credit charge each, `run_node` returning every `generationIds`.

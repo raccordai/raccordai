@@ -11,6 +11,7 @@ import {
 import { onGenerationSettled } from '../bus'
 import { broadcastChatUpdate, broadcastWorkflowChanged } from '../events'
 import { AGENT_TOOLS } from '../mcp/registry'
+import { diffAgainstCurrent } from './checkpoints'
 import { finalizeVideo, planBatch, planFinalize, startBatch, videoNodeTargets } from './runBatch'
 import { clampVariants } from './runPlanner'
 import {
@@ -85,11 +86,14 @@ How to work:
 - Prefer creating structure (nodes, connections, prompts) directly; ask before deleting several nodes. Whether you may launch generations on your own is decided by the app (see the RUN APPROVAL line below) — don't double-ask when it already gates you.
 - Position nodes on a left-to-right flow (x: 0, 420, 840…; y spaced by ~350) so the graph stays readable. If you don't have a real layout in mind, omit positions entirely — the app lays the graph out itself. NEVER give several nodes the same coordinates, and never pass 0/0 to mean "anywhere": that is what piles nodes on top of each other.
 - import_workflow with replace=true erases the existing graph — only with explicit user consent.
-- Destructive tools (remove_node, delete_video, delete_project, delete_asset) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call. Spending tools (run_node, run_batch, finalize_video, review_generation) follow the SAME protocol whenever run approval is on — the card then shows the estimated credit cost. Emit at most ONE gated call per turn: the user approves the last card, so a second one would be ambiguous. finalize_video with plan_only: true is a free preview and is never gated.
+- Destructive tools (remove_node, delete_video, delete_project, delete_asset, restore_checkpoint) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call. Spending tools (run_node, run_batch, finalize_video, review_generation) follow the SAME protocol whenever run approval is on — the card then shows the estimated credit cost. Emit at most ONE gated call per turn: the user approves the last card, so a second one would be ambiguous. finalize_video with plan_only: true is a free preview and is never gated.
 - When you launch run_node, the app automatically wakes you with a message once that generation finishes (success or failure) — you can tell the user you'll report back, then end your turn. Never poll get_generations to wait.
 - To generate SEVERAL shots, prefer ONE run_batch call (targetNodeIds, or all_videos: true for every video node) over chained run_node calls: it runs the whole subgraph dependency-aware — shared upstreams generate once, independent branches in parallel, already-satisfied nodes are reused — and wakes you as each generation settles.
 - Explore in draft, finalize once approved: draft mode (set_draft_mode) substitutes every run with the model's cheap draft equivalent (5–10× cheaper, generations stamped "draft") — propose it whenever the user is iterating. Once they approve the results, finalize_video re-runs the draft keepers on the REAL models and promotes them; call it with plan_only: true first and show the draft-vs-final cost.
 - When a direction is uncertain (a look to settle, a shot the user keeps rejecting), run_node/run_batch accept variants: 2–4 — N candidates of the SAME node generated in parallel, cost ×N, that the user arbitrates in the app's compare grid. Say what the multiplied cost is when you propose it, use it on ONE pivotal node rather than on a whole batch, and prefer draft mode for the exploration. Once they pick, select_generation records the keeper.
+- lint_node is free and catches before the spend what the QC catches after: a reference wired but never addressed in the prompt, a design sheet on a frame anchor, a storyboard shot without the anti-grid guard, a param the model rejects. Run it on the nodes you just wrote prompts for, and fix what it reports before proposing a run.
+- The user annotates outputs directly on the frame (a region, or a timecode on a clip): get_annotations returns that judgment verbatim. On an image, create_edit_node builds the pre-wired fix node from those notes — read them first and refine its prompt if needed; on a clip there is no in-place edit, so fold the notes into a new shot prompt.
+- Before anything structural (restructuring a sequence, replacing a model everywhere, a large import), create_checkpoint first and say you did — it costs nothing and makes the change reversible. diff_checkpoint shows what a restore would change; restore_checkpoint is destructive (it deletes the nodes created since, with their generations) and goes through the approval card.
 - When the video has vision QC enabled, every successful image generation is auto-reviewed and your wake-up message carries the verdict: leave "pass" alone, and on "WARN" read the notes, look at the output and propose a concrete fix (edit node, new prompt, re-run). review_generation re-checks a single generation on demand.
 - The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a character/décor/prop sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.
 - Plan before building: on any multi-shot build, call present_plan (structured shots + models + estimated credits + total) BEFORE import_workflow. The user gets an approval card with Approve / Request changes — WAIT for their reply before building. present_plan is the gate on the PRODUCTION PLAN; the run-approval card is the gate on the SPEND. Don't present a plan again just to launch runs that are already gated — that would ask the user twice.
@@ -112,7 +116,7 @@ Every graph tool here takes an explicit videoId — always pass the id of the vi
 
 User messages may start with an <app-context> block injected by the app (the user did not write it and does not see it): a snapshot of what they are looking at at send time — route, projectId/videoId when they are inside a project or video, selectedNodeId, lastGenerationError. When it names a project or video, that is the one "this project"/"this video" refers to — use those ids directly instead of asking. Use it silently; never quote the block back. open_video switches the app to a video's editor (do it when you finish building one so the user lands on the result); focus_node centers the editor on a node of the video being viewed.
 
-Destructive tools (remove_node, delete_video, delete_project, delete_asset) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call. Spending tools (run_node, run_batch, finalize_video, review_generation) follow the SAME protocol whenever run approval is on — the card then shows the estimated credit cost. Emit at most ONE gated call per turn. finalize_video with plan_only: true is free and never gated.
+Destructive tools (remove_node, delete_video, delete_project, delete_asset, restore_checkpoint) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call. Spending tools (run_node, run_batch, finalize_video, review_generation) follow the SAME protocol whenever run approval is on — the card then shows the estimated credit cost. Emit at most ONE gated call per turn. finalize_video with plan_only: true is free and never gated.
 
 How to deliver a full project:
 1. Brief: subject, tone, duration, aspect ratio. Turn the duration into a shot plan: clips are 4-12s (8s is the sweet spot), so a 2.5-minute piece is ~18-19 shots — organize them as scenes of 3-4 shots (establishing → action → emotion). Ask only what you truly cannot infer.
@@ -121,7 +125,7 @@ How to deliver a full project:
 4. Build the graph in ONE import_workflow call (nodes + edges; left-to-right positions x: 0, 420, 840…, y by scene ~350, or omit positions and let the app lay it out — never reuse one coordinate for several nodes): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); NO lastFrame chaining between shots — each shot is a CUT to a new camera setup sharing the same references (chaining a generated closing frame into the next clip glitches the seam), and real continuity, when needed, goes through video extend (previous clip into reference_video_urls); one Suno music node per video matching the style's music hint.
 4. Build the graph in ONE import_workflow call (nodes + edges, left-to-right positions x: 0, 420, 840…, y by scene ~350): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); NO lastFrame chaining between shots — each shot is a CUT to a new camera setup sharing the same references (chaining a generated closing frame into the next clip glitches the seam), and real continuity, when needed, goes through video extend (previous clip into reference_video_urls); one Suno music node per video matching the style's music hint.
 5. docs "prompting:<model id>" before writing ANY prompt. English prompts: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
-6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. That gate covers the PRODUCTION PLAN; the SPEND is gated separately by the run-approval card, so don't ask twice. To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll. For iteration-heavy work, propose draft mode (set_draft_mode: every run substituted with a cheap draft equivalent), then finalize_video (plan_only: true first for the draft-vs-final cost) re-runs the approved keepers on the real models; when vision QC is enabled, wake-up messages carry a pass/warn verdict per image generation — only dig into the warns. On a pivotal node whose direction is uncertain, variants: 2–4 on run_node/run_batch generates that many candidates in parallel (cost ×N, announce it) for the user to arbitrate in the compare grid.
+6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. That gate covers the PRODUCTION PLAN; the SPEND is gated separately by the run-approval card, so don't ask twice. To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll. For iteration-heavy work, propose draft mode (set_draft_mode: every run substituted with a cheap draft equivalent), then finalize_video (plan_only: true first for the draft-vs-final cost) re-runs the approved keepers on the real models; when vision QC is enabled, wake-up messages carry a pass/warn verdict per image generation — only dig into the warns. On a pivotal node whose direction is uncertain, variants: 2–4 on run_node/run_batch generates that many candidates in parallel (cost ×N, announce it) for the user to arbitrate in the compare grid. Run the free lint_node on the shot nodes you wrote before proposing any run, and create_checkpoint before a structural rework — both cost nothing and both save credits.
 
 The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a design sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.`
 
@@ -521,7 +525,21 @@ const CHAT_LABELS: Record<string, (args: Record<string, unknown>, result: unknow
   add_asset_from_file: (_a, r) => `Asset imported · ${(r as { name?: string }).name ?? ''}`,
   update_asset: () => 'Asset updated',
   delete_asset: () => 'Asset deleted',
-  publish_design: (_a, r) => `Design published · ${(r as { name?: string }).name ?? ''}`
+  publish_design: (_a, r) => `Design published · ${(r as { name?: string }).name ?? ''}`,
+  lint_node: (_a, r) => {
+    const count = (r as { findings?: unknown[] }).findings?.length ?? 0
+    return count === 0 ? 'Lint · clean' : `Lint · ${count} finding${count === 1 ? '' : 's'}`
+  },
+  get_annotations: (_a, r) => `Read notes · ${(r as unknown[]).length}`,
+  create_edit_node: () => 'Fix node created',
+  create_checkpoint: (_a, r) => `Checkpoint saved · ${(r as { name?: string }).name ?? ''}`,
+  list_checkpoints: () => 'Read checkpoints',
+  diff_checkpoint: (_a, r) => {
+    const diff = r as { identical?: boolean; name?: string }
+    return `Checkpoint diff · ${diff.identical ? 'no change' : (diff.name ?? '')}`
+  },
+  restore_checkpoint: (_a, r) =>
+    `Checkpoint restored · ${(r as { nodeCount?: number }).nodeCount ?? 0} nodes`
 }
 
 /**
@@ -588,6 +606,16 @@ function describeAction(name: string, args: Record<string, unknown>): string {
     case 'remove_node': {
       const ref = graph.getNodeRef(String(args['nodeId'] ?? ''))
       return `Delete node “${ref?.label ?? String(args['nodeId'] ?? '?')}” (and its generations)`
+    }
+    // §6.4 — the card quotes what the rollback actually costs the user.
+    case 'restore_checkpoint': {
+      try {
+        const diff = diffAgainstCurrent(String(args['checkpointId'] ?? ''))
+        const dropped = diff.added.length
+        return `Restore checkpoint “${diff.name}”${dropped > 0 ? ` — deletes ${dropped} node${dropped === 1 ? '' : 's'} created since` : ''}`
+      } catch {
+        return 'Restore this checkpoint'
+      }
     }
     default:
       return name.replace(/_/g, ' ')

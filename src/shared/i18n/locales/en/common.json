@@ -322,6 +322,49 @@
       "scrub": "Scrub every video",
       "zoom": "Zoom"
     },
+    "annotate": {
+      "open": "Note what is wrong on this output",
+      "title": "Note what to fix",
+      "hintImage": "Drag on the image to circle the problem, then describe it. Without a selection the note applies to the whole frame.",
+      "hintVideo": "Play the clip, mark the moment that is wrong, then describe it.",
+      "empty": "No notes yet.",
+      "placeholder": "e.g. the left hand is deformed",
+      "add": "Add the note",
+      "remove": "Delete this note",
+      "wholeFrame": "Whole frame",
+      "markTime": "Mark this moment",
+      "createEditNode": "Create the fix node",
+      "editNodeCreated": "Fix node created, wired to this output."
+    },
+    "checkpoints": {
+      "title": "Checkpoints",
+      "open": "Checkpoints — capture the graph before a risky change",
+      "empty": "No checkpoint yet. Capture one before a risky change.",
+      "namePlaceholder": "e.g. before restructuring",
+      "create": "Capture the graph",
+      "nodeCount_one": "{{count}} node",
+      "nodeCount_other": "{{count}} nodes",
+      "restore": "Restore",
+      "delete": "Delete this checkpoint",
+      "deleteConfirm": "Delete the checkpoint “{{name}}”? The graph is not affected.",
+      "diffTitle": "Restoring “{{name}}” would:",
+      "identical": "This checkpoint matches the current graph.",
+      "restoreConfirm": "Restore",
+      "restored": "Graph restored ({{count}} selected outputs re-applied). Undo brings you back.",
+      "restoredMissing": "{{count}} selected outputs could not be restored — those generations were deleted.",
+      "added": "add back {{count}} node(s) it did not have",
+      "removed": "delete {{count}} node(s) created since, with their generations",
+      "changed": "revert {{count}} node(s) to their captured prompt/params",
+      "edges": "rewire {{count}} connection(s)",
+      "selections": "change the selected output on {{count}} node(s)"
+    },
+    "lint": {
+      "fix": {
+        "appendPrompt": "Add to the prompt",
+        "setParam": "Use the default",
+        "rewire": "Rewire as a reference"
+      }
+    },
     "variants": {
       "label": "Variants",
       "run": "Generate {{n}} candidates in parallel and compare them",

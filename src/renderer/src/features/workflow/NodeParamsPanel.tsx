@@ -27,12 +27,14 @@ import type { GraphNode } from '@shared/ipc/contracts'
 import type { ModelDefinition } from '@shared/models'
 import { defaultParamsFor, getModel, videoDefaultParams } from '@shared/models'
 import { getStyle } from '@shared/styles/registry'
+import { lintNode, type LintFix } from '@shared/promptLint'
 import { Button } from '@renderer/components/ui/Button'
 import { Lightbox } from '@renderer/components/Lightbox'
 import { MentionMenu, useMentionMenu, type MentionItem } from '@renderer/components/ui/MentionMenu'
 import { VideoThumb } from '@renderer/components/VideoThumb'
 import { Label, Select, TextArea, TextField } from '@renderer/components/ui/Input'
 import { useConfirm } from '@renderer/components/feedback/Feedback'
+import { AnnotateModal } from './AnnotateModal'
 import { incomingConnectionsFor, useWorkflowGraph } from './workflowContext'
 import { downloadMedia } from '@renderer/lib/downloadMedia'
 import { invoke } from '@renderer/lib/ipc'
@@ -93,6 +95,7 @@ export function NodeParamsPanel({
   return (
     <ModelNodeEditor
       node={node}
+      projectId={projectId}
       onClose={onClose}
       onDelete={handleDelete}
       onRun={onRun}
@@ -290,6 +293,7 @@ function AssetNodeEditor({
 // ─── Model node editor ────────────────────────────────────────────────────
 function ModelNodeEditor({
   node,
+  projectId,
   onClose,
   onDelete,
   onRun,
@@ -297,6 +301,7 @@ function ModelNodeEditor({
   onAskAssistant
 }: {
   node: GraphNode
+  projectId: string
   onClose: () => void
   onDelete: () => void
   onRun: () => void
@@ -316,6 +321,7 @@ function ModelNodeEditor({
     graphKeys.graph(node.videoId),
     ['history']
   ])
+  const rewireEdgeMut = useIpcMutation('edges:rewire', [graphKeys.graph(node.videoId), ['history']])
   const generations = useNodeGenerations(node.id).data
   /** Generations picked for the compare grid (§6.6: 2 to MAX_VARIANTS candidates). */
   const [compareIds, setCompareIds] = useState<string[]>([])
@@ -387,6 +393,31 @@ function ModelNodeEditor({
     return generations.find((g) => g.status === 'success' && g.url)?.url ?? undefined
   }, [model?.kind, generations, node.selectedGenerationId])
 
+  // Prompt lint (§6.5): pure, computed locally from the graph the panel already
+  // holds — no round trip, so it re-runs live as the user types params.
+  const projectAssets = useProjectAssets(projectId).data
+  const lintFindings = useMemo(() => {
+    const designIdOf = (source: GraphNode | undefined): string | undefined => {
+      const sourceParams = (source?.params ?? {}) as { designId?: unknown; assetId?: unknown }
+      if (typeof sourceParams.designId === 'string') return sourceParams.designId
+      if (typeof sourceParams.assetId === 'string') {
+        return projectAssets?.find((a) => a.id === sourceParams.assetId)?.designId ?? undefined
+      }
+      return undefined
+    }
+    return lintNode({
+      modelId: node.modelId,
+      params,
+      connections: connections.map((c) => ({
+        edgeId: c.edge.id,
+        handleKey: c.edge.targetHandle,
+        ...(c.alias ? { alias: c.alias } : {}),
+        ...(c.source ? { sourceLabel: c.source.label ?? c.source.key } : {}),
+        ...(designIdOf(c.source) ? { designId: designIdOf(c.source) } : {})
+      }))
+    })
+  }, [node.modelId, params, connections, projectAssets])
+
   if (!model) {
     return (
       <PanelShell title="Unknown model" onClose={onClose} onDelete={onDelete}>
@@ -424,6 +455,20 @@ function ModelNodeEditor({
     const next = { ...params, [key]: value }
     setParams(next)
     updateParams.mutate({ nodeId: node.id, params: next })
+  }
+
+  /** Applies a lint fix (§6.5) — one journaled mutation, no dialog. */
+  function applyLintFix(fix: LintFix): void {
+    if (fix.kind === 'appendPrompt') {
+      const current = (params.prompt as string | undefined) ?? ''
+      commit('prompt', current.trim() ? `${current.trim()} ${fix.text}` : fix.text)
+      return
+    }
+    if (fix.kind === 'setParam') {
+      commit(fix.key, fix.value)
+      return
+    }
+    rewireEdgeMut.mutate({ edgeId: fix.edgeId, targetHandle: fix.targetHandle })
   }
 
   function insertIntoPrompt(token: string) {
@@ -623,6 +668,36 @@ function ModelNodeEditor({
         </div>
       )}
 
+      {/* Prompt lint (§6.5) — what the prompting doctrine would say about this
+          node, before a credit is spent. Each finding carries its own fix. */}
+      {lintFindings.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {lintFindings.map((finding) => (
+            <div
+              key={`${finding.rule}:${finding.subject ?? ''}`}
+              className={`flex gap-2 rounded-md border p-2.5 text-[11px] leading-relaxed ${
+                finding.severity === 'error'
+                  ? 'border-danger/40 bg-danger/5 text-danger'
+                  : 'border-warning/40 bg-warning/5 text-warning'
+              }`}
+            >
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div>{finding.message}</div>
+                {finding.fix && (
+                  <button
+                    onClick={() => applyLintFix(finding.fix!)}
+                    className="mt-1 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-200 hover:bg-neutral-700"
+                  >
+                    {t(`editor.lint.fix.${finding.fix.kind}` as never)}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {model.promptingNotes && (
         <div className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 p-3 text-[11px] leading-relaxed text-neutral-400 whitespace-pre-wrap">
           {model.promptingNotes}
@@ -811,6 +886,7 @@ function ModelNodeEditor({
                 key={g.id}
                 generation={g}
                 model={model}
+                videoId={node.videoId}
                 isSelected={node.selectedGenerationId === g.id}
                 onUseThis={() => selectGen.mutate({ nodeId: node.id, generationId: g.id })}
                 defaultAssetName={node.label ?? model.label}
@@ -1237,6 +1313,7 @@ type GenRow = {
 function GenerationCard({
   generation: g,
   model,
+  videoId,
   isSelected,
   onUseThis,
   defaultAssetName,
@@ -1248,6 +1325,7 @@ function GenerationCard({
 }: {
   generation: GenRow
   model: ModelDefinition
+  videoId: string
   isSelected: boolean
   onUseThis: () => void
   defaultAssetName: string
@@ -1269,6 +1347,8 @@ function GenerationCard({
   const [error, setError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [zoomed, setZoomed] = useState(false)
+  /** §6.3 — the "select + fix" modal for this output. */
+  const [annotating, setAnnotating] = useState(false)
 
   async function handleDownload() {
     if (!g.url) return
@@ -1416,6 +1496,16 @@ function GenerationCard({
               <Maximize2 className="h-3 w-3" />
             </button>
           )}
+          {/* §6.3 — note a region (image) or a timecode (clip) on this output. */}
+          {g.status === 'success' && g.url && model.kind !== 'audio' && (
+            <button
+              onClick={() => setAnnotating(true)}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+              title={t('editor.annotate.open')}
+            >
+              <Sparkles className="h-3 w-3" />
+            </button>
+          )}
           {onToggleCompare && (
             <button
               onClick={onToggleCompare}
@@ -1537,6 +1627,18 @@ function GenerationCard({
           url={g.url}
           kind={model.kind === 'video' ? 'video' : 'image'}
           onClose={() => setZoomed(false)}
+        />
+      )}
+
+      {annotating && g.url && (
+        <AnnotateModal
+          generationId={g.id}
+          videoId={videoId}
+          url={g.url}
+          kind={model.kind === 'video' ? 'video' : 'image'}
+          nodeLabel={nodeLabel}
+          onClose={() => setAnnotating(false)}
+          onAskAssistant={onAskAssistant}
         />
       )}
     </li>

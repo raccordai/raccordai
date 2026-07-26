@@ -1,4 +1,5 @@
 import type { ModelKind } from '@shared/models'
+import { formatFindings, type LintFinding } from '@shared/promptLint'
 
 /**
  * Vision QC (§6.2) — the pure half: prompt construction and verdict parsing.
@@ -77,4 +78,23 @@ export function parseQcVerdict(text: string): QcVerdictResult {
     throw new Error(`QC reply has an unknown verdict: ${String(verdict)}`)
   }
   return { verdict, notes: typeof notes === 'string' ? notes.trim() : '' }
+}
+
+/**
+ * Folds the prompt lint (§6.5) into the vision verdict: the linter sees what
+ * the image cannot show (a reference wired but never addressed, a param the
+ * model rejects), so its findings belong in the same report. A `pass` only
+ * degrades to `warn` on a BLOCKING finding — a stylistic nudge must not
+ * re-open a shot the reviewer accepted.
+ */
+export function foldLintIntoVerdict(
+  result: QcVerdictResult,
+  findings: LintFinding[]
+): QcVerdictResult {
+  if (findings.length === 0) return result
+  const blocking = findings.some((f) => f.severity === 'error')
+  const verdict = result.verdict === 'pass' && !blocking ? 'pass' : 'warn'
+  if (verdict === 'pass') return result
+  const lintBlock = `Prompt lint:\n${formatFindings(findings)}`
+  return { verdict, notes: [result.notes, lintBlock].filter(Boolean).join('\n\n') }
 }

@@ -47,6 +47,14 @@ Typical session:
      run_node / run_batch accept variants: N (2–4) to generate N candidates of
      the same node in parallel (cost ×N) — the user arbitrates them in the
      app's compare grid, or select_generation picks the keeper.
+  7. Free safety rails, use them: lint_node checks a node BEFORE the spend
+     (undeclared reference, sheet on a frame anchor, missing anti-grid guard,
+     param outside the model's enums) — run it on every prompt you write.
+     create_checkpoint captures the graph before a structural rework;
+     diff_checkpoint shows what a restore would change, restore_checkpoint
+     rolls back in one undo step. get_annotations returns what the user
+     circled on an output and said about it — create_edit_node turns those
+     notes into a pre-wired fix node (images only).
 
 Conventions:
   - Position nodes left-to-right (x: 0, 420, 840…; y spaced ~350). Omitting positions is fine —

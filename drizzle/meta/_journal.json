@@ -71,6 +71,13 @@
       "when": 1785004026023,
       "tag": "0009_shiny_nehzno",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1785052056705,
+      "tag": "0010_shallow_marauders",
+      "breakpoints": true
     }
   ]
 }

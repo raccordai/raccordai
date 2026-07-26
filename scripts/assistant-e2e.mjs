@@ -220,8 +220,11 @@ async function main() {
   await win.waitForTimeout(1200)
 
   // API key: the chat fails fast without one. Only set it if none is configured.
+  // The header gear is a BUTTON (a toggle since the shortcut-registry work), not
+  // a link — the old `a[href*="/settings"]` only ever matched the missing-key
+  // banner, so this step broke as soon as a key was configured.
   let createdKey = false
-  await win.locator('a[href*="/settings"]').first().click()
+  await win.getByRole('button', { name: 'Settings' }).first().click()
   await win.waitForTimeout(700)
   const keyInput = win.locator('input[placeholder*="API key" i]')
   if ((await keyInput.count()) > 0) {

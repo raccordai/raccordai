@@ -8,6 +8,8 @@
  * without editing any prompt.
  */
 
+import { ANTI_GRID_GUARD } from '../models/seedance2-prompting'
+
 export interface WorkflowTemplateNode {
   key: string
   modelId: string
@@ -391,7 +393,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '[CHARACTER] matches the character design @Image1 (reference only — the sheet must not appear on screen). ' +
               '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 1-3. ' +
               'Shot 1: wide establishing shot of [PLACE], [CHARACTER] walks into frame, slow pan following the character, wind moving through the scene. ' +
-              'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
+              `${ANTI_GRID_GUARD} ` +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
             applyVideoStyle: true,
@@ -415,7 +417,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 4-6. ' +
               'New camera setup: this is a cut, not a continuation of the previous shot. ' +
               'Shot 1: dynamic medium shot, [CHARACTER] [ACTION], fluid animation on the movement, dramatic camera tilt at the peak of the action. ' +
-              'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
+              `${ANTI_GRID_GUARD} ` +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
             applyVideoStyle: true,
@@ -439,7 +441,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
               '@Image2 is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom; this shot covers panels 7-9. ' +
               'New camera setup: this is a cut, not a continuation of the previous shot. ' +
               "Shot 1: slow push-in close-up on [CHARACTER]'s face, a quiet emotional beat closing the scene, eyes catching the light. " +
-              'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout. ' +
+              `${ANTI_GRID_GUARD} ` +
               '2D anime style, high-definition, rich detail; faces stable, smooth motion, no subtitles, no watermarks.',
             aspect_ratio: '16:9',
             applyVideoStyle: true,

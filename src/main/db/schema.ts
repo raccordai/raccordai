@@ -252,3 +252,64 @@ export const chatThreads = sqliteTable('chat_threads', {
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull()
 })
+
+/**
+ * Regional feedback (§6.3) — the user's judgment on one generation, captured
+ * where they saw the problem: a normalized region on an image, or a timecode
+ * on a video, plus a plain-language comment. They compose the prompt of a
+ * pre-wired edit node (or an assistant request) and are the raw signal the
+ * taste memory (§6.7) will distill.
+ */
+export const generationAnnotations = sqliteTable(
+  'generation_annotations',
+  {
+    id: text('id').primaryKey(),
+    generationId: text('generation_id')
+      .notNull()
+      .references(() => generations.id, { onDelete: 'cascade' }),
+    videoId: text('video_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    /** Normalized {x,y,w,h} in [0,1] — null for a whole-frame or timecode note. */
+    region: text('region', { mode: 'json' }).$type<{
+      x: number
+      y: number
+      w: number
+      h: number
+    }>(),
+    /** Seconds into the clip (video notes); null on images. */
+    timecodeSec: real('timecode_sec'),
+    comment: text('comment').notNull(),
+    createdAt: integer('created_at').notNull()
+  },
+  (table) => [index('annotations_by_generation').on(table.generationId)]
+)
+
+/**
+ * Named checkpoints (§6.4) — the safety net that authorizes boldness.
+ *
+ * Two representations of the same capture, on purpose: `snapshot` holds the
+ * raw node/edge rows and is what a restore replays (same diff-restore as undo,
+ * so nodes that survive keep their identity AND their generations), while
+ * `workflow` holds the portable workflow-JSON v1 export used for the diff and
+ * for exporting a checkpoint elsewhere. `selections` records the chosen output
+ * per node KEY — ids alone would not survive a graph rebuilt from JSON.
+ */
+export const videoCheckpoints = sqliteTable(
+  'video_checkpoints',
+  {
+    id: text('id').primaryKey(),
+    videoId: text('video_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** Workflow JSON v1, the exact shape import_workflow accepts (diff + export). */
+    workflow: text('workflow', { mode: 'json' }).notNull(),
+    /** Raw {nodes, edges} rows — the restore payload. */
+    snapshot: text('snapshot', { mode: 'json' }).notNull(),
+    /** node key → generation id selected at capture time. */
+    selections: text('selections', { mode: 'json' }).$type<Record<string, string>>().notNull(),
+    createdAt: integer('created_at').notNull()
+  },
+  (table) => [index('checkpoints_by_video').on(table.videoId)]
+)

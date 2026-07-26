@@ -7,6 +7,14 @@ import * as assets from '../services/assets'
 import * as generations from '../services/generations'
 import * as graph from '../services/graph'
 import * as graphHistory from '../services/graphHistory'
+import { createEditNodeFromAnnotations, listAnnotations } from '../services/annotations'
+import {
+  createCheckpoint,
+  diffAgainstCurrent,
+  listCheckpoints,
+  restoreCheckpoint
+} from '../services/checkpoints'
+import { lintNodeById } from '../services/lint'
 import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
 import * as renderService from '../services/render'
@@ -516,6 +524,87 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'read',
     execute: ({ nodeId }) => ({ credits: generations.estimateNodeRunCredits(String(nodeId)) })
+  },
+  // ── §6.4 checkpoints ───────────────────────────────────────────────────────
+  {
+    name: 'create_checkpoint',
+    description:
+      'Capture the video’s graph under a name (nodes, edges, params and the selected output per node) so a risky change can be walked back. Free.',
+    inputSchema: obj({ videoId: str(), name: str('Short name, e.g. "before restructuring"') }, [
+      'videoId',
+      'name'
+    ]),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, name }) => createCheckpoint(String(videoId), String(name))
+  },
+  {
+    name: 'list_checkpoints',
+    description: 'List the video’s checkpoints (newest first): id, name, node count, date.',
+    inputSchema: obj({ videoId: str() }, ['videoId']),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId }) => listCheckpoints(String(videoId))
+  },
+  {
+    name: 'diff_checkpoint',
+    description:
+      'What restoring a checkpoint would change: nodes added/removed, params (prompt first) and labels changed, edges added/removed, selected outputs changed. Free — read this before proposing a restore.',
+    inputSchema: obj({ checkpointId: str() }, ['checkpointId']),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ checkpointId }) => diffAgainstCurrent(String(checkpointId))
+  },
+  {
+    name: 'restore_checkpoint',
+    description:
+      'Roll the graph back to a checkpoint (ONE undo step). Nodes created since are deleted with their generations; outputs deleted since are not resurrected.',
+    inputSchema: obj({ checkpointId: str() }, ['checkpointId']),
+    scope: 'global',
+    risk: 'destructive',
+    execute: ({ checkpointId }) => restoreCheckpoint(String(checkpointId))
+  },
+
+  // ── §6.3 regional feedback ────────────────────────────────────────────────
+  {
+    name: 'get_annotations',
+    description:
+      'The user’s notes on one generation: a region of the frame or a timecode, plus what they said is wrong. This is their judgment — read it before proposing a fix.',
+    inputSchema: obj({ generationId: str() }, ['generationId']),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ generationId }) => listAnnotations(String(generationId))
+  },
+  {
+    name: 'create_edit_node',
+    description:
+      'Build the fix node from a generation’s notes: a gpt-image-2-image-to-image node wired to it, prompt composed from the regions and comments (image outputs only — for a clip, use the notes to rewrite the shot prompt). Creates nothing else and runs nothing.',
+    inputSchema: obj({ generationId: str() }, ['generationId']),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ generationId }) => createEditNodeFromAnnotations(String(generationId))
+  },
+  {
+    name: 'lint_node',
+    description:
+      'Check a node BEFORE running it: empty prompt, missing required input, reference wired but never addressed in the prompt, design sheet on a frame anchor, storyboard shot without the anti-grid guard, param outside the model’s enums. Free — no kie.ai call.',
+    inputSchema: obj({ nodeId: str() }, ['nodeId']),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ nodeId }) => {
+      const findings = lintNodeById(String(nodeId))
+      return {
+        ok: findings.length === 0,
+        findings: findings.map((f) => ({
+          rule: f.rule,
+          severity: f.severity,
+          message: f.message,
+          subject: f.subject ?? null,
+          // The fix an agent can apply itself (update_node / connect_nodes).
+          fix: f.fix ?? null
+        }))
+      }
+    }
   },
   {
     name: 'run_node',

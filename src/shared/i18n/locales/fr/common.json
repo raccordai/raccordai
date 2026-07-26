@@ -322,6 +322,49 @@
       "scrub": "Naviguer dans toutes les vidéos",
       "zoom": "Zoom"
     },
+    "annotate": {
+      "open": "Noter ce qui ne va pas sur ce résultat",
+      "title": "Noter ce qu’il faut corriger",
+      "hintImage": "Trace un cadre sur l’image pour entourer le problème, puis décris-le. Sans sélection, la note porte sur toute l’image.",
+      "hintVideo": "Lis le plan, marque le moment qui ne va pas, puis décris-le.",
+      "empty": "Aucune note pour l’instant.",
+      "placeholder": "ex. la main gauche est déformée",
+      "add": "Ajouter la note",
+      "remove": "Supprimer cette note",
+      "wholeFrame": "Toute l’image",
+      "markTime": "Marquer ce moment",
+      "createEditNode": "Créer le nœud de correction",
+      "editNodeCreated": "Nœud de correction créé, câblé sur ce résultat."
+    },
+    "checkpoints": {
+      "title": "Points de sauvegarde",
+      "open": "Points de sauvegarde — capturer le graphe avant un changement risqué",
+      "empty": "Aucun point de sauvegarde. Capture-en un avant un changement risqué.",
+      "namePlaceholder": "ex. avant restructuration",
+      "create": "Capturer le graphe",
+      "nodeCount_one": "{{count}} nœud",
+      "nodeCount_other": "{{count}} nœuds",
+      "restore": "Restaurer",
+      "delete": "Supprimer ce point de sauvegarde",
+      "deleteConfirm": "Supprimer le point de sauvegarde « {{name}} » ? Le graphe n’est pas modifié.",
+      "diffTitle": "Restaurer « {{name}} » va :",
+      "identical": "Ce point de sauvegarde correspond au graphe actuel.",
+      "restoreConfirm": "Restaurer",
+      "restored": "Graphe restauré ({{count}} sorties sélectionnées réappliquées). Annuler te ramène en arrière.",
+      "restoredMissing": "{{count}} sorties sélectionnées n’ont pas pu être restaurées — ces générations ont été supprimées.",
+      "added": "rajouter {{count}} nœud(s) qu’il n’avait pas",
+      "removed": "supprimer {{count}} nœud(s) créés depuis, avec leurs générations",
+      "changed": "revenir au prompt/paramètres capturés sur {{count}} nœud(s)",
+      "edges": "recâbler {{count}} connexion(s)",
+      "selections": "changer la sortie sélectionnée sur {{count}} nœud(s)"
+    },
+    "lint": {
+      "fix": {
+        "appendPrompt": "Ajouter au prompt",
+        "setParam": "Utiliser la valeur par défaut",
+        "rewire": "Recâbler en référence"
+      }
+    },
     "variants": {
       "label": "Variantes",
       "run": "Générer {{n}} candidats en parallèle et les comparer",

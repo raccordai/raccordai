@@ -320,13 +320,59 @@ export type QueueState = z.infer<typeof queueStateSchema>
  */
 export const variantsSchema = z.number().int().min(1).max(MAX_VARIANTS).optional()
 
+/** §6.3 — a note the user left on one generation (region or timecode). */
+export const regionSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number()
+})
+export const annotationSchema = z.object({
+  id: z.string(),
+  region: regionSchema.nullable(),
+  timecodeSec: z.number().nullable(),
+  comment: z.string()
+})
+
+/** §6.4 — a named graph capture, listed newest first. */
+export const checkpointSchema = z.object({
+  id: z.string(),
+  videoId: z.string(),
+  name: z.string(),
+  nodeCount: z.number().int().min(0),
+  createdAt: z.number()
+})
+
+/** §6.4 — what restoring a checkpoint would change in the current graph. */
+export const checkpointDiffSchema = z.object({
+  name: z.string(),
+  added: z.array(z.object({ key: z.string(), label: z.string() })),
+  removed: z.array(z.object({ key: z.string(), label: z.string() })),
+  changed: z.array(
+    z.object({ key: z.string(), label: z.string(), changedParams: z.array(z.string()) })
+  ),
+  edgesAdded: z.array(z.string()),
+  edgesRemoved: z.array(z.string()),
+  selectionChanged: z.array(z.string()),
+  identical: z.boolean()
+})
+
+/** A prompt-lint finding (§6.5) as it crosses the IPC boundary. */
+export const lintFindingSchema = z.object({
+  rule: z.string(),
+  severity: z.enum(['error', 'warning']),
+  message: z.string()
+})
+
 /** One line of the pre-run cost preview (§4.4), variants-aware since §6.6. */
 export const plannedRowSchema = z.object({
   nodeId: z.string(),
   label: z.string(),
   /** Total for this node: per-run estimate × variants (null = no declared rates). */
   credits: z.number().nullable(),
-  variants: z.number().int().min(1)
+  variants: z.number().int().min(1),
+  /** §6.5 — what the prompt lint says about this node, shown in the run confirm. */
+  lint: z.array(lintFindingSchema)
 })
 export type PlannedRow = z.infer<typeof plannedRowSchema>
 
@@ -513,6 +559,11 @@ export const ipcContracts = {
     output: graphEdgeSchema
   },
   'edges:disconnect': { input: z.object({ edgeId: z.string() }), output: z.void() },
+  /** §6.5 one-click fix — move an edge to another input of the same target node. */
+  'edges:rewire': {
+    input: z.object({ edgeId: z.string(), targetHandle: z.string() }),
+    output: graphEdgeSchema
+  },
   /**
    * Reorder the connections of one input handle (§4.6): reference numbering
    * (@Image1, @Image2…) follows edge creation order, so `edgeIds` — a
@@ -673,6 +724,51 @@ export const ipcContracts = {
       generations: z.record(z.string(), z.string())
     })
   },
+  /** §6.3 — the user's notes on one generation (region on an image, timecode on a clip). */
+  'annotations:list': {
+    input: z.object({ generationId: z.string() }),
+    output: z.array(annotationSchema)
+  },
+  'annotations:add': {
+    input: z.object({
+      generationId: z.string(),
+      comment: z.string().trim().min(1),
+      region: regionSchema.nullable().optional(),
+      timecodeSec: z.number().nullable().optional()
+    }),
+    output: annotationSchema
+  },
+  'annotations:delete': { input: z.object({ annotationId: z.string() }), output: z.void() },
+  /** Builds the pre-wired edit node from the notes (image outputs only). */
+  'annotations:createEditNode': {
+    input: z.object({ generationId: z.string() }),
+    output: z.object({ nodeId: z.string(), prompt: z.string() })
+  },
+
+  /** §6.4 — named graph captures. */
+  'checkpoints:list': {
+    input: z.object({ videoId: z.string() }),
+    output: z.array(checkpointSchema)
+  },
+  'checkpoints:create': {
+    input: z.object({ videoId: z.string(), name: z.string().trim().min(1) }),
+    output: checkpointSchema
+  },
+  'checkpoints:delete': { input: z.object({ checkpointId: z.string() }), output: z.void() },
+  'checkpoints:diff': {
+    input: z.object({ checkpointId: z.string() }),
+    output: checkpointDiffSchema
+  },
+  'checkpoints:restore': {
+    input: z.object({ checkpointId: z.string() }),
+    output: z.object({
+      nodeCount: z.number().int().min(0),
+      edgeCount: z.number().int().min(0),
+      selectionsRestored: z.number().int().min(0),
+      selectionsMissing: z.number().int().min(0)
+    })
+  },
+
   /** §6.2 — run (or re-run) the vision QC on one successful generation. */
   'generations:reviewGeneration': {
     input: z.object({ generationId: z.string() }),

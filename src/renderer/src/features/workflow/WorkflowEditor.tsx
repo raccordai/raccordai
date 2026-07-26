@@ -25,11 +25,13 @@ import { NodeParamsPanel } from './NodeParamsPanel'
 import { useCollapsed } from './timelineHooks'
 import { TimelineV2 } from './TimelineV2'
 import { HistoryPanel } from './HistoryPanel'
+import { CheckpointsPanel } from './CheckpointsPanel'
 import {
   Anchor,
   ChevronDown,
   ChevronRight,
   Copy,
+  Flag,
   History,
   Image as ImageIcon,
   PanelBottom,
@@ -81,7 +83,14 @@ interface NodeClipboard {
 let nodeClipboard: NodeClipboard | null = null
 
 interface CostPreviewState {
-  rows: { id: string; label: string; credits: number | null; variants: number }[]
+  rows: {
+    id: string
+    label: string
+    credits: number | null
+    variants: number
+    /** §6.5 — prompt-lint findings for that node, surfaced in the run confirm. */
+    lint: { severity: 'error' | 'warning'; message: string }[]
+  }[]
   total: number
   /** Current kie.ai balance, null when unreachable (no key, offline). */
   balance: number | null
@@ -168,6 +177,8 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  /** §6.4 — the checkpoints island (capture / diff / restore). */
+  const [checkpointsOpen, setCheckpointsOpen] = useState(false)
   /** "Fix with the assistant" buttons → global sidebar with a prepared draft. */
   const askAssistant = useCallback((text: string) => {
     openAssistant(text)
@@ -626,7 +637,8 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
                 id: r.nodeId,
                 label: r.label,
                 credits: r.credits,
-                variants: r.variants
+                variants: r.variants,
+                lint: r.lint
               })),
               total: plan.total,
               balance,
@@ -770,6 +782,14 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
           )}
         </Button>
         <Button
+          variant={checkpointsOpen ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setCheckpointsOpen((v) => !v)}
+          title={t('editor.checkpoints.open')}
+        >
+          <Flag className="h-4 w-4" />
+        </Button>
+        <Button
           variant={historyOpen ? 'secondary' : 'ghost'}
           size="sm"
           onClick={() => setHistoryOpen((v) => !v)}
@@ -779,7 +799,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
         </Button>
       </>
     ),
-    [t, timelineCollapsed, setTimelineCollapsed, historyOpen]
+    [t, timelineCollapsed, setTimelineCollapsed, historyOpen, checkpointsOpen]
   )
   useHeaderActions(headerActions)
 
@@ -896,7 +916,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
             </div>
           )}
 
-          {(selectedNode || historyOpen) && (
+          {(selectedNode || historyOpen || checkpointsOpen) && (
             <div className="absolute top-16 right-3 bottom-3 z-30 flex flex-col items-stretch gap-3">
               {selectedNode && (
                 <NodeParamsPanel
@@ -912,6 +932,9 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
                   onRunVariants={(count) => handleRunVariants(selectedNode.id, count)}
                   onAskAssistant={askAssistant}
                 />
+              )}
+              {checkpointsOpen && (
+                <CheckpointsPanel videoId={videoId} onClose={() => setCheckpointsOpen(false)} />
               )}
               {historyOpen && (
                 <HistoryPanel
@@ -1032,20 +1055,33 @@ function CostPreviewModal({ preview }: { preview: CostPreviewState }) {
         <h2 className="text-sm font-semibold text-neutral-100">{t('editor.costModal.title')}</h2>
         <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto">
           {preview.rows.map((row) => (
-            <li key={row.id} className="flex items-baseline justify-between gap-3 text-xs">
-              <span className="min-w-0 flex-1 truncate text-neutral-300">
-                {row.label}
-                {row.variants > 1 && (
-                  <span className="ml-1.5 rounded bg-accent/15 px-1 py-0.5 font-mono text-[10px] text-accent-soft">
-                    ×{row.variants}
-                  </span>
-                )}
-              </span>
-              <span className="font-mono text-neutral-400">
-                {row.credits !== null
-                  ? t('editor.costModal.credits', { credits: row.credits })
-                  : t('editor.costModal.unknownCost')}
-              </span>
+            <li key={row.id} className="text-xs">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0 flex-1 truncate text-neutral-300">
+                  {row.label}
+                  {row.variants > 1 && (
+                    <span className="ml-1.5 rounded bg-accent/15 px-1 py-0.5 font-mono text-[10px] text-accent-soft">
+                      ×{row.variants}
+                    </span>
+                  )}
+                </span>
+                <span className="font-mono text-neutral-400">
+                  {row.credits !== null
+                    ? t('editor.costModal.credits', { credits: row.credits })
+                    : t('editor.costModal.unknownCost')}
+                </span>
+              </div>
+              {/* §6.5 — the last free moment to catch a prompt problem. */}
+              {row.lint.map((finding, i) => (
+                <div
+                  key={i}
+                  className={`mt-0.5 pl-2 text-[10px] leading-snug ${
+                    finding.severity === 'error' ? 'text-danger' : 'text-warning'
+                  }`}
+                >
+                  {finding.severity === 'error' ? '✗' : '⚠'} {finding.message}
+                </div>
+              ))}
             </li>
           ))}
         </ul>

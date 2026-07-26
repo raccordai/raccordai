@@ -9,6 +9,15 @@
  * guide flags exact timestamps as UNSTABLE — shot-numbered structure is the
  * supported long-clip syntax.
  */
+/**
+ * The MANDATORY constraint appended to every storyboard-driven shot prompt:
+ * without it the model may render the 3x3 grid itself in the video. Single
+ * source of truth — the blueprints, the prompt lint (§6.5) and the guide below
+ * all use this exact sentence.
+ */
+export const ANTI_GRID_GUARD =
+  'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout.'
+
 export const SEEDANCE2_PROMPT_GUIDE = `ANATOMY (official ByteDance order):
   Precise subject + action detail + scene/environment + lighting & color tone + camera movement
   + visual style + image quality + constraints.

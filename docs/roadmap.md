@@ -9,9 +9,9 @@ slots, rendered MP4 export, generation feedback layer, video-level defaults +
 style-at-payload, graph ergonomics, assistant-first flows, the full assistant
 sidebar (global shell, per-turn app context, unified tool registry with risk
 taxonomy, smart batch runs in main, global thread + compaction, SSE streaming,
-@-mentions) and the first three iteration-loop items (draft mode + finalize,
-vision QC on settle, variants ×N with the compare grid) — is recorded in git
-history and CLAUDE.md; only open work remains below.
+@-mentions) and the whole iteration loop of §6 (draft mode + finalize, vision
+QC on settle, regional feedback, checkpoints, prompt lint, variants ×N) — is
+recorded in git history and CLAUDE.md; only open work remains below.
 
 ## 1. Open-source hygiene — before publishing
 
@@ -84,55 +84,21 @@ nobody looks at the outputs except the user. Guiding metric for this whole
 section: **cost (credits + minutes) from brief to the first shot the user
 judges good**. Same shared constraints as §4.
 
-Shipped: **6.1** draft mode + finalize, **6.2** vision QC on settle, **6.6**
-variants ×N + compare grid (details in CLAUDE.md). The numbering below is
-deliberately left as-is — code comments and docs reference these section
-numbers.
+The whole loop has shipped: **6.1** draft mode + finalize, **6.2** vision QC
+on settle, **6.3** regional feedback (annotate a region or a timecode → a
+pre-wired fix node), **6.4** named checkpoints + diff + one-step restore,
+**6.5** prompt lint (params panel, run confirm, `lint_node`, folded into the
+QC verdict) and **6.6** variants ×N + compare grid. Details in CLAUDE.md and
+`docs/mcp.md`; only the ambient layer below is still open, and it is
+deliberately last — it feeds on the signals the loop now produces.
 
-### 6.3 Regional feedback — the "select + fix" gesture (M/L)
+Two deviations from the original proposals, both deliberate: a checkpoint
+restore replays the raw rows through undo's diff-restore instead of
+`importWorkflow(replace)` (which would delete every generation of the video),
+and the prompt lint also reports blocking problems (empty prompt, missing
+required input) that used to surface only as a run failure.
 
-Today a bad generation can only be regenerated or re-prompted by hand; the
-user's judgment ("the hand is wrong", "remove that logo") stays in their
-head. Transpose Cursor's select + Cmd+K:
-
-- Image generations: draw a region on the preview + a comment → builds a
-  pre-wired `gpt-image-2-image-to-image` edit node from that generation
-  (prompt composed from comment + region), or prefills the assistant with
-  both. Video generations: timecode markers + comment feeding the
-  regeneration prompt.
-- Annotations persist additively (`generation_annotations` table) — they are
-  the raw signal for the taste memory (6.7).
-
-### 6.4 Named checkpoints + project diff (M)
-
-The safety net that authorizes boldness (Cursor's Composer checkpoints).
-`graphHistory` already computes per-mutation before/after — half the work.
-
-- Persisted named snapshots per video (additive `video_checkpoints` table:
-  workflow-JSON v1 export + selected generation ids). Restore validates
-  through the `importWorkflow` path, is journaled as ONE undo step, and
-  never resurrects deleted generations (consistent with undo).
-- Diff view checkpoint ↔ current: nodes added/removed, prompts changed,
-  selections changed — pure helper in `src/shared/`, unit-tested.
-- Registry tools: `create_checkpoint`, `diff_checkpoint`,
-  `restore_checkpoint` (`risk: 'destructive'` → approval card).
-
-### 6.5 Prompt lint (S/M)
-
-The prompting knowledge already exists (`seedance2-prompting.ts`,
-`docs/models.md` invariants) — it only speaks _after_ a bad run. Make it
-speak before:
-
-- Pure `lintPrompt(model, params, prompt, connections)` in `src/shared/`
-  (unit-tested): reference wired but no `@ImageN` role declared in the
-  prompt; video prompt describing visuals instead of motion; storyboard
-  wired on a frame anchor; storyboard-driven shot missing the anti-grid
-  guard; params outside the model's enums.
-- Surfaced as warnings + one-click fixes in the params panel and in the run
-  confirm; exposed to the assistant/MCP as `lint_node` and folded into 6.2's
-  QC report.
-
-### 6.7 Later — ambient layer (L, after 6.3 is live)
+### 6.7 Later — ambient layer (L)
 
 These feed on the signals the loop above produces; do not start them first.
 
@@ -148,15 +114,11 @@ These feed on the signals the loop above produces; do not start them first.
 
 ## Suggested order
 
-1. **Iteration loop** (§6), remaining items: 6.5 prompt lint (cheapest — it
-   folds into the QC report that already exists), then 6.3 regional feedback
-   (the gesture that turns the user's judgment into a reusable signal) and
-   6.4 checkpoints as they come.
-2. **OSS hygiene** (§1) — the blockers for a good first impression at
+1. **OSS hygiene** (§1) — the blockers for a good first impression at
    publication.
-3. **Versioned E2E suite** (§2) — should land before contributors arrive;
+2. **Versioned E2E suite** (§2) — should land before contributors arrive;
    the MP4-render driver is ready to be promoted.
-4. **Ecosystem** (§5) — the unified tool registry shipped with the assistant
+3. **Ecosystem** (§5) — the unified tool registry shipped with the assistant
    sidebar doubles as MCP-surface hardening for the "public API" pitch.
-5. **Ambient layer** (§6.7) — only once the loop produces the signals it
-   needs.
+4. **Ambient layer** (§6.7) — now unblocked: the loop produces the signals it
+   needs (selections, annotations, QC verdicts).

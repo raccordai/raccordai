@@ -385,6 +385,38 @@ export function reorderEdges(args: {
   touchVideo(args.videoId)
 }
 
+/**
+ * Move one edge to another input handle of the SAME target node (§6.5's
+ * one-click fix for a design sheet wired to a frame anchor). One journaled
+ * step — a disconnect + connect pair would cost the user two undos and, in
+ * between, leave the reference numbering of the handle inconsistent.
+ */
+export function rewireEdge(edgeId: string, targetHandle: string): GraphEdge {
+  const db = getDb()
+  const edge = db.select().from(edges).where(eq(edges.id, edgeId)).get()
+  if (!edge) throw new Error('Edge not found')
+  if (edge.targetHandle === targetHandle) return edge
+  const target = db.select().from(nodes).where(eq(nodes.id, edge.targetNodeId)).get()
+  const model = target ? getModel(target.modelId) : undefined
+  const handle = model?.inputs.find((h) => h.key === targetHandle)
+  if (!handle) throw new Error(`"${targetHandle}" is not an input of the target node`)
+
+  // Land last on the new handle: the numbering is by createdAt, and a moved
+  // edge must not silently steal @Image1 from an existing connection.
+  const siblings = db
+    .select()
+    .from(edges)
+    .where(and(eq(edges.targetNodeId, edge.targetNodeId), eq(edges.targetHandle, targetHandle)))
+    .all()
+  const createdAt = Math.max(Date.now(), ...siblings.map((e) => e.createdAt + 1))
+
+  withGraphHistory(edge.videoId, () =>
+    db.update(edges).set({ targetHandle, createdAt }).where(eq(edges.id, edgeId)).run()
+  )
+  touchVideo(edge.videoId)
+  return { ...edge, targetHandle, createdAt }
+}
+
 export function disconnectEdge(edgeId: string): void {
   const db = getDb()
   const edge = db.select().from(edges).where(eq(edges.id, edgeId)).get()

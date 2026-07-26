@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildQcUserText, isQcEligible, parseQcVerdict } from './qcPlan'
+import type { LintFinding } from '@shared/promptLint'
+import { buildQcUserText, foldLintIntoVerdict, isQcEligible, parseQcVerdict } from './qcPlan'
 
 describe('isQcEligible', () => {
   it('accepts only image models', () => {
@@ -63,5 +64,45 @@ describe('parseQcVerdict', () => {
     expect(() => parseQcVerdict('looks good to me')).toThrow(/no JSON verdict/)
     expect(() => parseQcVerdict('{"verdict":')).toThrow(/no JSON verdict|malformed/)
     expect(() => parseQcVerdict('{"verdict":"maybe"}')).toThrow(/unknown verdict/)
+  })
+})
+
+describe('foldLintIntoVerdict', () => {
+  const warning: LintFinding = {
+    rule: 'video-prompt-without-motion',
+    severity: 'warning',
+    message: 'No motion described.'
+  }
+  const error: LintFinding = {
+    rule: 'param-out-of-enum',
+    severity: 'error',
+    message: '"Resolution" is set to "4k", which this model does not accept.'
+  }
+
+  it('leaves the verdict untouched when the lint is clean', () => {
+    const result = { verdict: 'pass', notes: '' } as const
+    expect(foldLintIntoVerdict(result, [])).toBe(result)
+  })
+
+  it('keeps a pass on non-blocking findings only', () => {
+    const result = { verdict: 'pass', notes: '' } as const
+    expect(foldLintIntoVerdict(result, [warning])).toEqual(result)
+  })
+
+  it('degrades a pass to warn on a blocking finding and reports it', () => {
+    const folded = foldLintIntoVerdict({ verdict: 'pass', notes: '' }, [error])
+    expect(folded.verdict).toBe('warn')
+    expect(folded.notes).toContain('Prompt lint:')
+    expect(folded.notes).toContain('does not accept')
+  })
+
+  it('appends the lint under the existing notes of a warn', () => {
+    const folded = foldLintIntoVerdict(
+      { verdict: 'warn', notes: 'Her left hand has six fingers.' },
+      [warning]
+    )
+    expect(folded.verdict).toBe('warn')
+    expect(folded.notes.startsWith('Her left hand has six fingers.')).toBe(true)
+    expect(folded.notes).toContain('⚠ No motion described.')
   })
 })

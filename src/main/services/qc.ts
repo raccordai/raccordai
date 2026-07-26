@@ -6,7 +6,14 @@ import { generations, nodes, videos } from '../db/schema'
 import { broadcastGenerationsChanged } from '../events'
 import { imageBlockFor } from './ai'
 import { kieClaudeMessage, type ClaudeContentBlock } from './kie'
-import { buildQcUserText, isQcEligible, parseQcVerdict, QC_SYSTEM } from './qcPlan'
+import { lintNodeById } from './lint'
+import {
+  buildQcUserText,
+  foldLintIntoVerdict,
+  isQcEligible,
+  parseQcVerdict,
+  QC_SYSTEM
+} from './qcPlan'
 
 /**
  * Vision QC (§6.2) — the generation "linter": one cheap vision check on each
@@ -88,7 +95,9 @@ export async function reviewGeneration(generationId: string): Promise<QcResult> 
       kieClaudeMessage({ model: QC_MODEL, system: QC_SYSTEM, content }),
       QC_TIMEOUT_MS
     )
-    result = parseQcVerdict(reply)
+    // §6.5 — the prompt lint rides along in the same report: it catches what
+    // the image cannot show (undeclared references, out-of-enum params).
+    result = foldLintIntoVerdict(parseQcVerdict(reply), lintNodeById(node.id))
   } catch (err) {
     result = { verdict: 'error', notes: err instanceof Error ? err.message : String(err) }
   }

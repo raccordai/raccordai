@@ -3,6 +3,7 @@ import type { PlannedRow } from '@shared/ipc/contracts'
 import { onGenerationSettled } from '../bus'
 import * as generations from './generations'
 import * as graph from './graph'
+import { lintNodeById } from './lint'
 import { notifyBatchSummary } from './notifications'
 import { planRun, type PlanEntry } from './runPlanner'
 import { runNode } from './runEngine'
@@ -65,7 +66,13 @@ function plannedRow(entry: PlanEntry, opts?: { forceFinal?: boolean }): PlannedR
     nodeId: entry.id,
     label: entry.label,
     credits: perRun === null ? null : perRun * entry.runs,
-    variants: entry.runs
+    variants: entry.runs,
+    // §6.5 — the run confirm is the last free moment to catch a bad prompt.
+    lint: lintNodeById(entry.id).map((f) => ({
+      rule: f.rule,
+      severity: f.severity,
+      message: f.message
+    }))
   }
 }
 

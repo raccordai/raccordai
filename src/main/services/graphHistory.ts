@@ -118,7 +118,33 @@ function restoreSnapshot(videoId: string, snapshot: GraphSnapshot): void {
  * changed the graph. No-op (plain passthrough) during undo/redo replay.
  */
 export function withGraphHistory<T>(videoId: string, mutation: () => T): T {
-  if (replaying) return mutation()
+  // Inside a group, the outer call owns the journal entry and the broadcast.
+  if (replaying || grouping > 0) return mutation()
+  return journaled(videoId, mutation)
+}
+
+/** Depth of the current `withGraphHistoryGroup` nesting (0 = not grouping). */
+let grouping = 0
+
+/**
+ * Runs several graph mutations as ONE undo step — the nested `withGraphHistory`
+ * calls of the composed services (create + connect + select, or the checkpoint
+ * restore's import + selections) become a single before/after entry, so the
+ * user undoes the gesture they made rather than its implementation details.
+ */
+export function withGraphHistoryGroup<T>(videoId: string, mutation: () => T): T {
+  if (replaying || grouping > 0) return mutation()
+  return journaled(videoId, () => {
+    grouping++
+    try {
+      return mutation()
+    } finally {
+      grouping--
+    }
+  })
+}
+
+function journaled<T>(videoId: string, mutation: () => T): T {
   const before = snapshotGraph(videoId)
   const result = mutation()
   const after = snapshotGraph(videoId)
@@ -173,6 +199,22 @@ export function redoGraph(videoId: string): HistoryState {
     stacks.undo.push(entry)
   }
   return historyState(videoId)
+}
+
+/**
+ * Applies an arbitrary snapshot as ONE journaled step (checkpoint restore,
+ * §6.4) — the same diff-restore undo uses, so nodes present on both sides keep
+ * their identity and their generations, and the user can undo the restore.
+ */
+export function applyGraphSnapshot(videoId: string, snapshot: GraphSnapshot): void {
+  withGraphHistory(videoId, () => {
+    replaying = true
+    try {
+      restoreSnapshot(videoId, snapshot)
+    } finally {
+      replaying = false
+    }
+  })
 }
 
 /** Test-only: reset all stacks. */

@@ -57,7 +57,9 @@ describe('AGENT_TOOLS registry', () => {
       'delete_asset',
       'delete_project',
       'delete_video',
-      'remove_node'
+      'remove_node',
+      // §6.4 — a restore deletes every node created since the capture.
+      'restore_checkpoint'
     ])
   })
 
