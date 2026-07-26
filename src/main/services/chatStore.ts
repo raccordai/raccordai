@@ -70,6 +70,28 @@ export function createChatThread(
   return id
 }
 
+/**
+ * Drops assistant turns with no content at all. A provider stream that dies
+ * before its first block used to be stored verbatim as
+ * `{role:'assistant', content:[]}`; the Messages API rejects such a message on
+ * the next call ("all messages must have non-empty content"), so a single
+ * hiccup could brick a thread for good. chat.ts no longer writes them —
+ * threads recorded before that guard still carry them, hence the load-time
+ * sweep.
+ */
+export function dropEmptyAssistantTurns(
+  history: Anthropic.MessageParam[]
+): Anthropic.MessageParam[] {
+  return history.filter(
+    (message) =>
+      !(
+        message.role === 'assistant' &&
+        Array.isArray(message.content) &&
+        message.content.length === 0
+      )
+  )
+}
+
 export function loadChatSession(threadId: string): PersistedChatSession | null {
   const row = getDb().select().from(chatThreads).where(eq(chatThreads.id, threadId)).get()
   if (!row) return null
@@ -77,7 +99,7 @@ export function loadChatSession(threadId: string): PersistedChatSession | null {
     projectId: row.projectId,
     videoId: row.videoId,
     title: row.title,
-    history: (row.history as Anthropic.MessageParam[] | null) ?? [],
+    history: dropEmptyAssistantTurns((row.history as Anthropic.MessageParam[] | null) ?? []),
     items: (row.items as ChatItem[] | null) ?? [],
     watched: row.watched ?? []
   }

@@ -77,12 +77,25 @@ function lastToolResult(messages) {
 }
 
 await spec('assistant', async () => {
-  const state = { projectId: null, videoId: null, sawAppContext: false }
+  const state = { projectId: null, videoId: null, sawAppContext: false, emptyMode: false }
   let turn = 0
 
   /** The scripted agent: one tool per turn, then a final report. */
   function nextAssistantMessage(body) {
     const messages = body.messages ?? []
+    // Last step of the spec: the proxy answering with zero content blocks.
+    if (state.emptyMode) {
+      return {
+        id: 'msg_empty',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-opus-4-8',
+        content: [],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 0 }
+      }
+    }
     // Registry tools return the created row — its `id` is the project/video id
     // (the turn counter already moved on when the tool_use went out).
     const previous = lastToolResult(messages)
@@ -204,4 +217,22 @@ await spec('assistant', async () => {
   await win.waitForSelector('.react-flow__node', { timeout: 15_000 })
   checkEqual(await win.locator('.react-flow__node').count(), 3, 'the canvas renders 3 nodes')
   checkEqual(await win.locator('.react-flow__edge').count(), 2, 'the canvas renders 2 edges')
+
+  // A proxy that closes a stream having sent nothing used to end the turn as if
+  // the model had finished: no text, no error, an empty assistant message
+  // persisted in the history — a build in progress just stopped, silently.
+  step('a content-less provider reply is retried, then surfaced')
+  const [thread] = await invoke('chat:listThreads')
+  state.emptyMode = true
+  const callsBefore = mock.recorded.claude.length
+  const after = await invoke('chat:send', { threadId: thread.id, text: 'et le workflow ?' })
+  check(Boolean(after.error), 'the turn reports an error instead of ending in silence')
+  check(!after.busy, 'the composer is released')
+  checkEqual(
+    mock.recorded.claude.length - callsBefore,
+    3,
+    'the empty reply was retried twice before giving up'
+  )
+  const last = after.items.at(-1)
+  checkEqual(last?.type, 'user', 'no empty assistant bubble was appended')
 })

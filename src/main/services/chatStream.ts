@@ -62,11 +62,19 @@ export function createAnthropicAccumulator(onTextDelta?: (delta: string) => void
 } {
   const blocks: Anthropic.ContentBlock[] = []
   const partialJson: Record<number, string> = {}
+  // A stream that dies early is indistinguishable from a finished one at the
+  // network level (the body just ends), so the accumulator has to notice: no
+  // block at all, or a block still open when the events run out. Without this
+  // the caller got a well-formed EMPTY message and the agentic loop treated it
+  // as "the model has nothing more to say" — the turn stopped dead, silently.
+  const openBlocks = new Set<number>()
+  let events = 0
   let stopReason: string | null = null
   let error: StreamedMessage['error']
 
   return {
     push(raw: unknown): void {
+      events += 1
       const event = raw as {
         type?: string
         index?: number
@@ -83,6 +91,7 @@ export function createAnthropicAccumulator(onTextDelta?: (delta: string) => void
         case 'content_block_start': {
           if (event.content_block && event.index !== undefined) {
             blocks[event.index] = { ...event.content_block }
+            openBlocks.add(event.index)
             if (event.content_block.type === 'tool_use') partialJson[event.index] = ''
           }
           break
@@ -101,6 +110,7 @@ export function createAnthropicAccumulator(onTextDelta?: (delta: string) => void
         }
         case 'content_block_stop': {
           const index = event.index ?? -1
+          openBlocks.delete(index)
           const block = blocks[index]
           if (block?.type === 'tool_use' && partialJson[index] !== undefined) {
             try {
@@ -122,8 +132,20 @@ export function createAnthropicAccumulator(onTextDelta?: (delta: string) => void
       }
     },
     finish(): StreamedMessage {
+      const content = blocks.filter((b): b is Anthropic.ContentBlock => b !== undefined)
+      if (!error && content.length === 0) {
+        error = {
+          type: 'empty_stream',
+          message: `closed the stream without sending any content (${events} event${events === 1 ? '' : 's'} received)`
+        }
+      } else if (!error && openBlocks.size > 0) {
+        error = {
+          type: 'truncated_stream',
+          message: `closed the stream mid-message (${events} events, ${openBlocks.size} unterminated content block${openBlocks.size === 1 ? '' : 's'})`
+        }
+      }
       return {
-        content: blocks.filter((b): b is Anthropic.ContentBlock => b !== undefined),
+        content,
         stop_reason: stopReason,
         ...(error ? { error } : {})
       }
@@ -144,9 +166,11 @@ export function createResponsesAccumulator(onTextDelta?: (delta: string) => void
 } {
   let output: ResponsesOutputItem[] | undefined
   let error: { message?: string } | undefined
+  let events = 0
 
   return {
     push(raw: unknown): void {
+      events += 1
       const event = raw as {
         type?: string
         delta?: string
@@ -165,7 +189,41 @@ export function createResponsesAccumulator(onTextDelta?: (delta: string) => void
       }
     },
     finish() {
+      // Same trap as the Anthropic path: no terminal response.completed means
+      // the stream died, not that the model answered nothing.
+      if (!error && !output) {
+        error = {
+          message: `closed the stream without a completed response (${events} event${events === 1 ? '' : 's'} received)`
+        }
+      }
       return { ...(output ? { output } : {}), ...(error ? { error } : {}) }
     }
   }
+}
+
+// ── Retry policy ─────────────────────────────────────────────────────────────
+
+/**
+ * Is this provider failure worth another attempt? A dropped/empty stream, a
+ * network blip, a 429 or a 5xx are transient — the proxy hiccups and the same
+ * request succeeds a second later. An auth/quota/validation refusal (4xx) is
+ * not: retrying it just burns the user's time behind a spinner.
+ */
+export function isRetryableProviderError(message: string): boolean {
+  const text = message.toLowerCase()
+  if (/http (4\d\d)\b/.test(text) && !/http 429\b/.test(text)) return false
+  return (
+    text.includes('stream') ||
+    text.includes('empty') ||
+    text.includes('timed out') ||
+    text.includes('timeout') ||
+    text.includes('stopped responding') ||
+    text.includes('fetch failed') ||
+    text.includes('econnreset') ||
+    text.includes('econnrefused') ||
+    text.includes('socket hang up') ||
+    text.includes('terminated') ||
+    text.includes('network') ||
+    /http (429|5\d\d)\b/.test(text)
+  )
 }

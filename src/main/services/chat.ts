@@ -23,7 +23,12 @@ import {
   stripImageBlocks
 } from './chatCompaction'
 import { formatAppContext } from './chatContext'
-import { SseParser, createAnthropicAccumulator, createResponsesAccumulator } from './chatStream'
+import {
+  SseParser,
+  createAnthropicAccumulator,
+  createResponsesAccumulator,
+  isRetryableProviderError
+} from './chatStream'
 import {
   createChatThread,
   deleteChatSession,
@@ -67,6 +72,16 @@ import * as videos from './videos'
 // Full-project deliveries chain many tool calls even with batching (§4.10
 // phase 4 raised it from 15); the settle wake-up remains the completion path.
 const MAX_ITERATIONS = 24
+
+/** Backoff before re-issuing a provider call that failed transiently. */
+const PROVIDER_RETRY_DELAYS_MS = [1000, 3000]
+
+/**
+ * No byte from the proxy for this long ⇒ the turn is stuck. Without it a
+ * half-open connection pins `busy` forever, and the composer stays disabled:
+ * from the user's seat, the assistant simply stopped existing.
+ */
+const PROVIDER_IDLE_TIMEOUT_MS = 120_000
 
 /** kie.ai OpenAI-Responses proxy path per GPT model (Claude ids use /claude/v1/messages). */
 const OPENAI_RESPONSES_PATHS: Record<string, string> = {
@@ -123,7 +138,6 @@ How to deliver a full project:
 2. create_project (short name from the subject), then create_video. Prefer ONE video for the whole piece (the timeline chains its clips); split into several videos only if the user asks for separate sequences.
 3. docs "models" FIRST — the frame-anchor vs reference distinction decides your wiring: character sheets/storyboards go to Seedance 2 reference_image_urls (with an explicit role in the prompt, they never appear on screen); Seedance 1.5 / Grok image inputs literally BECOME frames. docs "styles" → set_video_style; the style bible is appended automatically at run time to every visual node whose params carry "applyVideoStyle": true — set that flag on the visual nodes you create and NEVER paste the bible into a prompt. For standard shapes, scale a template (docs "template:<id>") to the requested duration. On an existing project, search_assets first: published design sheets (designId/designSubject set) are reused via studio/asset nodes (reference inputs only) instead of regenerating them; publish_design a newly approved sheet so later videos can reuse it.
 4. Build the graph in ONE import_workflow call (nodes + edges; left-to-right positions x: 0, 420, 840…, y by scene ~350, or omit positions and let the app lay it out — never reuse one coordinate for several nodes): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); NO lastFrame chaining between shots — each shot is a CUT to a new camera setup sharing the same references (chaining a generated closing frame into the next clip glitches the seam), and real continuity, when needed, goes through video extend (previous clip into reference_video_urls); one Suno music node per video matching the style's music hint.
-4. Build the graph in ONE import_workflow call (nodes + edges, left-to-right positions x: 0, 420, 840…, y by scene ~350): a key visual wired as @Image1 reference on every Seedance 2 shot (character consistency); one 9-panel storyboard node per scene (docs "designs", recipe "storyboard" — built FROM the key visual with gpt-image-2-image-to-image, wired as @Image2 reference on the scene's shots with "a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom" plus the anti-grid constraint "render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout"; it is the user's review gate before any video run); NO lastFrame chaining between shots — each shot is a CUT to a new camera setup sharing the same references (chaining a generated closing frame into the next clip glitches the seam), and real continuity, when needed, goes through video extend (previous clip into reference_video_urls); one Suno music node per video matching the style's music hint.
 5. docs "prompting:<model id>" before writing ANY prompt. English prompts: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
 6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. That gate covers the PRODUCTION PLAN; the SPEND is gated separately by the run-approval card, so don't ask twice. To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll. For iteration-heavy work, propose draft mode (set_draft_mode: every run substituted with a cheap draft equivalent), then finalize_video (plan_only: true first for the draft-vs-final cost) re-runs the approved keepers on the real models; when vision QC is enabled, wake-up messages carry a pass/warn verdict per image generation — only dig into the warns. On a pivotal node whose direction is uncertain, variants: 2–4 on run_node/run_batch generates that many candidates in parallel (cost ×N, announce it) for the user to arbitrate in the compare grid. Run the free lint_node on the shot nodes you wrote before proposing any run, and create_checkpoint before a structural rework — both cost nothing and both save credits.
 
@@ -631,7 +645,12 @@ interface KieClaudeMessage {
 }
 
 /** Reads an SSE body, feeding each JSON `data:` payload to the callback. */
-async function readSse(res: Response, onEvent: (event: unknown) => void): Promise<void> {
+async function readSse(
+  res: Response,
+  onEvent: (event: unknown) => void,
+  /** Called on every chunk read — re-arms the caller's idle watchdog. */
+  onChunk?: () => void
+): Promise<void> {
   const reader = res.body?.getReader()
   if (!reader) throw new Error('SSE response has no body')
   const decoder = new TextDecoder()
@@ -649,54 +668,95 @@ async function readSse(res: Response, onEvent: (event: unknown) => void): Promis
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
+    onChunk?.()
     feed(parser.push(decoder.decode(value, { stream: true })))
   }
   feed(parser.push(decoder.decode()))
   feed(parser.flush())
 }
 
-async function kieClaudeCreate(
+/**
+ * Runs a provider call under an inactivity watchdog: the timer is re-armed on
+ * every byte received, so a long generation is fine but a dead socket isn't.
+ * On expiry the fetch/read is aborted and the raw AbortError is replaced by a
+ * message the user can act on.
+ */
+async function withIdleTimeout<T>(
+  label: string,
+  run: (watchdog: { signal: AbortSignal; ping: () => void }) => Promise<T>
+): Promise<T> {
+  const controller = new AbortController()
+  let expired = false
+  let timer: NodeJS.Timeout | undefined
+  const ping = (): void => {
+    clearTimeout(timer)
+    timer = setTimeout(() => {
+      expired = true
+      controller.abort()
+    }, PROVIDER_IDLE_TIMEOUT_MS)
+  }
+  ping()
+  try {
+    return await run({ signal: controller.signal, ping })
+  } catch (err) {
+    if (expired) {
+      throw new Error(
+        `${label} stopped responding (no data for ${PROVIDER_IDLE_TIMEOUT_MS / 1000}s).`,
+        { cause: err }
+      )
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function kieClaudeCreate(
   apiKey: string,
   body: Record<string, unknown>,
   onTextDelta?: (delta: string) => void
 ): Promise<KieClaudeMessage> {
-  const res = await fetch(`${KIE_BASE}/claude/v1/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify(body)
-  })
-  // §4.10 phase 6: the proxy streams (stream: true); a JSON body remains
-  // accepted as fallback (mocks, proxies that ignore the flag).
-  if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
-    const accumulator = createAnthropicAccumulator(onTextDelta)
-    await readSse(res, (event) => accumulator.push(event))
-    const message = accumulator.finish()
-    if (message.error) {
-      throw new Error(`kie.ai Claude stream failed: ${message.error.message ?? 'unknown error'}`)
+  return withIdleTimeout('kie.ai Claude', async ({ signal, ping }) => {
+    const res = await fetch(`${KIE_BASE}/claude/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify(body),
+      signal
+    })
+    ping()
+    // §4.10 phase 6: the proxy streams (stream: true); a JSON body remains
+    // accepted as fallback (mocks, proxies that ignore the flag).
+    if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      const accumulator = createAnthropicAccumulator(onTextDelta)
+      await readSse(res, (event) => accumulator.push(event), ping)
+      const message = accumulator.finish()
+      if (message.error) {
+        throw new Error(`kie.ai Claude stream failed: ${message.error.message ?? 'unknown error'}`)
+      }
+      return message
     }
-    return message
-  }
-  const raw = await res.text()
-  let json: KieClaudeMessage
-  try {
-    json = JSON.parse(raw) as KieClaudeMessage
-  } catch {
-    throw new Error(`kie.ai Claude returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`)
-  }
-  if (!res.ok || json.error) {
-    throw new Error(
-      `kie.ai Claude failed (HTTP ${res.status}): ${json.error?.message ?? raw.slice(0, 300)}`
-    )
-  }
-  return json
+    const raw = await res.text()
+    let json: KieClaudeMessage
+    try {
+      json = JSON.parse(raw) as KieClaudeMessage
+    } catch {
+      throw new Error(`kie.ai Claude returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`)
+    }
+    if (!res.ok || json.error) {
+      throw new Error(
+        `kie.ai Claude failed (HTTP ${res.status}): ${json.error?.message ?? raw.slice(0, 300)}`
+      )
+    }
+    return json
+  })
 }
 
 /** Same contract as kieClaudeCreate, over kie.ai's OpenAI Responses proxies. */
-async function kieResponsesCreate(
+function kieResponsesCreate(
   apiKey: string,
   path: string,
   args: {
@@ -707,48 +767,52 @@ async function kieResponsesCreate(
   },
   onTextDelta?: (delta: string) => void
 ): Promise<KieClaudeMessage> {
-  const res = await fetch(`${KIE_BASE}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: args.model,
-      instructions: args.system,
-      input: toResponsesInput(args.messages),
-      tools: toResponsesTools(args.tools),
-      tool_choice: 'auto',
-      stream: true
+  return withIdleTimeout(`kie.ai ${args.model}`, async ({ signal, ping }) => {
+    const res = await fetch(`${KIE_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: args.model,
+        instructions: args.system,
+        input: toResponsesInput(args.messages),
+        tools: toResponsesTools(args.tools),
+        tool_choice: 'auto',
+        stream: true
+      }),
+      signal
     })
-  })
-  // Streaming variant of the translator path (§4.10 phase 6): deltas surface
-  // incrementally, the terminal response.completed event carries the full
-  // output array — same shape as the non-streaming body.
-  if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
-    const accumulator = createResponsesAccumulator(onTextDelta)
-    await readSse(res, (event) => accumulator.push(event))
-    const final = accumulator.finish()
-    if (final.error) {
-      throw new Error(`kie.ai ${args.model} stream failed: ${final.error.message ?? 'unknown'}`)
+    ping()
+    // Streaming variant of the translator path (§4.10 phase 6): deltas surface
+    // incrementally, the terminal response.completed event carries the full
+    // output array — same shape as the non-streaming body.
+    if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
+      const accumulator = createResponsesAccumulator(onTextDelta)
+      await readSse(res, (event) => accumulator.push(event), ping)
+      const final = accumulator.finish()
+      if (final.error) {
+        throw new Error(`kie.ai ${args.model} stream failed: ${final.error.message ?? 'unknown'}`)
+      }
+      return fromResponsesOutput(final.output)
     }
-    return fromResponsesOutput(final.output)
-  }
-  const raw = await res.text()
-  let json: { output?: ResponsesOutputItem[]; error?: { message?: string } }
-  try {
-    json = JSON.parse(raw) as typeof json
-  } catch {
-    throw new Error(
-      `kie.ai ${args.model} returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`
-    )
-  }
-  if (!res.ok || json.error) {
-    throw new Error(
-      `kie.ai ${args.model} failed (HTTP ${res.status}): ${json.error?.message ?? raw.slice(0, 300)}`
-    )
-  }
-  return fromResponsesOutput(json.output)
+    const raw = await res.text()
+    let json: { output?: ResponsesOutputItem[]; error?: { message?: string } }
+    try {
+      json = JSON.parse(raw) as typeof json
+    } catch {
+      throw new Error(
+        `kie.ai ${args.model} returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`
+      )
+    }
+    if (!res.ok || json.error) {
+      throw new Error(
+        `kie.ai ${args.model} failed (HTTP ${res.status}): ${json.error?.message ?? raw.slice(0, 300)}`
+      )
+    }
+    return fromResponsesOutput(json.output)
+  })
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
@@ -928,13 +992,18 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       session.partial = null
-      const response = await callProvider(
+      const response = await callProviderWithRetry(
         kieKey,
         model,
         system,
         tools,
         session.history,
-        onTextDelta
+        onTextDelta,
+        // Each attempt replays its own deltas — drop what the failed one wrote
+        // or the sidebar would show the answer twice.
+        () => {
+          session.partial = null
+        }
       )
       session.partial = null
 
@@ -1010,6 +1079,40 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
     }
     persistSession(sessionKey, session)
     await runTurn(sessionKey, session)
+  }
+}
+
+/**
+ * A provider call that is allowed to fail transiently. The proxy sometimes
+ * closes a stream having sent nothing: the old loop stored the resulting empty
+ * assistant message and broke out of the iteration, so a build in progress
+ * (project created, video created, style set…) stopped mid-way with no text,
+ * no error and no card — the user was left staring at a graph that never came.
+ * An empty response is now an error like any other: retried, then surfaced.
+ */
+async function callProviderWithRetry(
+  kieKey: string,
+  model: string,
+  system: string,
+  tools: Anthropic.Tool[],
+  messages: Anthropic.MessageParam[],
+  onTextDelta: (delta: string) => void,
+  onAttemptStart: () => void
+): Promise<KieClaudeMessage> {
+  for (let attempt = 0; ; attempt++) {
+    onAttemptStart()
+    try {
+      const response = await callProvider(kieKey, model, system, tools, messages, onTextDelta)
+      if (response.content.length === 0) {
+        throw new Error(`kie.ai ${model} returned an empty response (no content).`)
+      }
+      return response
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const delay = PROVIDER_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined || !isRetryableProviderError(message)) throw err
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
   }
 }
 

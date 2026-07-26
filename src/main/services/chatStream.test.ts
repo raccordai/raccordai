@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { SseParser, createAnthropicAccumulator, createResponsesAccumulator } from './chatStream'
+import {
+  SseParser,
+  createAnthropicAccumulator,
+  createResponsesAccumulator,
+  isRetryableProviderError
+} from './chatStream'
 
 describe('SseParser', () => {
   it('splits complete events and keeps partial ones buffered', () => {
@@ -114,5 +119,68 @@ describe('createResponsesAccumulator', () => {
     const acc = createResponsesAccumulator()
     acc.push({ type: 'response.failed', response: { error: { message: 'quota' } } })
     expect(acc.finish().error).toMatchObject({ message: 'quota' })
+  })
+
+  it('treats a stream that never completes as an error', () => {
+    const acc = createResponsesAccumulator()
+    acc.push({ type: 'response.created' })
+    acc.push({ type: 'response.output_text.delta', delta: 'Hel' })
+    const final = acc.finish()
+    expect(final.output).toBeUndefined()
+    expect(final.error?.message).toMatch(/without a completed response/)
+  })
+})
+
+describe('a stream that dies without content', () => {
+  it('is an error, not an empty message', () => {
+    const acc = createAnthropicAccumulator()
+    acc.push({ type: 'message_start', message: {} })
+    const message = acc.finish()
+    expect(message.content).toEqual([])
+    expect(message.error).toMatchObject({ type: 'empty_stream' })
+    expect(message.error?.message).toMatch(/1 event received/)
+  })
+
+  it('is an error when a content block is left unterminated', () => {
+    const acc = createAnthropicAccumulator()
+    acc.push({ type: 'message_start', message: {} })
+    acc.push({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
+    acc.push({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Je ' } })
+    const message = acc.finish()
+    expect(message.content).toHaveLength(1)
+    expect(message.error).toMatchObject({ type: 'truncated_stream' })
+  })
+
+  it('keeps a real stream error rather than masking it', () => {
+    const acc = createAnthropicAccumulator()
+    acc.push({ type: 'error', error: { type: 'overloaded_error', message: 'overloaded' } })
+    expect(acc.finish().error).toMatchObject({ type: 'overloaded_error', message: 'overloaded' })
+  })
+})
+
+describe('isRetryableProviderError', () => {
+  it('retries dropped streams, timeouts, network blips, 429 and 5xx', () => {
+    for (const message of [
+      'kie.ai Claude stream failed: closed the stream without sending any content (3 events received)',
+      'kie.ai claude-opus-4-8 returned an empty response (no content).',
+      'kie.ai Claude stopped responding (no data for 120s).',
+      'fetch failed',
+      'read ECONNRESET',
+      'kie.ai Claude failed (HTTP 429): rate limited',
+      'kie.ai Claude failed (HTTP 502): bad gateway'
+    ]) {
+      expect(isRetryableProviderError(message), message).toBe(true)
+    }
+  })
+
+  it('does not retry what a second attempt cannot fix', () => {
+    for (const message of [
+      'kie.ai Claude failed (HTTP 401): invalid api key',
+      'kie.ai Claude failed (HTTP 402): insufficient credits',
+      'kie.ai Claude failed (HTTP 400): messages must have non-empty content',
+      "kie.ai API key is not configured. Add it in the app's Integrations section on the home page."
+    ]) {
+      expect(isRetryableProviderError(message), message).toBe(false)
+    }
   })
 })

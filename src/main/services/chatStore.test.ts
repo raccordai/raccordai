@@ -74,6 +74,25 @@ describe('chat threads', () => {
     expect(loadChatSession(id)).not.toBeNull()
   })
 
+  it('drops assistant turns a dead stream left empty', () => {
+    // A provider stream that closed before its first block used to be stored
+    // as {role:'assistant', content:[]}; the Messages API refuses to accept
+    // such a message back, so the thread stayed broken forever.
+    const id = createChatThread()
+    saveChatSession(id, {
+      ...SAMPLE,
+      projectId,
+      history: [
+        { role: 'user', content: 'Le scénario…' },
+        { role: 'assistant', content: [] },
+        { role: 'user', content: 'tu as créé le workflow ?' }
+      ]
+    })
+    const history = loadChatSession(id)?.history
+    expect(history).toHaveLength(2)
+    expect(history?.every((m) => m.role === 'user')).toBe(true)
+  })
+
   it('upserts on repeated saves', () => {
     const id = createChatThread()
     saveChatSession(id, { ...SAMPLE, projectId })
