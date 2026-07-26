@@ -99,6 +99,7 @@ pnpm typecheck    # tsc over tsconfig.node.json and tsconfig.web.json
 pnpm lint         # ESLint (flat config, includes the no-raw-colors rule)
 pnpm format       # Prettier over the whole repo
 pnpm test         # unit tests (Vitest through Electron's embedded Node)
+pnpm e2e          # end-to-end suite (built app + mocked kie.ai — no credits)
 pnpm db:generate  # generate a Drizzle migration after editing src/main/db/schema.ts
 pnpm dist:mac     # package for macOS (dmg)
 ```
@@ -149,6 +150,7 @@ a new locale (the i18n parity test keeps it honest), or anything in
 | [docs/mcp.md](docs/mcp.md)         | The MCP server: connecting, the tool registry, the in-band docs topics    |
 | [docs/models.md](docs/models.md)   | Adding a kie.ai model, and how the app consumes a `ModelDefinition`       |
 | [docs/testing.md](docs/testing.md) | Test strategy, coverage scope and thresholds                              |
+| [e2e/README.md](e2e/README.md)     | The end-to-end suite: what it guarantees, how to run and extend it        |
 | [docs/roadmap.md](docs/roadmap.md) | Open proposals — nothing committed to, but that's where the work is going |
 
 ## License

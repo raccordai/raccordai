@@ -44,6 +44,11 @@ export function setLocale(locale: Locale): void {
 const portSchema = z.number().int().min(1024).max(65535)
 
 export function getLocalApiPort(): number {
+  // RACCORD_LOCAL_API_PORT wins over the setting: the E2E suite runs a second
+  // instance beside a possibly-running app and must not fight it for the port
+  // (same override pattern as RACCORD_KIE_BASE).
+  const fromEnv = portSchema.safeParse(Number(process.env['RACCORD_LOCAL_API_PORT']))
+  if (fromEnv.success) return fromEnv.data
   const stored = portSchema.safeParse(getSetting('localApiPort'))
   return stored.success ? stored.data : DEFAULT_LOCAL_API_PORT
 }

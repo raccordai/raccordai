@@ -3,9 +3,10 @@
 ## Running the tests
 
 ```bash
-pnpm test            # full suite, single pass
+pnpm test            # unit suite, single pass
 pnpm test:watch      # watch mode during development
-pnpm test:coverage   # suite + coverage report (blocking thresholds)
+pnpm test:coverage   # unit suite + coverage report (blocking thresholds)
+pnpm build && pnpm e2e   # E2E suite (built app + mocked kie.ai, no credits)
 ```
 
 Tests run inside **Electron's embedded Node** (`ELECTRON_RUN_AS_NODE`, see
@@ -22,6 +23,7 @@ tests/mocks/electron.ts   minimal stub of the electron module (aliased for all t
 tests/helpers/db.ts       in-memory SQLite + real drizzle migrations, injected
                           into the singleton via setDatabaseForTests()
 src/**/*.test.ts          tests colocated with the code under test
+e2e/                      E2E suite — runner, harness, specs (see e2e/README.md)
 ```
 
 Principles:
@@ -37,16 +39,24 @@ Principles:
 
 ## Test pyramid
 
-| Level | Target                                                                                                                       | Tool                                                                                                          |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Unit  | pure logic in `src/shared/` (models, i18n), SQLite services (`graph`, `projects`, `videos`), helpers (`media/files`, `lib/`) | Vitest                                                                                                        |
-| E2E   | full flows (generation, chat, UI)                                                                                            | Playwright `_electron` + kie.ai/Anthropic mocks (`RACCORD_KIE_BASE`, `RACCORD_ANTHROPIC_BASE`), see CLAUDE.md |
+| Level | Target                                                                                                                       | Tool                                                                               |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Unit  | pure logic in `src/shared/` (models, i18n), SQLite services (`graph`, `projects`, `videos`), helpers (`media/files`, `lib/`) | Vitest                                                                             |
+| E2E   | full flows: generation + poller, assistant, IPC/MCP, `media://`, MP4 render                                                  | Playwright `_electron` + the kie.ai mock (`RACCORD_KIE_BASE`), see `e2e/README.md` |
 
-The generation engine (`runEngine.ts`, `kie.ts`), the chat (`chat.ts`) and the
-IPC/MCP wiring are deliberately **outside the unit scope**: their value is in
-network/process integration, covered by the mocked E2E harness. Keeping them
-out of the coverage computation avoids cosmetic unit tests written only to
-"make the number go up".
+The generation engine (`runEngine.ts`, `kie.ts`), the chat (`chat.ts`), the
+render process wrapper (`render.ts`) and the IPC/MCP wiring are deliberately
+**outside the unit scope**: their value is in network/process integration,
+covered by the E2E suite. Keeping them out of the coverage computation avoids
+cosmetic unit tests written only to "make the number go up".
+
+`pnpm e2e` runs each spec in its own process against the **built** app, so
+`pnpm build` comes first. Every spec launches Electron with a throwaway
+`--user-data-dir` and its own local-API port: the suite never reads or writes
+the developer's real install, and it has a dedicated CI job. Everything
+kie.ai-shaped — generations, Suno, uploads, credit balance and the Claude
+proxy the assistant talks to — is served by one local mock, so a run costs no
+credits and touches no network.
 
 ## Coverage strategy
 

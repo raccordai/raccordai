@@ -39,9 +39,18 @@ which only re-checks the resource seal and would happily pass an unsigned one.
 
 ## 2. Quality & CI chain
 
-| Proposal                                                                                                                                                 | Effort | Why                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Formalized E2E: promote the Playwright drivers + kie/Anthropic mocks from the session scratchpads into a versioned `e2e/` suite, with a dedicated CI job | L      | This is the layer that covers runEngine/chat/IPC/render, deliberately outside the unit scope. The harness exists (RACCORD_KIE_BASE / RACCORD_ANTHROPIC_BASE), it just isn't versioned. Ready to promote: the MP4-render driver (heterogeneous clips + Suno music + cancellation, MCP-driven to bypass the save dialog; suno mock endpoints documented in the verify skill) |
+Shipped: the versioned E2E suite — `e2e/` (`pnpm e2e`, dedicated CI job).
+The Playwright drivers and the kie mocks that used to live in session
+scratchpads are now a harness: each spec launches the built app with a
+throwaway `--user-data-dir` and its own local-API port (nothing touches the
+developer's install, so no spec needs a cleanup step), against one mock that
+serves every kie surface — jobs, Suno, uploads, credit balance, the Claude
+proxy — plus the result media, and records what the app submitted so a spec
+can assert the payload and not just the outcome. Three specs: generation +
+poller + `media://` (and the style-at-payload rule), the home assistant, and
+the MP4 render (heterogeneous clips + Suno music + cancellation, MCP-driven
+to bypass the save dialog, asserted with ffprobe on the produced file).
+Rules and how to add a spec: `e2e/README.md`.
 
 ## 3. Technical robustness
 
@@ -131,9 +140,10 @@ These feed on the signals the loop above produces; do not start them first.
 
 1. **Finish §1** — what is left is four GitHub-side actions a maintainer takes
    in a minute, plus the README visuals.
-2. **Versioned E2E suite** (§2) — should land before contributors arrive;
-   the MP4-render driver is ready to be promoted.
-3. **Ecosystem** (§5) — the unified tool registry shipped with the assistant
+2. **Ecosystem** (§5) — the unified tool registry shipped with the assistant
    sidebar doubles as MCP-surface hardening for the "public API" pitch.
-4. **Ambient layer** (§6.7) — now unblocked: the loop produces the signals it
+3. **Ambient layer** (§6.7) — now unblocked: the loop produces the signals it
    needs (selections, annotations, QC verdicts).
+
+Growing the E2E suite is not a step of its own any more: a flow worth
+protecting gets its spec in `e2e/` as part of the work that introduces it.

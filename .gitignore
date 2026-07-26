@@ -11,5 +11,8 @@ coverage/
 # Tooling caches
 .tanstack/
 
+# Generated E2E media fixtures (rebuilt on demand from the bundled ffmpeg)
+e2e/.fixtures/
+
 # User backups must never land in the repo
 *.raccord

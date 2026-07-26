@@ -37,7 +37,8 @@ Thanks for your interest! This document describes how to open a Pull Request
   If you spot a cleanup, open a separate PR.
 - **Small is better.** Beyond ~400 lines of effective diff, split it if
   possible; review will be faster and better.
-- **Green locally before opening**: `pnpm typecheck && pnpm test && pnpm build`.
+- **Green locally before opening**: `pnpm typecheck && pnpm test && pnpm build`
+  (plus `pnpm e2e` when the change touches a flow the E2E suite covers).
 - **Screenshot or screencast required** for any visible UI change (the app is
   a visual editor — review happens with the eyes too).
 - **Honest description**: what works, what isn't covered, debatable choices.
@@ -74,11 +75,17 @@ The full strategy lives in [`docs/testing.md`](docs/testing.md). The essentials:
   rejection.
 - A test verifies observable behavior, not executed lines. "Cosmetic" tests
   written to inflate the number will be rejected.
+- `pnpm build && pnpm e2e` runs the end-to-end suite (see
+  [`e2e/README.md`](e2e/README.md)): the real app, driven by Playwright
+  against a local kie.ai mock — **no credits, no network**. Run it when you
+  touch the generation engine, the assistant, the IPC/MCP surface or the
+  render, and add a spec when you ship a flow worth protecting.
 
 ## What the pipeline checks
 
 `lint` → `format:check` → `typecheck` → `test:coverage` (blocking thresholds)
-→ `build`. A PR with a red pipeline is not reviewed.
+→ `build`, and a parallel `e2e` job (built app + mocked kie.ai under xvfb).
+A PR with a red pipeline is not reviewed.
 
 ## Review
 

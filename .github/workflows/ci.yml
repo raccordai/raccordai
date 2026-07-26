@@ -42,3 +42,35 @@ jobs:
           name: coverage
           path: coverage/
           retention-days: 14
+
+  # The layer the unit suite leaves out on purpose: run engine, chat, IPC/MCP,
+  # media protocol and the MP4 render — driven through Playwright against the
+  # mocked kie.ai (no credits, no network). See e2e/README.md.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Electron's runtime deps + a virtual display: the app is a real window,
+      # even headless. libasound is named libasound2t64 since Ubuntu 24.04.
+      - name: Install Electron runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1
+          sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      # safeStorage has no keyring here — the harness launches Electron with
+      # --password-store=basic so the seeded kie key can be encrypted.
+      - run: xvfb-run --auto-servernum pnpm e2e

@@ -47,7 +47,7 @@ export default tseslint.config(
   {
     // Node scripts (build tooling, E2E drivers) — not part of the app bundles.
     // Browser globals too: playwright evaluate() callbacks run in the renderer.
-    files: ['scripts/**/*.{mjs,cjs,js}', '*.{mjs,cjs}', '.*.cjs'],
+    files: ['scripts/**/*.{mjs,cjs,js}', 'e2e/**/*.mjs', '*.{mjs,cjs}', '.*.cjs'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } }
   },
   {
