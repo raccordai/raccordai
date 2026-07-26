@@ -1,0 +1,75 @@
+name: ✨ Feature request
+description: Propose a change to how Raccord works
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Raccord's north star: **be the most intuitive tool to create AI videos
+        through workflows**. The proposals that land are the ones that lower
+        the cost — in credits and in minutes — of getting from a brief to the
+        first shot you judge good.
+
+        Open the issue **before** writing code (see
+        [CONTRIBUTING.md](https://github.com/raccordai/raccordai/blob/main/CONTRIBUTING.md)):
+        an accepted proposal is much faster to merge than a surprise PR.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        What you were trying to do and where it hurt. Describe the situation,
+        not the solution — a concrete story beats an abstract need.
+      placeholder: |
+        Re-running the same shot with a slightly different prompt means
+        re-typing the whole prompt; I lose track of which variant said what.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like instead
+      description: The behavior you want, from the user's point of view.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds and alternatives
+      description: How you cope today, and other designs you considered and rejected.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Canvas / node graph
+        - Timeline
+        - Generation (kie.ai models, queue, retries)
+        - MP4 render / export
+        - Assistant (chat)
+        - MCP server / agent-drivable API
+        - Projects, assets, library
+        - Settings, onboarding, updates
+        - i18n / a new locale
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to implement this myself if the proposal is accepted
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and `docs/roadmap.md`, and this is not already tracked
+          required: true

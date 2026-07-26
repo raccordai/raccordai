@@ -1,0 +1,117 @@
+name: 🐛 Bug report
+description: Something in Raccord behaves incorrectly
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A bug reproduced from your description gets
+        fixed; one that can't be reproduced gets closed — so the version, OS
+        and steps below really matter.
+
+        **Never paste an API key** (kie.ai, Anthropic) in an issue: logs and
+        screenshots can contain one.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: |
+        I clicked "Render MP4" on a timeline with 3 shots. Expected an .mp4
+        file; got an error toast "ffmpeg exited with code 1".
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: From a fresh launch if possible. Number the steps.
+      placeholder: |
+        1. Create a project, then a video from the "storyboard-sequence" template
+        2. Run the first node
+        3. …
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Raccord version
+      description: Settings → About shows it. If you build from source, give the commit sha.
+      placeholder: '1.1.0'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 10
+        - Windows 11
+        - Linux (AppImage)
+        - Linux (deb)
+        - Other / built from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Update channel
+      description: Settings → Updates. Choose "dev" if you run `pnpm dev` or a local build.
+      options:
+        - stable
+        - beta
+        - dev (development / built from source)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Best guess is fine.
+      options:
+        - Canvas / node graph
+        - Timeline
+        - Generation (kie.ai models, queue, retries)
+        - MP4 render / export
+        - Assistant (chat)
+        - MCP server
+        - Projects, assets, library
+        - Settings, onboarding, updates
+        - Backup / import / restore
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: models
+    attributes:
+      label: Models involved
+      description: If the bug touches a generation, which model(s)?
+      placeholder: 'seedance-2-fast, gpt-image-2-image-to-image'
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, errors, screenshots
+      description: |
+        Node error messages, the failing generation's error, a screenshot of
+        the canvas. Redact anything key-shaped before pasting.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate
+          required: true
+        - label: This report contains no API key or other secret
+          required: true

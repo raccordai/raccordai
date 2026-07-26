@@ -73,6 +73,23 @@ jobs:
           codesign -dvv "$app" 2>&1 | grep "Authority=Developer ID Application"
           xcrun stapler validate "$app"
 
+          # ffmpeg/ffprobe are asarUnpack'd (they are spawned as child
+          # processes by the MP4 render, see electron-builder.yml) and land as
+          # loose Mach-O binaries under Resources. `--verify --deep` only
+          # checks that they match the resource seal, so an unsigned one would
+          # pass here and be rejected by the notary service — assert their own
+          # Developer ID signature and hardened runtime explicitly.
+          unpacked="$app/Contents/Resources/app.asar.unpacked/node_modules"
+          for bin in \
+            "$unpacked/ffmpeg-static/ffmpeg" \
+            "$unpacked/ffprobe-static/bin/darwin/arm64/ffprobe"; do
+            echo "checking $bin"
+            test -x "$bin"
+            codesign -dvv "$bin" 2>&1 | tee /tmp/sig.txt
+            grep -q "Authority=Developer ID Application" /tmp/sig.txt
+            grep -qE "flags=.*runtime" /tmp/sig.txt
+          done
+
       - name: Alias binaries with stable names for /releases/latest/download links
         shell: bash
         run: |

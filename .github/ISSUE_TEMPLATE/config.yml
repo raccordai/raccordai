@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/raccordai/raccordai/security/advisories/new
+    about: Never report a vulnerability in a public issue — open a private advisory instead (see SECURITY.md).
+  - name: 💬 Question or idea to discuss
+    url: https://github.com/raccordai/raccordai/discussions
+    about: Usage questions and open-ended ideas belong in Discussions. Issues are for actionable bugs and scoped requests.
+  - name: 📖 Contributing guide
+    url: https://github.com/raccordai/raccordai/blob/main/CONTRIBUTING.md
+    about: Setup, project conventions and what a mergeable PR looks like.

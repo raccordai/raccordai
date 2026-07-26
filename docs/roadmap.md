@@ -15,13 +15,27 @@ recorded in git history and CLAUDE.md; only open work remains below.
 
 ## 1. Open-source hygiene — before publishing
 
-| Proposal                                                              | Effort | Why                                                                                                                                                      |
-| --------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public README: screenshots, demo GIF, quickstart                      | S      | It is the project's landing page                                                                                                                         |
-| `CODE_OF_CONDUCT.md` + issue templates (bug / feature / kie.ai model) | S      | Frames the discussions and structures bug reports (version, OS, channel)                                                                                 |
-| Security policy (`SECURITY.md`)                                       | S      | Private vulnerability reporting channel — the app handles API keys                                                                                       |
-| Enable secret scanning + push protection on the GitHub repo           | S      | Repo setting, not a file — flip it right after the first push (documented in CONTRIBUTING.md)                                                            |
-| Confirm mac notarization covers the asarUnpack'd ffmpeg/ffprobe       | S      | One-time check on the next publish run — electron-builder signs `app.asar.unpacked` by default, but only the signed pipeline (repo secrets) can prove it |
+Shipped: the README quickstart (install → key → first shot → export, plus
+run-from-source, a docs index and the community links), `SECURITY.md`
+(private reporting channels, scope, how secrets are handled),
+`CODE_OF_CONDUCT.md` (Contributor Covenant 2.1) and the three issue forms
+(bug with version/OS/channel/area, feature, new kie.ai model) behind a
+`config.yml` that routes vulnerabilities to a private advisory and questions
+to Discussions.
+
+The mac-signing question is settled too: a local signed `pnpm dist:mac`
+confirms electron-builder gives every asarUnpack'd binary (ffmpeg, both
+ffprobe arches, `better_sqlite3.node`) its own Developer ID signature with the
+hardened runtime — which is what the notary service checks. `publish-release.yml`
+now asserts it per binary instead of trusting `codesign --verify --deep`,
+which only re-checks the resource seal and would happily pass an unsigned one.
+
+| Proposal                                             | Effort | Why                                                                                                                                                          |
+| ---------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| README screenshots + demo GIF                        | S      | The only piece of the landing page still missing — needs real project media, mock-generated output would misrepresent the app                                |
+| Enable secret scanning + push protection on the repo | S      | Repo setting, not a file — a maintainer flips it in _Settings → Security_ (documented in CONTRIBUTING.md and SECURITY.md, which already states it as active) |
+| Create the `model` issue label                       | S      | `model_request.yml` applies it; GitHub silently drops a label that does not exist                                                                            |
+| Enable GitHub Discussions                            | S      | `.github/ISSUE_TEMPLATE/config.yml` and CONTRIBUTING.md send questions and open-ended ideas there                                                            |
 
 ## 2. Quality & CI chain
 
@@ -31,9 +45,10 @@ recorded in git history and CLAUDE.md; only open work remains below.
 
 ## 3. Technical robustness
 
-| Proposal                                                  | Effort | Why                                                      |
-| --------------------------------------------------------- | ------ | -------------------------------------------------------- |
-| Opt-in crash telemetry (Sentry or self-hosted equivalent) | M      | Without crash reports, open-source support will be blind |
+| Proposal                                                  | Effort | Why                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ship an arm64-native ffprobe                              | S      | `ffprobe-static@3.1.0` puts an **x86_64** binary in `bin/darwin/arm64/` (verified on a packaged build) — on an Apple Silicon Mac without Rosetta 2 the probe step fails and takes the whole MP4 render with it. `ffmpeg-static` is genuinely arm64; only ffprobe is not |
+| Opt-in crash telemetry (Sentry or self-hosted equivalent) | M      | Without crash reports, open-source support will be blind                                                                                                                                                                                                                |
 
 ## 4. Product — smaller items
 
@@ -114,8 +129,8 @@ These feed on the signals the loop above produces; do not start them first.
 
 ## Suggested order
 
-1. **OSS hygiene** (§1) — the blockers for a good first impression at
-   publication.
+1. **Finish §1** — what is left is four GitHub-side actions a maintainer takes
+   in a minute, plus the README visuals.
 2. **Versioned E2E suite** (§2) — should land before contributors arrive;
    the MP4-render driver is ready to be promoted.
 3. **Ecosystem** (§5) — the unified tool registry shipped with the assistant

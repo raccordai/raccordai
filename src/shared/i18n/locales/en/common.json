@@ -210,7 +210,7 @@
     "updateChannel": "Update channel",
     "channelStable": "Stable",
     "channelBeta": "Beta",
-    "channelHint": "The beta channel receives new features early (beta flags on by default). Only applies to the installed app — in development the channel is always \"dev\".",
+    "channelHint": "The beta channel receives pre-releases, ahead of the stable ones. Only applies to the installed app — in development the channel is always \"dev\".",
     "updateCheck": "Check for updates",
     "updateInstall": "Restart and install",
     "updateStatus": {

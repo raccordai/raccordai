@@ -23,6 +23,5 @@
 - [ ] UI strings added to `fr/common.json` **and** `en/common.json`
 - [ ] Additive-only DB migration (if the schema changed)
 - [ ] Colors via `styles.css` tokens (if UI)
-- [ ] Feature flag created (if early-phase feature)
 - [ ] Capability added to the MCP registry (if new app capability)
 - [ ] Screenshot attached (if visible change)

@@ -1,0 +1,100 @@
+name: 🎬 New kie.ai model
+description: Ask for (or offer to add) a generation model available on kie.ai
+labels: ['model']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A model is **one declarative file** in `src/shared/models/` plus one
+        entry in the `MODELS` array — the node UI, the params form, the
+        payload, the credit estimate, the timeline, the assistant and the MCP
+        docs all derive from it. The full guide is
+        [`docs/models.md`](https://github.com/raccordai/raccordai/blob/main/docs/models.md);
+        adding a model is a great first contribution.
+
+        Fill in what you know — a link to the kie.ai model page is already a
+        useful issue.
+
+  - type: input
+    id: model-id
+    attributes:
+      label: kie.ai model id
+      description: The exact identifier sent to `POST /api/v1/jobs/createTask`, verbatim.
+      placeholder: 'bytedance/seedance-1.5-pro'
+    validations:
+      required: true
+
+  - type: input
+    id: docs-url
+    attributes:
+      label: Link to the kie.ai documentation
+      description: The model page listing its parameters and response shape.
+      placeholder: 'https://docs.kie.ai/...'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      description: |
+        Drives the Add-node grouping and the timeline — only `video` nodes
+        become clips, `audio` nodes go to the audio lane.
+      options:
+        - image
+        - video
+        - audio
+    validations:
+      required: true
+
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Image / video inputs, and their semantics
+      description: |
+        **The #1 pitfall.** For each media input, say whether it is a **frame
+        anchor** (the image appears on screen: `first_frame_url`,
+        `input_urls`, `image_urls`…) or a **reference** (guides the model but
+        stays invisible unless the prompt gives it a role: `reference_*`).
+        Note any mutually exclusive modes the provider documents.
+      placeholder: |
+        - first_frame_url — frame anchor, optional
+        - reference_image_urls — references, up to 4, addressed as @Image1…
+        - the API rejects first_frame_url and reference_image_urls together
+    validations:
+      required: true
+
+  - type: textarea
+    id: params
+    attributes:
+      label: Parameters
+      description: Name, type, allowed values and default for each — durations, resolutions, aspect ratios, seeds…
+      placeholder: |
+        - prompt: string, required
+        - duration: 4 | 8 (seconds), default 4 — sent as a string
+        - resolution: "720p" | "1080p", default "720p"
+        - aspect_ratio: "16:9" | "9:16" | "1:1", default "16:9"
+
+  - type: input
+    id: price
+    attributes:
+      label: Price per run
+      description: From https://kie.ai/pricing — feeds `estimateCredits` (indicative rate, declared in the model file).
+      placeholder: '$0.15 per 4s clip at 720p'
+
+  - type: textarea
+    id: prompting
+    attributes:
+      label: Official prompting guidance
+      description: |
+        Link or distilled summary. This becomes `promptingNotes` /
+        `promptGuide`, which is what the built-in assistant and external MCP
+        agents read before writing a prompt — so it should reflect the
+        provider's guide, not personal habits.
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd like to write the model file myself (I've read `docs/models.md`)

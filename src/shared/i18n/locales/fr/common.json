@@ -210,7 +210,7 @@
     "updateChannel": "Canal de mise à jour",
     "channelStable": "Stable",
     "channelBeta": "Bêta",
-    "channelHint": "Le canal bêta reçoit les nouvelles fonctionnalités en avance (flags bêta activés par défaut). Ne s'applique qu'à l'application installée — en développement le canal est toujours « dev ».",
+    "channelHint": "Le canal bêta reçoit les préversions, en avance sur les versions stables. Ne s'applique qu'à l'application installée — en développement le canal est toujours « dev ».",
     "updateCheck": "Rechercher une mise à jour",
     "updateInstall": "Redémarrer et installer",
     "updateStatus": {
