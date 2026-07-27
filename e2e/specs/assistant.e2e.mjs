@@ -89,7 +89,7 @@ await spec('assistant', async () => {
         id: 'msg_empty',
         type: 'message',
         role: 'assistant',
-        model: 'claude-opus-4-8',
+        model: 'claude-opus-5',
         content: [],
         stop_reason: 'end_turn',
         stop_sequence: null,
@@ -128,7 +128,7 @@ await spec('assistant', async () => {
       id: `msg_${turn}`,
       type: 'message',
       role: 'assistant',
-      model: 'claude-opus-4-8',
+      model: 'claude-opus-5',
       stop_sequence: null,
       usage: { input_tokens: 1, output_tokens: 1 }
     }

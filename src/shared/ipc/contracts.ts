@@ -24,12 +24,20 @@ export const HOME_CHAT_ID = 'home'
  * (Anthropic Messages format); GPT ids go through the OpenAI Responses proxies.
  */
 export const assistantModelSchema = z.enum([
+  'claude-opus-5',
   'claude-opus-4-8',
   'claude-sonnet-5',
   'gpt-5-6-sol',
   'gpt-5.4-codex'
 ])
 export type AssistantModel = z.infer<typeof assistantModelSchema>
+
+/**
+ * Model the assistant runs on until the user picks another one — the single
+ * source of truth for main's fallback and for the renderer's optimistic
+ * rendering while `settings:getAssistantModel` is still in flight.
+ */
+export const DEFAULT_ASSISTANT_MODEL: AssistantModel = 'claude-opus-5'
 
 /**
  * Does the assistant need the user's approval before spending credits?

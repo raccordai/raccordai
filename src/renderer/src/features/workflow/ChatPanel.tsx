@@ -16,7 +16,13 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AppContext, ChatImage, ChatItem, ChatPlan } from '@shared/ipc/contracts'
+import {
+  DEFAULT_ASSISTANT_MODEL,
+  type AppContext,
+  type ChatImage,
+  type ChatItem,
+  type ChatPlan
+} from '@shared/ipc/contracts'
 import { Button } from '@renderer/components/ui/Button'
 import { useToast } from '@renderer/components/feedback/Feedback'
 import { MentionMenu, useMentionMenu, type MentionItem } from '@renderer/components/ui/MentionMenu'
@@ -41,7 +47,7 @@ function dataUrlToChatImage(dataUrl: string): ChatImage | null {
 
 /**
  * Assistant conversation — Claude-style transcript driving the app through
- * the main-process agentic loop (claude-opus-4-8 + graph tools). Hosted by
+ * the main-process agentic loop (claude-opus-5 + graph tools). Hosted by
  * the global AssistantSidebar; tool calls render as compact chips.
  */
 export function ChatPanel({
@@ -251,7 +257,7 @@ export function ChatPanel({
           className="shrink-0 px-1 text-[10px] text-neutral-600"
           title={t('settings.assistantModel')}
         >
-          {ASSISTANT_MODEL_SHORT[assistantModel.data ?? 'claude-opus-4-8']}
+          {ASSISTANT_MODEL_SHORT[assistantModel.data ?? DEFAULT_ASSISTANT_MODEL]}
         </span>
         {(chat.data?.items.length ?? 0) > 0 && (
           <button

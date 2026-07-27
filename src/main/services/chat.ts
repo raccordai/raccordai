@@ -59,8 +59,8 @@ import { getAssistantModel, getAssistantRunApproval, getKieApiKey, getLocale } f
 import * as videos from './videos'
 
 /**
- * The assistant — an agentic loop over kie.ai's Claude proxy (claude-opus-4-8,
- * https://docs.kie.ai/market/claude/claude-opus-4-8) whose tools are the SAME
+ * The assistant — an agentic loop over kie.ai's Claude proxy (claude-opus-5,
+ * https://docs.kie.ai/market/claude/claude-opus-5) whose tools are the SAME
  * main-process services the IPC layer exposes. One in-memory session per
  * video; the renderer mirrors it via chat:get + `event:chatUpdate` pushes.
  *

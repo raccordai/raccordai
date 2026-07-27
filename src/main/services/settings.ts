@@ -6,6 +6,7 @@ import { DEFAULT_LOCAL_API_PORT } from '@shared/config'
 import {
   assistantModelSchema,
   assistantRunApprovalSchema,
+  DEFAULT_ASSISTANT_MODEL,
   localeSchema,
   type AssistantModel,
   type AssistantRunApproval,
@@ -131,7 +132,7 @@ export function setNotifyOnCompletion(enabled: boolean): void {
 /** Which kie.ai market model powers the embedded assistant. */
 export function getAssistantModel(): AssistantModel {
   const stored = assistantModelSchema.safeParse(getSetting('assistantModel'))
-  return stored.success ? stored.data : 'claude-opus-4-8'
+  return stored.success ? stored.data : DEFAULT_ASSISTANT_MODEL
 }
 
 export function setAssistantModel(model: AssistantModel): void {
