@@ -2,12 +2,14 @@ import { MODELS } from '@shared/models'
 import { MAX_VARIANTS } from '@shared/config'
 import { getStyle } from '@shared/styles/registry'
 import { videoAspectRatioSchema, videoResolutionSchema } from '@shared/ipc/contracts'
+import { SCREEN_DIRECTIONS, planScenario, type ScenarioBeat } from '@shared/scenario'
 import { broadcastFocusNode, broadcastNavigate, broadcastWorkflowChanged } from '../events'
 import * as assets from '../services/assets'
 import * as generations from '../services/generations'
 import * as graph from '../services/graph'
 import * as graphHistory from '../services/graphHistory'
 import { createEditNodeFromAnnotations, listAnnotations } from '../services/annotations'
+import { linkShots } from '../services/continuity'
 import {
   createCheckpoint,
   diffAgainstCurrent,
@@ -126,6 +128,11 @@ export const AGENT_TOOLS: AgentTool[] = [
           accepts: h.accepts,
           required: h.required ?? false,
           multiple: h.multiple ?? false,
+          maxCount: h.maxCount,
+          // Combined-length budget across the handle (Seedance 2: 15 s).
+          maxTotalSeconds: h.maxTotalSeconds,
+          // The frame-anchor vs reference distinction, machine-readable.
+          frameAnchor: h.frameAnchor ?? false,
           referenceAlias: h.referenceAlias
         })),
         outputs: m.outputs.map((o) => o.key),
@@ -134,6 +141,11 @@ export const AGENT_TOOLS: AgentTool[] = [
           type: f.type,
           default: f.defaultValue,
           options: f.options?.map((o) => o.value),
+          // Numeric bounds are a hard API contract (a Seedance clip cannot be
+          // shorter than 4 s) — without them here an agent has no way to know.
+          min: f.min,
+          max: f.max,
+          step: f.step,
           description: f.description
         })),
         promptingNotes: m.promptingNotes,
@@ -369,6 +381,16 @@ export const AGENT_TOOLS: AgentTool[] = [
         // §6 iteration loop: cheap-substitution runs / vision checks on settle.
         draftMode: video.draftMode,
         qcEnabled: video.qcEnabled,
+        // §6.7 — the shot list this graph is meant to realize. Summary only:
+        // get_scenario returns the shots with their prompt scaffolds.
+        scenario: video.scenario
+          ? {
+              brief: video.scenario.brief,
+              shotCount: video.scenario.shots.length,
+              totalSeconds: video.scenario.totalSeconds,
+              warnings: video.scenario.warnings.length
+            }
+          : null,
         nodes: nodes.map((n) => ({
           id: n.id,
           key: n.key,
@@ -389,6 +411,83 @@ export const AGENT_TOOLS: AgentTool[] = [
         assets: assets.listAssets(video.projectId).map(assetRow)
       }
     }
+  },
+  {
+    name: 'write_scenario',
+    description:
+      'Turn a brief into the video\'s scenario, BEFORE present_plan: you write the beats, it returns shots with durations the model accepts, chained by their opening/closing frames, each carrying a promptScaffold to write the shot prompt on top of. Always report its `warnings` to the user — stretched or merged beats, a total that drifts from the brief, a cut with no exit frame. Details: docs "scenario".',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        brief: str('The user’s brief, verbatim — what the film has to deliver'),
+        modelId: str('Video model the shot durations must be legal for'),
+        targetSeconds: {
+          type: 'number',
+          description: 'Total length the brief asks for, when it names one'
+        },
+        shortBeatPolicy: {
+          type: 'string',
+          enum: ['stretch', 'merge'],
+          description:
+            'Beats under the model floor: "stretch" (default) runs them at the floor and keeps the cut list; "merge" folds them into a neighbour and keeps the film length.'
+        },
+        beats: {
+          type: 'array',
+          description: 'The script, in order.',
+          items: {
+            type: 'object',
+            properties: {
+              title: str('Short beat title, e.g. "Le départ"'),
+              action: str('What happens — the raw material of the shot prompt'),
+              seconds: { type: 'number', description: 'Length the script asks for' },
+              camera: str('Camera intent, e.g. "low-angle tracking"'),
+              sound: str('Dialogue and sound design'),
+              opensOn: str('Frame this beat opens on (derived from the previous one if omitted)'),
+              closesOn: str('Frame this beat closes on — what the NEXT shot opens on'),
+              screenDirection: {
+                type: 'string',
+                enum: [...SCREEN_DIRECTIONS],
+                description: 'Which way the subject travels — continuity across the cut'
+              },
+              boardDriven: {
+                type: 'boolean',
+                description: 'True if a storyboard/shot board will be wired on this shot'
+              },
+              mergeWithNext: {
+                type: 'boolean',
+                description: 'Fold this beat into the next one whatever the policy'
+              }
+            },
+            required: ['title', 'action', 'seconds']
+          }
+        }
+      },
+      ['videoId', 'brief', 'modelId', 'beats']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, brief, modelId, targetSeconds, shortBeatPolicy, beats }) => {
+      const scenario = planScenario({
+        brief: String(brief),
+        modelId: String(modelId),
+        ...(typeof targetSeconds === 'number' ? { targetSeconds } : {}),
+        ...(shortBeatPolicy === 'merge' || shortBeatPolicy === 'stretch'
+          ? { shortBeatPolicy }
+          : {}),
+        beats: (Array.isArray(beats) ? beats : []) as ScenarioBeat[]
+      })
+      videos.setVideoScenario(String(videoId), scenario)
+      return scenario
+    }
+  },
+  {
+    name: 'get_scenario',
+    description:
+      "The video's scenario: the shot list, each shot's legal duration, its opening and closing frames, and the promptScaffold to write its prompt on top of. Null when none was written yet.",
+    inputSchema: obj({ videoId: str() }, ['videoId']),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId }) => videos.getVideoScenario(String(videoId))
   },
   {
     name: 'export_workflow',
@@ -485,6 +584,26 @@ export const AGENT_TOOLS: AgentTool[] = [
         targetNodeId: String(targetNodeId),
         targetHandle: String(input)
       })
+  },
+  {
+    name: 'link_shots',
+    description:
+      'Chain shots for continuity: each clip becomes an @Video reference on the NEXT shot (same look, wardrobe, set, grade), role sentence appended to its prompt, one undo step. It serializes the batch and a re-roll invalidates the shots after it — propose it, never apply it by default. Cuts it cannot wire come back in "skipped". NOT lastFrame chaining. Details: docs "continuity".',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        nodeIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Video shot node ids IN TIMELINE ORDER (at least two).'
+        }
+      },
+      ['videoId', 'nodeIds']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, nodeIds }) =>
+      linkShots(String(videoId), (Array.isArray(nodeIds) ? nodeIds : []).map(String))
   },
   {
     name: 'remove_node',
@@ -587,7 +706,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'lint_node',
     description:
-      'Check a node BEFORE running it: empty prompt, missing required input, reference wired but never addressed in the prompt, design sheet on a frame anchor, storyboard shot without the anti-grid guard, param outside the model’s enums. Free — no kie.ai call.',
+      'Check a node BEFORE running it: empty prompt, missing required input, reference wired but never addressed in the prompt, design sheet on a frame anchor, storyboard shot without the anti-grid guard, param outside the model’s enums or numeric bounds (a clip shorter than the model accepts), reference handle over its combined-length budget. Free — no kie.ai call.',
     inputSchema: obj({ nodeId: str() }, ['nodeId']),
     scope: 'global',
     risk: 'read',

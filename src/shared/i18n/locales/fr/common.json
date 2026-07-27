@@ -358,10 +358,21 @@
       "edges": "recâbler {{count}} connexion(s)",
       "selections": "changer la sortie sélectionnée sur {{count}} nœud(s)"
     },
+    "scenario": {
+      "title": "Scénario",
+      "open": "Scénario — le découpage écrit avant le graphe",
+      "empty": "Aucun scénario pour l'instant. Donne ton brief à l'assistant (« écris-moi le scénario de… ») : il écrit le découpage, cale les durées sur ce que le modèle accepte et enchaîne chaque plan sur l'image de fermeture du précédent.",
+      "shotCount_one": "{{count}} plan",
+      "shotCount_other": "{{count}} plans",
+      "target": "brief : {{target}}",
+      "asked": "demandé {{seconds}}",
+      "mergedFrom": "Fusionné depuis : {{beats}}",
+      "editHint": "Le scénario se modifie via l'assistant — il garde le découpage, les durées et le graphe cohérents."
+    },
     "lint": {
       "fix": {
         "appendPrompt": "Ajouter au prompt",
-        "setParam": "Utiliser la valeur par défaut",
+        "setParam": "Utiliser une valeur valide",
         "rewire": "Recâbler en référence"
       }
     },
@@ -533,6 +544,11 @@
       "name": "Image de style",
       "desc": "Un cadre qui fixe le look du film",
       "placeholder": "ex. ruelle sous la pluie, ambiance polar"
+    },
+    "shotboard": {
+      "name": "Board de plan",
+      "desc": "Grille 4 panneaux d'UN plan — image d'ouverture, action, image de fermeture",
+      "placeholder": "ex. Maya slalome entre deux camionnettes, de gauche à droite"
     },
     "storyboard": {
       "name": "Storyboard",

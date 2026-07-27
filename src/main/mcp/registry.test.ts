@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AGENT_TOOLS } from './registry'
+import { DOC_TOPICS, getDoc } from './docs'
 
 /**
  * Registry invariants (§4.10 phase 3). Every capability entry must be fully
@@ -77,5 +78,40 @@ describe('AGENT_TOOLS registry', () => {
     for (const tool of AGENT_TOOLS) {
       expect(tool.name).not.toMatch(/setting|backup|api_key|update_channel/)
     }
+  })
+})
+
+describe('agent-facing model documentation', () => {
+  // The bug this guards: an agent that cannot SEE the 4 s floor plans 2-3 s
+  // beats from a script, and the run only fails after the user approved it.
+  it('publishes the numeric bounds of every param in docs "model:<id>"', () => {
+    const doc = getDoc('model:bytedance/seedance-2-fast')
+    expect(doc).toContain('"duration"')
+    expect(doc).toContain('allowed: 4..15')
+    // Handle limits are part of the contract too.
+    expect(doc).toContain('≤15s combined')
+    expect(doc).toContain('FRAME ANCHOR')
+  })
+
+  it('exposes the same bounds through list_models', async () => {
+    const listModels = AGENT_TOOLS.find((t) => t.name === 'list_models')!
+    const models = (await listModels.execute({})) as Array<{
+      id: string
+      paramFields: Array<{ key: string; min?: number; max?: number }>
+    }>
+    const duration = models
+      .find((m) => m.id === 'bytedance/seedance-2-fast')!
+      .paramFields.find((f) => f.key === 'duration')
+    expect(duration).toMatchObject({ min: 4, max: 15 })
+  })
+
+  it('serves the continuity topic and advertises it', () => {
+    expect(DOC_TOPICS).toContain('continuity')
+    const doc = getDoc('continuity')
+    expect(doc).toContain('OPENS ON')
+    expect(doc).toContain('CLOSES ON')
+    expect(doc).toMatch(/screen direction/i)
+    expect(doc).toContain('link_shots')
+    expect(doc).toContain('shotboard')
   })
 })

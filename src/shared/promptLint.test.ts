@@ -180,6 +180,99 @@ describe('lintNode', () => {
     })
     expect(rules(findings)).not.toContain('param-out-of-enum')
   })
+
+  // The scenario that started this rule: a script with 2-3s beats produced
+  // Seedance nodes below the model's 4s floor, stored verbatim, and the run
+  // died on a zod dump after the user had already approved the plan.
+  it('blocks a clip shorter than the model accepts and proposes the floor', () => {
+    const findings = lintNode({
+      modelId: VIDEO_MODEL,
+      params: { prompt: 'She pedals hard, camera tracking beside her.', duration: 3 },
+      connections: []
+    })
+    const finding = findings.find((f) => f.rule === 'param-out-of-range')
+    expect(finding?.severity).toBe('error')
+    expect(finding?.subject).toBe('duration')
+    expect(finding?.message).toContain('4 to 15')
+    expect(finding?.fix).toEqual({ kind: 'setParam', key: 'duration', value: 4 })
+    expect(hasBlockingFinding(findings)).toBe(true)
+  })
+
+  it('blocks a clip longer than the model accepts', () => {
+    const findings = lintNode({
+      modelId: VIDEO_MODEL,
+      params: { prompt: 'She pedals hard, camera tracking beside her.', duration: 20 },
+      connections: []
+    })
+    expect(findings.find((f) => f.rule === 'param-out-of-range')?.fix).toEqual({
+      kind: 'setParam',
+      key: 'duration',
+      value: 15
+    })
+  })
+
+  it('warns (without blocking) when a stepped duration would be snapped', () => {
+    const findings = lintNode({
+      // Seedance 1.5 only accepts 4/8/12 — buildPayload snaps silently, so the
+      // timeline would show a length the delivered clip does not have.
+      modelId: 'bytedance/seedance-1.5-pro',
+      params: { prompt: 'She walks away, camera pulls back.', duration: 7 },
+      connections: []
+    })
+    const finding = findings.find((f) => f.rule === 'param-out-of-range')
+    expect(finding?.severity).toBe('warning')
+    expect(finding?.message).toContain('4, 8, 12')
+    expect(finding?.fix).toEqual({ kind: 'setParam', key: 'duration', value: 8 })
+    expect(hasBlockingFinding(findings)).toBe(false)
+  })
+
+  it('says nothing about a duration inside the model bounds', () => {
+    const findings = lintNode({
+      modelId: VIDEO_MODEL,
+      params: { prompt: 'She pedals hard, camera tracking beside her.', duration: 4 },
+      connections: []
+    })
+    expect(rules(findings)).not.toContain('param-out-of-range')
+  })
+
+  it('flags a number field emptied in the UI', () => {
+    const findings = lintNode({
+      modelId: VIDEO_MODEL,
+      params: { prompt: 'She pedals, camera tracks.', duration: Number.NaN },
+      connections: []
+    })
+    expect(findings.find((f) => f.rule === 'param-out-of-range')?.severity).toBe('error')
+  })
+
+  // Chaining previous shots as @Video references is the continuity tool, and
+  // it is the one that silently overruns Seedance 2's 15s combined budget.
+  it('warns when the reference videos exceed the handle budget', () => {
+    const clip = (n: number, seconds: number): LintConnection => ({
+      edgeId: `e${n}`,
+      handleKey: 'reference_video_urls',
+      alias: `@Video${n}`,
+      sourceLabel: `Shot 0${n}`,
+      sourceDurationSeconds: seconds
+    })
+    const prompt =
+      'New camera setup: a cut. @Video1 and @Video2 are the previous shots — match their grade. Camera tracks.'
+    const within = lintNode({
+      modelId: VIDEO_MODEL,
+      params: { prompt },
+      connections: [clip(1, 8), clip(2, 7)]
+    })
+    expect(rules(within)).not.toContain('reference-budget-exceeded')
+
+    const over = lintNode({
+      modelId: VIDEO_MODEL,
+      params: { prompt },
+      connections: [clip(1, 8), clip(2, 8)]
+    })
+    const finding = over.find((f) => f.rule === 'reference-budget-exceeded')
+    expect(finding?.severity).toBe('warning')
+    expect(finding?.subject).toBe('reference_video_urls')
+    expect(finding?.message).toContain('15s combined')
+  })
 })
 
 describe('helpers', () => {

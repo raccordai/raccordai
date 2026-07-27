@@ -27,6 +27,12 @@ export interface DesignRecipe {
   description: string
   /** Placeholder slot kept in the prompt when no description is given, e.g. "[CHARACTER]". */
   slot: string
+  /**
+   * True for recipes that produce a PANEL GRID (the 3x3 scene storyboard, the
+   * 2x2 shot board). Machine-readable so the prompt lint can require the
+   * anti-grid guard on any shot they feed, without hardcoding recipe ids.
+   */
+  board?: true
   /** The image model the default prompt is written for. */
   defaultModelId: string
   /** Recipe param overrides, merged over the model's defaults (never over `prompt`). */
@@ -116,8 +122,43 @@ export const DESIGN_RECIPES: DesignRecipe[] = [
       )
   },
   {
+    id: 'shotboard',
+    label: 'Shot board (4-panel grid)',
+    board: true,
+    description:
+      "The pre-visualization of ONE shot, down to its two hand-off frames: a 2x2 grid of 4 panels covering a single camera setup — panel 1 is the exact opening frame, panels 2-3 the action, panel 4 the exact closing frame the next shot has to cut away from. This is what makes two consecutive clips read as the same sequence: shot N+1 opens on shot N's panel 4. Use it on short shots (4-6 s), where a scene storyboard only spares one panel per clip, and on any cut the model keeps getting wrong.",
+    slot: '[SHOT]',
+    defaultModelId: 'gpt-image-2-text-to-image',
+    params: { aspect_ratio: '16:9' },
+    buildPrompt: ({ description, style }) =>
+      join(
+        `Shot board of ${description.trim() || '[SHOT]'}:`,
+        'a single 2x2 grid of 4 sequential panels covering ONE continuous camera setup, read left to right, top to bottom, a small panel number in the corner of each panel.',
+        'Panel 1 is the exact opening frame of the shot; panels 2 and 3 are the action beats in between; panel 4 is the exact closing frame the shot must end on.',
+        'Same character, wardrobe, props, set, lens and lighting in all four panels — this is one shot progressing, not four different cuts.',
+        'Keep the subject moving in the SAME screen direction across the four panels, and keep the horizon and the camera axis consistent.',
+        'Clear readable compositions over dense detail. No speech bubbles, no captions, no other text, no watermarks.',
+        styled(style)
+      ),
+    byModel: {
+      // Preferred path: the connected sheets (and the previous shot's board)
+      // lock identity and the entry frame at the board stage.
+      'gpt-image-2-image-to-image': ({ description, style }) =>
+        join(
+          `Create a shot board of ${description.trim() || '[SHOT]'}:`,
+          'a single 2x2 grid of 4 sequential panels covering ONE continuous camera setup, read left to right, top to bottom, a small panel number in the corner of each panel.',
+          'Panel 1 is the exact opening frame of the shot; panels 2 and 3 are the action beats in between; panel 4 is the exact closing frame the shot must end on.',
+          'Keep every character, outfit, prop and set exactly consistent with the connected references (Image 1, Image 2, …).',
+          'Same lens and lighting in all four panels — this is one shot progressing, not four different cuts — and the subject keeps the SAME screen direction throughout.',
+          'Clear readable compositions over dense detail. No speech bubbles, no captions, no other text, no watermarks.',
+          styled(style)
+        )
+    }
+  },
+  {
     id: 'storyboard',
     label: 'Storyboard (9-panel grid)',
+    board: true,
     description:
       'The pre-visualization step between design sheets and video: one 3x3 grid of 9 numbered panels showing how the scene unfolds — review the staging before spending video credits, then wire it as a shot reference (Seedance 2). Build it from the design sheets with gpt-image-2-image-to-image to lock identity at the storyboard stage.',
     slot: '[SCENE]',
@@ -128,6 +169,7 @@ export const DESIGN_RECIPES: DesignRecipe[] = [
         `Storyboard of ${description.trim() || '[SCENE]'}:`,
         'a single 3x3 grid of 9 sequential panels telling the scene beat by beat, read left to right, top to bottom, a small panel number in the corner of each panel.',
         'Same characters, outfits, location, lighting and art style in every panel; framing varies like a film — establishing wide, mediums, close-ups — so each panel implies its camera move.',
+        'Consecutive panels must CONNECT: what leaves the frame on one side enters the next panel from the matching side, the subject keeps the same screen direction throughout, and every panel shares the geography of the one before it.',
         'Clear readable compositions over dense detail. No speech bubbles, no captions, no other text, no watermarks.',
         styled(style)
       ),
@@ -139,6 +181,7 @@ export const DESIGN_RECIPES: DesignRecipe[] = [
           'a single 3x3 grid of 9 sequential panels telling the scene beat by beat, read left to right, top to bottom, a small panel number in the corner of each panel.',
           'Keep every character, outfit, prop and set exactly consistent with the connected design sheets (Image 1, Image 2, …) across all panels.',
           'Framing varies like a film — establishing wide, mediums, close-ups — so each panel implies its camera move.',
+          'Consecutive panels must CONNECT: what leaves the frame on one side enters the next panel from the matching side, the subject keeps the same screen direction throughout, and every panel shares the geography of the one before it.',
           'Clear readable compositions over dense detail. No speech bubbles, no captions, no other text, no watermarks.',
           styled(style)
         )

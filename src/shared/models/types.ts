@@ -43,6 +43,13 @@ export interface InputHandle {
   /** Hard upper bound on the number of connections to this handle. Run is rejected if exceeded. */
   maxCount?: number
   /**
+   * Combined length the provider accepts across every source wired to this
+   * handle (Seedance 2: 15 s of reference video, 15 s of reference audio).
+   * Machine-readable twin of the limit stated in `description`: the prompt lint
+   * adds up the sources' declared durations and warns before the run.
+   */
+  maxTotalSeconds?: number
+  /**
    * True when connected images APPEAR in the output literally (first/last frame),
    * as opposed to reference inputs that only guide identity/style. Design sheets
    * (characters, décors, props) must never be wired to a frame anchor — the UI

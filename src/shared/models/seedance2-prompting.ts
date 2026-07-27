@@ -9,14 +9,17 @@
  * guide flags exact timestamps as UNSTABLE — shot-numbered structure is the
  * supported long-clip syntax.
  */
+import { TRANSITION_CONTRACT } from '../shotContinuity'
+
 /**
- * The MANDATORY constraint appended to every storyboard-driven shot prompt:
- * without it the model may render the 3x3 grid itself in the video. Single
- * source of truth — the blueprints, the prompt lint (§6.5) and the guide below
- * all use this exact sentence.
+ * The MANDATORY constraint appended to every board-driven shot prompt: without
+ * it the model may render the panel grid itself in the video. Single source of
+ * truth — the blueprints, the prompt lint (§6.5) and the guide below all use
+ * this exact sentence. It names both grid shapes the app produces: the 3x3
+ * scene storyboard and the 2x2 shot board.
  */
 export const ANTI_GRID_GUARD =
-  'Render one single full-frame shot: no 3x3 grid, no panel borders, no panel numbers, no split-screen or comic-panel layout.'
+  'Render one single full-frame shot: no storyboard grid of any kind (no 3x3 grid, no 2x2 grid), no panel borders, no panel numbers, no split-screen or comic-panel layout.'
 
 export const SEEDANCE2_PROMPT_GUIDE = `ANATOMY (official ByteDance order):
   Precise subject + action detail + scene/environment + lighting & color tone + camera movement
@@ -56,8 +59,12 @@ MODEL TIERS (same syntax — pick by job):
     framing — spend the video prompt on MOTION: camera direction, rhythm, transition logic.
     MANDATORY anti-grid guard: without it the model may render the grid ITSELF in the video.
     State in the role that the storyboard is "a staging plan only, it must NEVER appear on screen",
-    and append the constraint "render one single full-frame shot: no 3x3 grid, no panel borders,
-    no panel numbers, no split-screen or comic-panel layout" to every storyboard-driven prompt.
+    and append this exact constraint to every board-driven prompt:
+    "${ANTI_GRID_GUARD}"
+  - SHOT BOARD recipe (one board per SHOT, 2x2 grid of 4 panels): the same idea at clip resolution —
+    panel 1 is the shot's exact opening frame, panels 2-3 the action, panel 4 its exact closing
+    frame. It is the transition tool (see TRANSITIONS below) and the right board for 4-6s clips,
+    where a 9-panel scene grid only spares one panel per clip. Same wiring rules as the storyboard.
 
 FRAME ANCHORS (First/Last frame handles — these images APPEAR on screen literally):
   - The First frame / Last frame inputs pin the clip's exact opening/closing image (scene stills,
@@ -86,6 +93,26 @@ CUTTING BETWEEN SHOTS (read this before wiring two clips together):
   - Anchoring several shots on the SAME clean source still (a hero product shot, a scene still) is
     fine and often ideal — it is a pristine image, not a generated frame. That is re-anchoring, not
     chaining.
+
+TRANSITIONS (shared references are NOT enough — this is what makes two clips one sequence):
+  - Same sheets, same style, and two consecutive clips still read as two different films, because
+    nothing told shot N+1 what shot N ended on. Write the hand-off into the prompts:
+      ${TRANSITION_CONTRACT}
+  - Name the cut when it carries meaning: "hard cut on the impact", "cut on the movement — she
+    exits frame right, the next shot picks her up entering frame left".
+  - SHOT BOARD (2x2, 4 panels — one per shot): panel 1 is the shot's exact opening frame, panels
+    2-3 the action, panel 4 its exact closing frame. Board two consecutive shots and write shot
+    N+1's panel 1 as shot N's panel 4: the cut is settled on a cheap image instead of on two video
+    generations. On 4-6s clips this beats a 9-panel scene storyboard, which spares each clip one
+    panel. Wire it as a reference with a role, plus the anti-grid guard — like any board.
+  - PREVIOUS CLIP AS @Video: the strongest carrier (grade, texture, wardrobe, voice) and the most
+    expensive — it serializes generation and a re-roll invalidates the shots after it. Role:
+    "@Video1 is the PREVIOUS shot — match its lighting, grade, wardrobe, set and character
+    appearance; do NOT continue its action or camera: this shot is a CUT to a new setup." Mind the
+    handle budget (3 files, 15s combined). Use it on the cuts that matter, not on every pair.
+  - SHOT LENGTH: the API floor is 4s. A script beat shorter than that is MERGED with its
+    neighbour or covered by a longer shot — never rounded down, and never silently stretched
+    without saying what it does to the film's total length.
 
 MULTI-SHOT (long clips — 10s+):
   Shot 1: [camera move] + [subject action/expression] + [location] + [audio].

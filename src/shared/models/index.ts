@@ -1,4 +1,4 @@
-import type { ModelDefinition } from './types'
+import type { ModelDefinition, ParamField } from './types'
 import { gptImage2T2I } from './gpt-image-2-t2i'
 import { gptImage2I2I } from './gpt-image-2-i2i'
 import { nanoBananaPro } from './nano-banana-pro'
@@ -73,6 +73,56 @@ export function estimateCreditsFor(modelId: string, params: unknown): number | n
   const parsed = model.paramsSchema.safeParse(params ?? {})
   if (!parsed.success) return null
   return model.estimateCredits(parsed.data)
+}
+
+/**
+ * `value` brought back inside a number field's declared bounds, and snapped to
+ * its step when the field describes a discrete set (Seedance 1.5: 4/8/12).
+ * Those bounds are an API contract — a Seedance 2 clip shorter than 4 s is
+ * rejected — so every write path funnels numbers through this instead of
+ * storing what it was handed. Ties snap to the shorter (cheaper) value, like
+ * the payload builders do.
+ */
+export function clampParamToField(value: number, field: ParamField): number {
+  if (!Number.isFinite(value)) {
+    return typeof field.defaultValue === 'number' ? field.defaultValue : (field.min ?? 0)
+  }
+  const clamped = Math.min(field.max ?? value, Math.max(field.min ?? value, value))
+  const { min, max, step } = field
+  if (min === undefined || step === undefined || step <= 1) return clamped
+  // Ties round DOWN, matching the payload builders' nearest-value reduce.
+  const steps = Math.ceil((clamped - min) / step - 0.5)
+  const snapped = min + steps * step
+  return Math.min(max ?? snapped, Math.max(min, snapped))
+}
+
+/**
+ * A `paramsSchema.parse` failure rendered as one sentence per offending field,
+ * in the model's own vocabulary (field label + declared bounds/options). The
+ * run engine puts this in the node's error badge, where a raw zod dump was
+ * unreadable — same thing the prompt lint says, but after the fact.
+ */
+export function describeParamsError(err: unknown, model: ModelDefinition): string {
+  const issues = (err as { issues?: Array<{ path?: PropertyKey[]; message?: string }> } | null)
+    ?.issues
+  if (!Array.isArray(issues) || issues.length === 0) {
+    return err instanceof Error ? err.message : String(err)
+  }
+  return issues
+    .map((issue) => {
+      const key = String(issue.path?.[0] ?? '')
+      const message = issue.message ?? 'invalid value'
+      const field = model.paramFields.find((f) => f.key === key)
+      if (!field) return key ? `${key}: ${message}` : message
+      if (field.options) {
+        return `"${field.label}" must be one of ${field.options.map((o) => o.value).join(', ')}.`
+      }
+      if (field.min !== undefined && field.max !== undefined) {
+        return `"${field.label}" must be between ${field.min} and ${field.max}.`
+      }
+      return `"${field.label}": ${message}`
+    })
+    .join(' · ')
 }
 
 export function defaultParamsFor(modelId: string): Record<string, unknown> {

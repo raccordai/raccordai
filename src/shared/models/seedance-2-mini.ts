@@ -34,7 +34,9 @@ export const seedance2Mini: ModelDefinition<Params> = {
       min: 4,
       max: 15,
       step: 1,
-      defaultValue: 15
+      defaultValue: 15,
+      description:
+        'Whole seconds, 4 to 15. The API rejects anything shorter than 4 s — a beat that short must be merged with its neighbour, never rounded down.'
     },
     {
       key: 'aspect_ratio',
@@ -90,6 +92,7 @@ export const seedance2Mini: ModelDefinition<Params> = {
       accepts: ['video'],
       multiple: true,
       maxCount: 3,
+      maxTotalSeconds: 15,
       referenceAlias: '@Video',
       description:
         "Each connection is numbered @Video1, @Video2, @Video3. mp4/mov, 480p or 720p, 2-15s each, ≤15s combined, ≤50 MB each. This is the video-extend channel — the reliable way to continue a shot, unlike chaining the previous clip's lastFrame. Also character swap and custom voice-over tracks."
@@ -100,6 +103,7 @@ export const seedance2Mini: ModelDefinition<Params> = {
       accepts: ['audio'],
       multiple: true,
       maxCount: 3,
+      maxTotalSeconds: 15,
       referenceAlias: '@Audio',
       description:
         'Each connection is numbered @Audio1, @Audio2, @Audio3. wav/mp3, 2-15s each, ≤15s combined, ≤15 MB each.'
@@ -113,6 +117,8 @@ export const seedance2Mini: ModelDefinition<Params> = {
     'Same @ reference system as Seedance 2 Fast — references GUIDE without appearing on screen; assign every connected source an explicit role.\n' +
     'Cheapest, fastest tier: use it for drafts, animatics and exploring variations, then re-run the keeper on Fast (animation) or Seedance 2 (1080p/4k live-action) — model swap keeps the params.\n' +
     'First/Last frame handles are literal anchors (mutually exclusive with @ references per run). Both anchors + "Show me what happens in between. USE MULTIPLE CAMERA ANGLES." fills the story between two stills.\n' +
+    "Between shots, CUT — do not chain a clip's lastFrame into the next one (the degraded closing frame pops on the seam); keep the same sheets wired as @ references instead.\n" +
+    'Two clips only read as one sequence if each prompt says which frame it OPENS ON and which it CLOSES ON, and keeps the screen direction across the cut; the 4-panel shot board (designs recipe "shotboard") settles the hand-off on a cheap image, and the previous CLIP wired as @Video1 ("match its grade and wardrobe, do NOT continue its action") carries the look — at the cost of serializing the runs.\n' +
     'For 10s+ outputs, use numbered shots or "[cut]" beats — never exact timestamps (officially unstable).\n' +
     'Total uploads cap: ≤ 12 files combined. Restriction: no realistic human faces in references (platform compliance).',
   promptGuide: SEEDANCE2_PROMPT_GUIDE,

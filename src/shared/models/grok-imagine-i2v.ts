@@ -46,7 +46,9 @@ export const grokImagineI2V: ModelDefinition<Params> = {
       min: MIN_API_DURATION,
       max: 30,
       step: 1,
-      defaultValue: 8
+      defaultValue: 8,
+      description:
+        'Whole seconds, 6 to 30. Values below 6 s saved by older nodes are snapped up at run.'
     },
     {
       key: 'aspect_ratio',

@@ -26,10 +26,12 @@ import { useCollapsed } from './timelineHooks'
 import { TimelineV2 } from './TimelineV2'
 import { HistoryPanel } from './HistoryPanel'
 import { CheckpointsPanel } from './CheckpointsPanel'
+import { ScenarioPanel } from './ScenarioPanel'
 import {
   Anchor,
   ChevronDown,
   ChevronRight,
+  Clapperboard,
   Copy,
   Flag,
   History,
@@ -179,6 +181,8 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false)
   /** §6.4 — the checkpoints island (capture / diff / restore). */
   const [checkpointsOpen, setCheckpointsOpen] = useState(false)
+  /** §6.7 — the scenario island: the shot list this graph realizes. */
+  const [scenarioOpen, setScenarioOpen] = useState(false)
   /** "Fix with the assistant" buttons → global sidebar with a prepared draft. */
   const askAssistant = useCallback((text: string) => {
     openAssistant(text)
@@ -782,6 +786,14 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
           )}
         </Button>
         <Button
+          variant={scenarioOpen ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setScenarioOpen((v) => !v)}
+          title={t('editor.scenario.open')}
+        >
+          <Clapperboard className="h-4 w-4" />
+        </Button>
+        <Button
           variant={checkpointsOpen ? 'secondary' : 'ghost'}
           size="sm"
           onClick={() => setCheckpointsOpen((v) => !v)}
@@ -799,7 +811,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
         </Button>
       </>
     ),
-    [t, timelineCollapsed, setTimelineCollapsed, historyOpen, checkpointsOpen]
+    [t, timelineCollapsed, setTimelineCollapsed, historyOpen, checkpointsOpen, scenarioOpen]
   )
   useHeaderActions(headerActions)
 
@@ -916,7 +928,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
             </div>
           )}
 
-          {(selectedNode || historyOpen || checkpointsOpen) && (
+          {(selectedNode || historyOpen || checkpointsOpen || scenarioOpen) && (
             <div className="absolute top-16 right-3 bottom-3 z-30 flex flex-col items-stretch gap-3">
               {selectedNode && (
                 <NodeParamsPanel
@@ -932,6 +944,9 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
                   onRunVariants={(count) => handleRunVariants(selectedNode.id, count)}
                   onAskAssistant={askAssistant}
                 />
+              )}
+              {scenarioOpen && (
+                <ScenarioPanel videoId={videoId} onClose={() => setScenarioOpen(false)} />
               )}
               {checkpointsOpen && (
                 <CheckpointsPanel videoId={videoId} onClose={() => setCheckpointsOpen(false)} />

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
+import { describeParamsError, estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
 import { remapDraftInputs, resolveDraftRun } from '@shared/models/draft'
 import { appendStyleBible, getStyle, nodeAppliesVideoStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
@@ -289,9 +289,9 @@ async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Prom
   try {
     validatedParams = model.paramsSchema.parse(draftSub ? draftSub.params : (node.params ?? {}))
   } catch (err) {
-    throw new Error(`Invalid params: ${err instanceof Error ? err.message : String(err)}`, {
-      cause: err
-    })
+    // A raw zod dump is unreadable in the node's error badge — name the field
+    // and what it accepts (the prompt lint says the same thing before the run).
+    throw new Error(`Invalid params: ${describeParamsError(err, model)}`, { cause: err })
   }
 
   // Style-at-payload: nodes flagged `applyVideoStyle` get the video's CURRENT

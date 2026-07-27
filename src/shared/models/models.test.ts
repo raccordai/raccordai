@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   MODELS,
+  clampParamToField,
   defaultParamsFor,
+  describeParamsError,
   estimateCreditsFor,
   getModel,
   getModelOrThrow,
   videoDefaultParams
 } from './index'
+import type { ParamField } from './types'
 
 describe('model registry invariants', () => {
   it('has unique model ids', () => {
@@ -58,6 +61,41 @@ describe('model registry invariants', () => {
         const payload = model.buildPayload({ params, inputs: {} })
         expect(payload).toBeTypeOf('object')
         expect(Object.keys(payload).length).toBeGreaterThan(0)
+      })
+
+      // The API's numeric limits are only real if they are declared on the
+      // field: the params panel clamps to them, the prompt lint checks them and
+      // list_models/docs publish them to the agents. An undeclared bound is a
+      // 3-second Seedance clip that only fails once the credits are committed.
+      it('declares bounds on every number field, and its schema agrees with them', () => {
+        const numberFields = model.paramFields.filter((f) => f.type === 'number')
+        for (const field of numberFields) {
+          expect(field.min, `${field.key} has no min`).toBeTypeOf('number')
+          expect(field.max, `${field.key} has no max`).toBeTypeOf('number')
+          const base = { ...defaultParamsFor(model.id), prompt: 'test prompt' }
+          // Both bounds must be reachable…
+          for (const bound of [field.min!, field.max!]) {
+            const parsed = model.paramsSchema.safeParse({ ...base, [field.key]: bound })
+            expect(parsed.success, `${field.key} rejects its own bound ${bound}`).toBe(true)
+          }
+          // …and past the ceiling must be refused (the floor may be deliberately
+          // tolerant: grok i2v snaps old sub-6s nodes up in buildPayload).
+          const tooHigh = model.paramsSchema.safeParse({
+            ...base,
+            [field.key]: field.max! + (field.step ?? 1)
+          })
+          expect(tooHigh.success, `${field.key} accepts more than its max`).toBe(false)
+        }
+      })
+
+      // A handle whose sources have a combined-length budget must declare it as
+      // a number (the lint adds the sources up), not only in prose.
+      it('declares maxTotalSeconds as a positive number when it has one', () => {
+        for (const handle of model.inputs) {
+          if (handle.maxTotalSeconds === undefined) continue
+          expect(handle.maxTotalSeconds).toBeGreaterThan(0)
+          expect(handle.multiple, `${handle.key} budgets seconds but is single`).toBe(true)
+        }
       })
 
       it('declares a coherent draftEquivalent when it has one (§6.1 draft mode)', () => {
@@ -445,5 +483,66 @@ describe('suno/generate-music', () => {
     const payload = suno.buildPayload({ params, inputs: {} })
     expect(payload).toMatchObject({ style: 'synthwave', title: 'Neon', vocalGender: 'f' })
     expect(payload).not.toHaveProperty('negativeTags')
+  })
+})
+
+describe('clampParamToField', () => {
+  const duration = (overrides: Partial<ParamField> = {}): ParamField => ({
+    key: 'duration',
+    label: 'Duration (s)',
+    type: 'number',
+    min: 4,
+    max: 15,
+    step: 1,
+    defaultValue: 5,
+    ...overrides
+  })
+
+  it('lifts a value below the floor and drops one above the ceiling', () => {
+    expect(clampParamToField(3, duration())).toBe(4)
+    expect(clampParamToField(0, duration())).toBe(4)
+    expect(clampParamToField(20, duration())).toBe(15)
+  })
+
+  it('leaves a legal value alone', () => {
+    expect(clampParamToField(4, duration())).toBe(4)
+    expect(clampParamToField(9, duration())).toBe(9)
+  })
+
+  it('snaps to the step when the field describes a discrete set, ties downwards', () => {
+    const seedance15 = duration({ min: 4, max: 12, step: 4, defaultValue: 8 })
+    expect(clampParamToField(5, seedance15)).toBe(4)
+    expect(clampParamToField(6, seedance15)).toBe(4) // tie → the cheaper clip
+    expect(clampParamToField(7, seedance15)).toBe(8)
+    expect(clampParamToField(11, seedance15)).toBe(12)
+    // …and matches what buildPayload actually sends.
+    const model = getModelOrThrow('bytedance/seedance-1.5-pro')
+    const params = model.paramsSchema.parse({ prompt: 'p', duration: 7 })
+    expect(model.buildPayload({ params, inputs: {} }).duration).toBe('8')
+  })
+
+  it('falls back to the default for a non-number (an emptied input field)', () => {
+    expect(clampParamToField(Number.NaN, duration())).toBe(5)
+    expect(clampParamToField(Number.NaN, duration({ defaultValue: undefined }))).toBe(4)
+  })
+})
+
+describe('describeParamsError', () => {
+  const model = getModelOrThrow('bytedance/seedance-2-fast')
+
+  it('names the field and its bounds instead of dumping zod', () => {
+    const result = model.paramsSchema.safeParse({ prompt: 'p', duration: 3 })
+    const message = describeParamsError((result as { error: unknown }).error, model)
+    expect(message).toBe('"Duration (s)" must be between 4 and 15.')
+  })
+
+  it('lists the accepted values of an enum field', () => {
+    const result = model.paramsSchema.safeParse({ prompt: 'p', resolution: '1080p' })
+    const message = describeParamsError((result as { error: unknown }).error, model)
+    expect(message).toContain('"Resolution" must be one of 480p, 720p')
+  })
+
+  it('passes a non-zod error through unchanged', () => {
+    expect(describeParamsError(new Error('boom'), model)).toBe('boom')
   })
 })

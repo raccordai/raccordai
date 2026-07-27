@@ -45,12 +45,16 @@ export function connectionsFor(nodeId: string): LintConnection[] {
     counters.set(edge.targetHandle, index)
     const handle = handleByKey.get(edge.targetHandle)
     const source = db.select().from(nodes).where(eq(nodes.id, edge.sourceNodeId)).get()
+    const sourceDuration = (source?.params as { duration?: unknown } | null)?.duration
     return {
       edgeId: edge.id,
       handleKey: edge.targetHandle,
       ...(handle?.referenceAlias ? { alias: `${handle.referenceAlias}${index}` } : {}),
       ...(source ? { sourceLabel: source.label ?? source.key } : {}),
-      ...(source && designIdOf(source) ? { designId: designIdOf(source) } : {})
+      ...(source && designIdOf(source) ? { designId: designIdOf(source) } : {}),
+      ...(typeof sourceDuration === 'number' && Number.isFinite(sourceDuration)
+        ? { sourceDurationSeconds: sourceDuration }
+        : {})
     }
   })
 }

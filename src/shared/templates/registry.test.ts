@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import enCommon from '../i18n/locales/en/common.json'
 import frCommon from '../i18n/locales/fr/common.json'
 import { MODELS, getModel } from '../models'
+import { ANTI_GRID_GUARD } from '../models/seedance2-prompting'
 import { STYLES, getStyle } from '../styles/registry'
 import {
   WORKFLOW_TEMPLATES,
@@ -227,7 +228,9 @@ describe('workflow template registry', () => {
         // Anti-grid guard: without it the model may render the storyboard grid
         // itself in the video instead of treating it as a staging plan.
         expect(prompt).toContain('must NEVER appear on screen')
-        expect(prompt).toContain('no 3x3 grid, no panel borders, no panel numbers')
+        // The guard is one constant (seedance2-prompting) — assert the constant,
+        // never a copy of its wording, or every rephrasing breaks this test.
+        expect(prompt).toContain(ANTI_GRID_GUARD)
         if (incoming.length > 2) {
           expect(incoming[2]!.output).toBe('lastFrame')
           expect(prompt).toContain('@Image3 as the first frame')

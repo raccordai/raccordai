@@ -93,7 +93,18 @@ Two views of the same params, and both matter:
 
 Constraints the API enforces (allowed durations, max prompt length, image
 count/size limits) must appear **three times**: in the zod schema (validation),
-in the field `description` (human), and in `promptingNotes` (agent). A prompt
+in the field `description` (human), and in `promptingNotes` (agent).
+
+For a `number` field that means `min`/`max` (and `step` when the API only takes
+discrete values) — **not optional**, a registry test fails without them. Those
+three numbers are the whole enforcement chain: the params panel clamps typed
+values through `clampParamToField`, the prompt lint raises `param-out-of-range`
+before the spend, `list_models` and `docs "model:<id>"` publish the range so an
+agent never plans a clip the API refuses, and `describeParamsError` turns a run
+failure into "Duration (s) must be between 4 and 15" instead of a zod dump.
+Same idea for handles: `maxCount` bounds the connections and `maxTotalSeconds`
+declares a combined-length budget (Seedance 2: 15 s of reference video), which
+the lint checks against the sources' declared durations. A prompt
 that is required at run time still gets `.default('')` + a UI default of `''`
 — use `.min(1)` so the run fails validation with a clear message instead of
 burning credits (see `gpt-image-2-t2i.ts`).
@@ -144,6 +155,18 @@ Rules that follow:
   `importWorkflow` stamps strictly increasing `createdAt` so the template edge
   array order IS the numbering. Keep role-critical edges (character sheet before
   storyboard) ordered accordingly.
+- **Transitions are their own problem** (`src/shared/shotContinuity.ts`, docs
+  topic `continuity`). Shared references keep identity stable and still leave
+  two consecutive clips reading as two different films, because nothing tells
+  shot N+1 what shot N ended on. Four layers, cheapest first: shared references
+  → the written contract (every prompt states the frame it OPENS ON and the one
+  it CLOSES ON, screen direction continuous across the cut, no crossing the
+  180° line) → a 4-panel **shot board** per shot (recipe `shotboard`: panel 1 =
+  opening frame, panel 4 = closing frame, so the hand-off is decided on a cheap
+  image) → the previous CLIP wired as an `@Video` reference (`link_shots`),
+  which carries grade/wardrobe/voice but serializes generation and invalidates
+  downstream shots on a re-roll. The last one is proposed, never applied by
+  default.
 - **Storyboard = the pre-visualization step** between design sheets and video
   (Seedance 2.x): one 3x3 grid of 9 numbered panels showing the scene beat by
   beat, built FROM the sheets with `gpt-image-2-image-to-image` (recipe

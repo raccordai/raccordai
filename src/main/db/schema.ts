@@ -1,4 +1,5 @@
 import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import type { Scenario } from '@shared/scenario'
 
 /**
  * Schema evolutions are additive only: new tables/columns via drizzle-kit
@@ -89,6 +90,13 @@ export const videos = sqliteTable(
      * cheap vision check (verdict stored on the generation row). Null/false = off.
      */
     qcEnabled: integer('qc_enabled', { mode: 'boolean' }),
+    /**
+     * Scenario (§6.7): the shot list written from the brief BEFORE the graph —
+     * durations already legal for the target model, each shot chained to the
+     * next by its opening/closing frame. Stored as the shared `Scenario` JSON;
+     * null until the assistant writes one.
+     */
+    scenario: text('scenario', { mode: 'json' }).$type<Scenario>(),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },

@@ -1,5 +1,6 @@
-import { getModel, type ModelDefinition } from './models'
+import { clampParamToField, getModel, type ModelDefinition, type ParamField } from './models'
 import { ANTI_GRID_GUARD } from './models/seedance2-prompting'
+import { getDesignRecipe } from './designs/registry'
 
 /**
  * Prompt lint (§6.5) — the prompting knowledge of `seedance2-prompting.ts` and
@@ -31,6 +32,8 @@ export interface LintFinding {
     | 'storyboard-on-frame-anchor'
     | 'storyboard-guard-missing'
     | 'param-out-of-enum'
+    | 'param-out-of-range'
+    | 'reference-budget-exceeded'
   severity: LintSeverity
   /** Agent- and user-facing English sentence (the UI localizes by `rule`). */
   message: string
@@ -50,6 +53,12 @@ export interface LintConnection {
   sourceLabel?: string
   /** `params.designId` of the source node (or of its asset) when it is a design sheet. */
   designId?: string
+  /**
+   * Declared clip length of the source node (`params.duration`), when it has
+   * one — the only duration knowable before the media exists, so the handle
+   * budget check below stays a warning.
+   */
+  sourceDurationSeconds?: number
 }
 
 export interface LintInput {
@@ -122,12 +131,38 @@ export function mentionsMotion(prompt: string): boolean {
 /** True when the anti-grid guard (or a close paraphrase) is already in the prompt. */
 export function hasAntiGridGuard(prompt: string): boolean {
   const normalized = prompt.toLowerCase()
-  return normalized.includes('no 3x3 grid') || normalized.includes('no panel borders')
+  return (
+    normalized.includes('no 3x3 grid') ||
+    normalized.includes('no 2x2 grid') ||
+    normalized.includes('no storyboard grid') ||
+    normalized.includes('no panel borders')
+  )
+}
+
+/** True when `designId` names a recipe that produces a panel grid (§6.4 boards). */
+function isBoardRecipe(designId: string): boolean {
+  return getDesignRecipe(designId)?.board === true
 }
 
 function promptOf(params: Record<string, unknown> | null | undefined): string {
   const prompt = (params ?? {})['prompt']
   return typeof prompt === 'string' ? prompt : ''
+}
+
+/**
+ * The discrete values a stepped number field accepts (Seedance 1.5: 4, 8, 12),
+ * or null when the field is a plain range — the message then quotes bounds
+ * instead of listing values.
+ */
+function allowedStepValues(field: ParamField): number[] | null {
+  const { min, max, step } = field
+  if (min === undefined || max === undefined || step === undefined || step <= 1) return null
+  const values: number[] = []
+  for (let value = min; value <= max; value += step) {
+    values.push(value)
+    if (values.length > 12) return null
+  }
+  return values.length > 1 ? values : null
 }
 
 /** The reference handle an anchored design sheet should be moved to, if any. */
@@ -141,6 +176,9 @@ function roleSentenceFor(connection: LintConnection): string {
   const label = connection.sourceLabel ? ` (${connection.sourceLabel})` : ''
   if (connection.designId === 'storyboard') {
     return `${alias} is the 9-panel storyboard of this scene — a staging plan only, it must NEVER appear on screen: follow its panels in order, left to right, top to bottom.`
+  }
+  if (connection.designId === 'shotboard') {
+    return `${alias} is the 4-panel shot board of THIS shot — a staging plan only, it must NEVER appear on screen: open on panel 1, play panels 2-3, end on panel 4.`
   }
   if (connection.designId === 'character') {
     return `${alias} is the character sheet${label} — keep the same face, hair, outfit and proportions.`
@@ -221,10 +259,11 @@ export function lintNode(input: LintInput): LintFinding[] {
     }
   }
 
-  // A storyboard reference without the anti-grid guard: the model may render
-  // the 3x3 grid itself in the shot.
+  // A panel grid wired as a reference without the anti-grid guard: the model
+  // may render the grid itself in the shot. Which recipes are grids comes from
+  // the registry (`board`), never from a hardcoded id.
   const storyboardRef = input.connections.find(
-    (c) => c.designId === 'storyboard' && !anchorKeys.has(c.handleKey)
+    (c) => c.designId && isBoardRecipe(c.designId) && !anchorKeys.has(c.handleKey)
   )
   if (storyboardRef && prompt.trim() !== '' && !hasAntiGridGuard(prompt)) {
     findings.push({
@@ -232,7 +271,7 @@ export function lintNode(input: LintInput): LintFinding[] {
       severity: 'warning',
       subject: storyboardRef.alias ?? storyboardRef.handleKey,
       message:
-        'A storyboard is wired as a reference but the prompt has no anti-grid guard — the model may render the panel grid on screen.',
+        'A panel board is wired as a reference but the prompt has no anti-grid guard — the model may render the panel grid on screen.',
       fix: { kind: 'appendPrompt', text: ANTI_GRID_GUARD }
     })
   }
@@ -263,6 +302,75 @@ export function lintNode(input: LintInput): LintFinding[] {
       ...(field.defaultValue !== undefined
         ? { fix: { kind: 'setParam', key: field.key, value: field.defaultValue } }
         : {})
+    })
+  }
+
+  // Numeric params outside the model's declared bounds — the API rejects them
+  // (a Seedance 2 clip shorter than 4 s is the classic), and until this rule
+  // existed nothing said so before the spend: the value was stored verbatim by
+  // the panel, by import_workflow and by the agent tools, and only blew up in
+  // `prepareRun`. Bounds come from the field itself, never from a model id.
+  for (const field of model.paramFields) {
+    if (field.type !== 'number') continue
+    const value = params[field.key]
+    if (value === undefined || value === null) continue
+    const fallback: LintFix | undefined =
+      field.defaultValue === undefined
+        ? undefined
+        : { kind: 'setParam', key: field.key, value: field.defaultValue }
+
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      findings.push({
+        rule: 'param-out-of-range',
+        severity: 'error',
+        subject: field.key,
+        message: `"${field.label}" is set to "${String(value)}", which is not a number.`,
+        ...(fallback ? { fix: fallback } : {})
+      })
+      continue
+    }
+
+    const legal = clampParamToField(value, field)
+    if (legal === value) continue
+
+    const { min, max } = field
+    const outOfBounds = (min !== undefined && value < min) || (max !== undefined && value > max)
+    const allowed = allowedStepValues(field)
+    const bounds = allowed
+      ? allowed.join(', ')
+      : min !== undefined && max !== undefined
+        ? `${min} to ${max}`
+        : min !== undefined
+          ? `${min} at the least`
+          : `${max} at the most`
+
+    findings.push({
+      rule: 'param-out-of-range',
+      // Out of bounds = the provider rejects the run. Merely off-step is
+      // snapped by `buildPayload`, so the clip is simply not the length the
+      // timeline was told about — worth saying, not worth blocking.
+      severity: outOfBounds ? 'error' : 'warning',
+      subject: field.key,
+      message: outOfBounds
+        ? `"${field.label}" is set to ${value} — this model accepts ${bounds}. The run would be rejected.`
+        : `"${field.label}" is set to ${value} — this model only accepts ${bounds}, so the run would be snapped to ${legal}.`,
+      fix: { kind: 'setParam', key: field.key, value: legal }
+    })
+  }
+
+  // Reference handles with a combined-duration budget (Seedance 2: ≤ 15 s of
+  // video, ≤ 15 s of audio across the handle). Only the DECLARED lengths of the
+  // source nodes are knowable before the media exists, so this stays a warning.
+  for (const handle of model.inputs) {
+    if (handle.maxTotalSeconds === undefined) continue
+    const wired = input.connections.filter((c) => c.handleKey === handle.key)
+    const total = wired.reduce((sum, c) => sum + (c.sourceDurationSeconds ?? 0), 0)
+    if (total <= handle.maxTotalSeconds) continue
+    findings.push({
+      rule: 'reference-budget-exceeded',
+      severity: 'warning',
+      subject: handle.key,
+      message: `"${handle.label}" carries ~${total}s of source media across ${wired.length} connections — this model accepts ${handle.maxTotalSeconds}s combined. Unwire one or shorten the sources.`
     })
   }
 

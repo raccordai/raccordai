@@ -39,7 +39,8 @@ export const grokImagineT2V: ModelDefinition<Params> = {
       min: 6,
       max: 30,
       step: 1,
-      defaultValue: 8
+      defaultValue: 8,
+      description: 'Whole seconds, 6 to 30. The API floor is 6 s; 6-10 s reads best for one action.'
     },
     {
       key: 'aspect_ratio',

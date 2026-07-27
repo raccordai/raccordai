@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { desc, eq } from 'drizzle-orm'
 import type { Video } from '@shared/ipc/contracts'
+import type { Scenario } from '@shared/scenario'
 import { isStyleId } from '@shared/styles/registry'
 import { getDb } from '../db/client'
 import { videos } from '../db/schema'
@@ -10,7 +11,12 @@ export type VideoRow = typeof videos.$inferSelect
 
 /** DB row → DTO: the toggles are nullable columns (additive migration), booleans in the contract. */
 export function toVideo(row: VideoRow): Video {
-  return { ...row, draftMode: row.draftMode ?? false, qcEnabled: row.qcEnabled ?? false }
+  return {
+    ...row,
+    draftMode: row.draftMode ?? false,
+    qcEnabled: row.qcEnabled ?? false,
+    scenario: row.scenario ?? null
+  }
 }
 
 export function listVideos(projectId: string): Video[] {
@@ -39,11 +45,25 @@ export function createVideo(projectId: string, name: string): Video {
     defaultResolution: null,
     draftMode: false,
     qcEnabled: false,
+    scenario: null,
     createdAt: now,
     updatedAt: now
   }
   getDb().insert(videos).values(video).run()
   return video
+}
+
+/**
+ * Scenario (§6.7) — the shot list the graph is built from. Replaced wholesale
+ * (the assistant rewrites it from the beats), null clears it. Normalization
+ * belongs to `planScenario`; this only stores what it produced.
+ */
+export function setVideoScenario(id: string, scenario: Scenario | null): void {
+  getDb().update(videos).set({ scenario, updatedAt: Date.now() }).where(eq(videos.id, id)).run()
+}
+
+export function getVideoScenario(id: string): Scenario | null {
+  return getDb().select().from(videos).where(eq(videos.id, id)).get()?.scenario ?? null
 }
 
 /** Attach a style template to a video (null clears it). Validated against the style registry. */

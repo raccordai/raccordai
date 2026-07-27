@@ -25,7 +25,7 @@ import { DESIGN_RECIPES } from '@shared/designs/registry'
 import { MAX_VARIANTS } from '@shared/config'
 import type { GraphNode } from '@shared/ipc/contracts'
 import type { ModelDefinition } from '@shared/models'
-import { defaultParamsFor, getModel, videoDefaultParams } from '@shared/models'
+import { clampParamToField, defaultParamsFor, getModel, videoDefaultParams } from '@shared/models'
 import { getStyle } from '@shared/styles/registry'
 import { lintNode, type LintFix } from '@shared/promptLint'
 import { Button } from '@renderer/components/ui/Button'
@@ -405,6 +405,10 @@ function ModelNodeEditor({
       }
       return undefined
     }
+    const durationOf = (source: GraphNode | undefined): number | undefined => {
+      const value = (source?.params as { duration?: unknown } | undefined)?.duration
+      return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    }
     return lintNode({
       modelId: node.modelId,
       params,
@@ -413,7 +417,10 @@ function ModelNodeEditor({
         handleKey: c.edge.targetHandle,
         ...(c.alias ? { alias: c.alias } : {}),
         ...(c.source ? { sourceLabel: c.source.label ?? c.source.key } : {}),
-        ...(designIdOf(c.source) ? { designId: designIdOf(c.source) } : {})
+        ...(designIdOf(c.source) ? { designId: designIdOf(c.source) } : {}),
+        ...(durationOf(c.source) !== undefined
+          ? { sourceDurationSeconds: durationOf(c.source) }
+          : {})
       }))
     })
   }, [node.modelId, params, connections, projectAssets])
@@ -772,7 +779,10 @@ function ModelNodeEditor({
                 step={field.step}
                 value={(params[field.key] as number | undefined) ?? ''}
                 onChange={(e) => setField(field.key, Number(e.target.value))}
-                onBlur={(e) => commit(field.key, Number(e.target.value))}
+                // The min/max attributes only guard the steppers — a typed value
+                // reaches us raw, and the model's bounds are an API contract
+                // (a 3 s Seedance clip is rejected). Clamp on commit.
+                onBlur={(e) => commit(field.key, clampParamToField(Number(e.target.value), field))}
               />
             )}
             {field.type === 'select' && (

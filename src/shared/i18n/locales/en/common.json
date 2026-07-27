@@ -358,10 +358,21 @@
       "edges": "rewire {{count}} connection(s)",
       "selections": "change the selected output on {{count}} node(s)"
     },
+    "scenario": {
+      "title": "Scenario",
+      "open": "Scenario — the shot list written before the graph",
+      "empty": "No scenario yet. Give your brief to the assistant (“write me the scenario for…”): it writes the shot list, fits the durations to what the model accepts and opens each shot on the frame the previous one closes on.",
+      "shotCount_one": "{{count}} shot",
+      "shotCount_other": "{{count}} shots",
+      "target": "brief: {{target}}",
+      "asked": "asked {{seconds}}",
+      "mergedFrom": "Merged from: {{beats}}",
+      "editHint": "The scenario is edited through the assistant — one author keeps the shot list, the durations and the graph consistent."
+    },
     "lint": {
       "fix": {
         "appendPrompt": "Add to the prompt",
-        "setParam": "Use the default",
+        "setParam": "Use a valid value",
         "rewire": "Rewire as a reference"
       }
     },
@@ -533,6 +544,11 @@
       "name": "Style frame",
       "desc": "One frame that locks the film's look",
       "placeholder": "e.g. rainy alley, noir mood"
+    },
+    "shotboard": {
+      "name": "Shot board",
+      "desc": "4-panel grid of ONE shot — opening frame, action, closing frame",
+      "placeholder": "e.g. Maya threads between two vans, moving left to right"
     },
     "storyboard": {
       "name": "Storyboard",

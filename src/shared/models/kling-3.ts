@@ -40,7 +40,8 @@ export const kling3: ModelDefinition<Params> = {
       min: 3,
       max: 15,
       step: 1,
-      defaultValue: 5
+      defaultValue: 5,
+      description: 'Whole seconds, 3 to 15.'
     },
     {
       key: 'aspect_ratio',

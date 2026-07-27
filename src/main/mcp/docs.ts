@@ -21,12 +21,17 @@ Edges wire a source node's output into a target node's input:
 
 Typical session:
   1. list_projects → list_videos → get_workflow (ids of everything)
+  1b. Asked for a film from a brief? Write the SCENARIO first — write_scenario turns beats into a
+     shot list whose durations the model accepts, chained cut to cut, before any graph exists
+     (docs "scenario"). It is the step where the constraints are cheap to respect.
   2. docs "models" then docs "model:<id>" for the models you plan to use;
      read docs "prompting:<id>" BEFORE writing any prompt for that model.
      CRITICAL: image inputs are either frame ANCHORS (they appear on screen) or
      REFERENCES (they guide without appearing) — docs "models" explains which is which.
      Equally critical: between two shots you CUT to a new angle — never chain one
-     clip's lastFrame into the next (it glitches); docs "models" has the recipes
+     clip's lastFrame into the next (it glitches); docs "models" has the recipes.
+     Two consecutive shots only read as one sequence if each prompt says what frame
+     it OPENS ON and CLOSES ON and keeps the screen direction — docs "continuity"
   3. pick an art direction: docs "styles" → set_video_style. The style bible is
      appended to prompts AT RUN TIME for visual nodes whose params carry
      "applyVideoStyle": true (set it on the visual nodes you create; never paste
@@ -49,7 +54,13 @@ Typical session:
      app's compare grid, or select_generation picks the keeper.
   7. Free safety rails, use them: lint_node checks a node BEFORE the spend
      (undeclared reference, sheet on a frame anchor, missing anti-grid guard,
-     param outside the model's enums) — run it on every prompt you write.
+     param outside the model's enums OR its numeric bounds, reference handle
+     over its combined-length budget) — run it on every prompt you write.
+     Numeric bounds are an API contract: docs "model:<id>" prints the allowed
+     range of every number param (a Seedance 2 clip cannot be shorter than 4s).
+     A beat shorter than the model's floor is run AT the floor or merged with
+     its neighbour — never rounded down into a clip the API will refuse.
+     write_scenario does that arithmetic for a whole script (docs "scenario").
      create_checkpoint captures the graph before a structural rework;
      diff_checkpoint shows what a restore would change, restore_checkpoint
      rolls back in one undo step. get_annotations returns what the user
@@ -66,7 +77,7 @@ Conventions:
     always set an AI-facing "description" so future agents know what the media depicts.
   - The user sees the graph update live in the app while you work.
 
-Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "styles", "designs", "templates", "template:<id>".`
+Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "scenario", "continuity", "styles", "designs", "templates", "template:<id>".`
 
 const WORKFLOW_JSON = `Workflow JSON (version 1) — the bulk import/export format (import_workflow / export_workflow):
 {
@@ -89,6 +100,119 @@ Rules:
   - Asset references use the portable "assetKey" (from list_assets); the importer resolves it to the
     project-local assetId and fails with a helpful error if the asset is missing.
   - Edge "input" names are NOT validated at import — get them right from docs "model:<id>".`
+
+const SCENARIO = `The scenario — what you write BEFORE the plan and the graph.
+
+A brief ("20 s, a courier chased through the city, Blade Runner 2049 look") is not a shot list, and
+going straight from one to the other is how the constraints get discovered too late: beats of 2-3 s
+that no video model will render, seven 4 s shots that quietly turn a 20 s script into a 28 s film,
+and every shot prompt written in isolation so the cuts do not connect.
+
+write_scenario is that missing step. YOU write the beats — the creative work stays yours — and it
+returns the shot list made legal and chained:
+
+  beats[] (what the script says)              shots[] (what the model can deliver)
+  ├ title        short beat name              ├ key             "shot-01", reusable as the node key
+  ├ action       what happens                 ├ seconds         a length the model ACCEPTS
+  ├ seconds      what the script asks         ├ requestedSeconds what the script asked
+  ├ camera       camera intent                ├ opensOn         explicit, or handed over by shot N-1
+  ├ sound        dialogue and sound           ├ closesOn        what shot N+1 will open on
+  ├ opensOn      entry frame (optional)       ├ mergedFrom      the beats folded into this shot
+  ├ closesOn     EXIT frame — write it        └ promptScaffold  the continuity paragraph to build on
+  ├ screenDirection  which way it travels
+  ├ boardDriven  a board will be wired here
+  └ mergeWithNext  fold into the next beat
+
+What it enforces, so you never have to remember it:
+  - DURATIONS. Beats under the model's floor are either run at the floor (shortBeatPolicy
+    "stretch", the default — keeps your cut list, adds seconds) or folded into a neighbour
+    ("merge" — keeps the film's length, changes the cut list). A beat over the ceiling is split
+    into legal parts. Everything is snapped to the model's step (Seedance 1.5: 4/8/12 only).
+    Nothing ever comes back as a clip the API refuses.
+  - THE TOTAL. Pass targetSeconds and the drift is computed for you. Never hide it: say
+    "your 20 s script comes out at 28 s — cut a beat, or accept 28 s" and let the user decide.
+  - THE CUTS. Each shot's opensOn is the previous shot's closesOn unless you wrote one. That is
+    what makes two clips read as one sequence (docs "continuity"). Write closesOn on every beat:
+    a missing one comes back as a warning, because the next shot then has nothing to open on.
+  - SCREEN DIRECTION. A subject travelling left-to-right followed by one travelling right-to-left
+    is flagged — that reversal reads as a different scene. It is a warning, not a fix: some
+    reversals are deliberate.
+
+How to use it:
+  1. Read the brief. Ask only what you cannot infer (length, ratio, tone).
+  2. list_models → pick the video model, note its duration min/max.
+  3. write_scenario with the beats. It is stored on the video and shown to the user in the
+     editor's Scenario panel, so it survives the conversation.
+  4. Report the warnings in plain language and let the user arbitrate anything editorial
+     (a total that drifted, a merge that changes the cut list).
+  5. present_plan (models + credits) → import_workflow, writing each shot's prompt ON TOP OF its
+     promptScaffold: the scaffold carries the cut, the opening and closing frames, the screen
+     direction and — when boardDriven — the anti-grid guard. Reuse each shot's \`key\` as the node
+     key so the graph and the scenario stay readable together.
+  6. get_scenario reads it back later ("reprends le plan 3"): the scenario stays the reference,
+     the graph is its realization. Rewriting it replaces it wholesale.`
+
+const CONTINUITY = `Making consecutive shots read as ONE sequence — the transition problem.
+
+The symptom: shot 3 is a courier weaving through traffic, shot 4 is a pursuer jumping onto a
+scooter. Same character sheet, same style, same storyboard — and the two clips still look like two
+different films. Nothing ever told shot 4 what shot 3 ended on.
+
+Four layers, in this order. The first three are free (they are prose and cheap images); only the
+last one costs generation time.
+
+1. SHARED REFERENCES — always. The same character/décor/prop sheets wired as @Image references on
+   EVERY shot of the sequence, each with its role in the prompt. This is what keeps identity and
+   art direction stable. It is necessary and it is never sufficient: it says who and what, never
+   where in frame, moving which way, coming from which shot.
+
+2. THE TRANSITION CONTRACT — always, it is only words. Every shot prompt states:
+     - the frame it OPENS ON: where the subject sits in frame, which way it is already moving,
+       what the previous shot handed over;
+     - the frame it CLOSES ON: the state the next shot has to pick up.
+   Then shot N+1's opening restates shot N's closing, in its own words. Two rules go with it:
+     - SCREEN DIRECTION is continuous across a cut: a subject travelling left-to-right keeps
+       travelling left-to-right in the next shot, unless the script explicitly turns it around.
+       A reversal reads as a different chase, which is exactly the bike/scooter failure above.
+     - The 180° LINE: two shots of the same action stay on the same side of the axis. Crossing it
+       makes the two clips read as two unrelated scenes.
+   Also name the cut itself when it carries meaning ("hard cut on the impact", "cut on the
+   movement — she exits frame right, the next shot picks her up entering frame left").
+
+3. SHOT BOARDS — when a cut keeps coming out wrong, or when the shots are short. docs "designs",
+   recipe "shotboard": a 2x2 grid of 4 panels for ONE shot — panel 1 is its exact opening frame,
+   panels 2-3 the action, panel 4 its exact closing frame. Board shot N and shot N+1, write shot
+   N+1's panel 1 as shot N's panel 4, and the hand-off is decided on a cheap image instead of on
+   two video generations. On short clips (4-6 s) this is strictly better than a 9-panel scene
+   storyboard, which spares each clip a single panel. Wire it like any board: a reference, with a
+   role, plus the anti-grid guard. A scene storyboard and a shot board coexist happily —
+   the storyboard covers the sequence, the board covers the cut.
+
+4. THE PREVIOUS CLIP AS AN @Video REFERENCE — the strongest layer, and the one with a bill.
+   link_shots wires each clip into the next shot's reference_video_urls and appends the role
+   ("@Video1 is the PREVIOUS shot — match its lighting, grade, wardrobe, set and character
+   appearance; do NOT continue its action or camera: this shot is a CUT to a new setup"). The
+   previous CLIP carries what no still can: grade, texture, wardrobe detail, voice. Costs, say
+   them to the user before proposing it:
+     - the batch SERIALIZES — shot N cannot start before N-1 has settled;
+     - re-rolling a shot invalidates every shot chained after it;
+     - the handle has a budget (Seedance 2: 3 files, 15 s combined) — link_shots skips the links
+       that would overrun it rather than sending a run the provider will refuse.
+   Reach for it on the cuts that matter (a continuous action across two clips, a character seen
+   twice in a row), not on every pair of a long sequence.
+
+WHAT IS NOT CONTINUITY: wiring a clip's "lastFrame" into the next clip's image input. A generated
+closing frame is motion-blurred and compressed; the next clip re-interprets a degraded still and
+the seam pops — warping faces, sliding backgrounds, a visible hitch. Between shots you CUT. The
+@Video reference above is the supported way to carry a clip forward, precisely because it guides
+instead of becoming a frame.
+
+SHOT LENGTH, before any of this: every video model has a floor (docs "model:<id>" prints the
+allowed range — Seedance 2 refuses anything under 4 s). A script beat shorter than the floor is
+MERGED with its neighbour, or covered by a longer shot that contains it. Never round it down into
+a clip the API refuses, and never silently stretch every 2-3 s beat to 4 s without saying what it
+does to the total: seven 4 s shots is a 28 s film, not the 20 s the script asked for. State the
+resulting total and reconcile it with the brief.`
 
 function modelsIndex(): string {
   const lines = MODELS.map(
@@ -139,14 +263,20 @@ function modelDetail(id: string): string {
       : m.inputs
           .map(
             (h) =>
-              `  - "${h.key}" accepts ${h.accepts.join('/')}${h.required ? ' (REQUIRED)' : ''}${h.multiple ? ' (multiple)' : ''}${h.maxCount ? ` (max ${h.maxCount})` : ''}${h.referenceAlias ? ` — sources addressable in the prompt as ${h.referenceAlias}1, ${h.referenceAlias}2… (connection order)` : ''}`
+              `  - "${h.key}" accepts ${h.accepts.join('/')}${h.required ? ' (REQUIRED)' : ''}${h.multiple ? ' (multiple)' : ''}${h.maxCount ? ` (max ${h.maxCount})` : ''}${h.maxTotalSeconds ? ` (≤${h.maxTotalSeconds}s combined)` : ''}${h.frameAnchor ? ' — FRAME ANCHOR: the image appears on screen' : ''}${h.referenceAlias ? ` — sources addressable in the prompt as ${h.referenceAlias}1, ${h.referenceAlias}2… (connection order)` : ''}`
           )
           .join('\n')
   const params = m.paramFields
     .map((f) => {
       const opts = f.options ? ` options: ${f.options.map((o) => o.value).join('|')}` : ''
       const def = f.defaultValue !== undefined ? ` default: ${JSON.stringify(f.defaultValue)}` : ''
-      return `  - "${f.key}" (${f.type})${def}${opts}${f.description ? ` — ${f.description}` : ''}`
+      // Numeric bounds are an API contract, not a UI hint: a value outside them
+      // is rejected at run time (clips shorter than the model's floor).
+      const range =
+        f.min !== undefined || f.max !== undefined
+          ? ` allowed: ${f.min ?? '-∞'}..${f.max ?? '+∞'}${f.step && f.step > 1 ? ` step ${f.step}` : ''}`
+          : ''
+      return `  - "${f.key}" (${f.type})${def}${range}${opts}${f.description ? ` — ${f.description}` : ''}`
     })
     .join('\n')
   return `${m.label} — id "${m.id}" [${m.kind}]
@@ -263,12 +393,14 @@ ${JSON.stringify(t.workflow, null, 2)}`
 }
 
 export const DOC_TOPICS =
-  'overview | workflow-json | models | model:<id> | prompting:<id> | styles | designs | templates | template:<id>'
+  'overview | workflow-json | models | model:<id> | prompting:<id> | scenario | continuity | styles | designs | templates | template:<id>'
 
 export function getDoc(topic: string): string {
   if (topic === 'overview') return OVERVIEW
   if (topic === 'workflow-json') return WORKFLOW_JSON
   if (topic === 'models') return modelsIndex()
+  if (topic === 'scenario') return SCENARIO
+  if (topic === 'continuity') return CONTINUITY
   if (topic.startsWith('model:')) return modelDetail(topic.slice('model:'.length))
   if (topic.startsWith('prompting:')) return promptingGuide(topic.slice('prompting:'.length))
   if (topic === 'styles') return stylesIndex()

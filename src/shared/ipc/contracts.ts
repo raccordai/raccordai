@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { MAX_VARIANTS } from '../config'
+import { SCENARIO_VERSION, SCREEN_DIRECTIONS, type Scenario } from '../scenario'
 
 /**
  * Single source of truth for the renderer <-> main boundary.
@@ -88,6 +89,43 @@ export type VideoAspectRatio = z.infer<typeof videoAspectRatioSchema>
 export const videoResolutionSchema = z.enum(['480p', '720p', '1080p', '1K', '2K', '4K'])
 export type VideoResolution = z.infer<typeof videoResolutionSchema>
 
+/** Scenario (§6.7) — mirrors `Scenario` in src/shared/scenario.ts (type-checked against it). */
+export const scenarioShotSchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  action: z.string(),
+  seconds: z.number(),
+  requestedSeconds: z.number(),
+  camera: z.string().optional(),
+  sound: z.string().optional(),
+  opensOn: z.string(),
+  closesOn: z.string(),
+  screenDirection: z.enum(SCREEN_DIRECTIONS).optional(),
+  mergedFrom: z.array(z.string()).optional(),
+  promptScaffold: z.string()
+})
+
+export const scenarioSchema = z.object({
+  version: z.literal(SCENARIO_VERSION),
+  brief: z.string(),
+  modelId: z.string(),
+  targetSeconds: z.number().optional(),
+  shots: z.array(scenarioShotSchema),
+  totalSeconds: z.number(),
+  warnings: z.array(z.string())
+})
+
+/**
+ * Compile-time guard: the zod mirror above and the `Scenario` type produced by
+ * `planScenario` must stay identical. Typecheck fails on any drift (a field
+ * added to one side only), which is what keeps the stored JSON, the IPC
+ * boundary and the planner talking about the same object.
+ */
+type Exactly<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+export type ScenarioContractMatchesPlanner = Exactly<z.infer<typeof scenarioSchema>, Scenario>
+const scenarioContractMatchesPlanner: ScenarioContractMatchesPlanner = true
+void scenarioContractMatchesPlanner
+
 export const videoSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -101,6 +139,8 @@ export const videoSchema = z.object({
   draftMode: z.boolean(),
   /** Vision QC (§6.2): successful image generations get one cheap vision check. */
   qcEnabled: z.boolean(),
+  /** Scenario (§6.7): the shot list the graph is built from; null until written. */
+  scenario: scenarioSchema.nullable(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
