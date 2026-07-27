@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.0](https://github.com/raccordai/raccordai/compare/v1.1.0...v1.2.0) (2026-07-27)
+
+
+### Features
+
+* **assistant:** multiple chat threads with a new-chat button ([ca3638b](https://github.com/raccordai/raccordai/commit/ca3638b090a99b4a7e780c3edf4431cd022f9998))
+* **assistant:** render markdown in the chat transcript ([468e393](https://github.com/raccordai/raccordai/commit/468e3936faaaf86135d271aee9827f33c4792e37))
+* **assistant:** require approval before the assistant spends credits ([467263b](https://github.com/raccordai/raccordai/commit/467263bd7558b6de589214fbe067fb4c51717b57))
+* **chat:** the assistant runs on Claude Opus 5 by default ([2ff9337](https://github.com/raccordai/raccordai/commit/2ff9337559d3f6bedc22f368c8657e140c524adc))
+* **iteration:** draft mode, finalize flow & vision QC on settle ([1149a25](https://github.com/raccordai/raccordai/commit/1149a2535a4e36ae2346116370bd54f88babe95b))
+* **iteration:** prompt lint, regional feedback & named checkpoints ([3365ed0](https://github.com/raccordai/raccordai/commit/3365ed08e408024292c6da2d6d22481375e559f6))
+* **iteration:** variants ×N and the compare grid ([da14a57](https://github.com/raccordai/raccordai/commit/da14a57808ab77f9ade50cded17ca9ba679a6e61))
+* **models:** cut between shots instead of chaining lastFrame ([3f1c9a8](https://github.com/raccordai/raccordai/commit/3f1c9a883a18bd4c9138d4b4fbaccf11149cfbd4))
+* **scenario:** plan beats into shots that are legal by construction ([452629e](https://github.com/raccordai/raccordai/commit/452629eaaff4edc1c1a93604b7fa945b11ca374b))
+* **ui:** shortcut registry and toggle-to-close menus ([4beb924](https://github.com/raccordai/raccordai/commit/4beb9240617668108f4f8d78617005184231dffe))
+
+
+### Bug Fixes
+
+* **chat:** an empty provider stream no longer ends the turn in silence ([283cb65](https://github.com/raccordai/raccordai/commit/283cb656bf7bf120c0cb56135a240ffb5eea6604))
+* **graph:** lay out imported workflows instead of stacking them at the origin ([8d9a671](https://github.com/raccordai/raccordai/commit/8d9a671a9d7643d5dcf822718c10b9438113eb8b))
+
 ## [1.1.0](https://github.com/raccordai/raccordai/compare/v1.0.0...v1.1.0) (2026-07-25)
 
 
