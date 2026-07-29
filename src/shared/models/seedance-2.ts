@@ -21,7 +21,7 @@ export const seedance2: ModelDefinition<Params> = {
   id: 'bytedance/seedance-2',
   label: 'Seedance 2',
   description:
-    'The full Seedance 2.0 tier — same @ reference system as Fast/Mini, plus 1080p and 4k output. For live-action realism and final masters; for animation, Fast matches its quality at a fraction of the cost.',
+    'The full Seedance 2.0 tier — same @ reference system as Fast/Mini, plus 1080p and 4k output. For live-action realism and final masters; at 720p it costs a quarter more than Fast, which matches it on animation, and 1080p/4k are several times that.',
   kind: 'video',
   recommendedFor: ['photorealism', 'high-resolution', 'final-masters', 'character-consistency'],
   // Identical schema/handles; 1080p/4k are floored to Fast's 720p cap by the draft layer.
@@ -125,8 +125,13 @@ export const seedance2: ModelDefinition<Params> = {
     'For 10s+ outputs, use numbered shots or "[cut]" beats — never exact timestamps (officially unstable).\n' +
     'Total uploads cap: ≤ 12 files combined. Restriction: no realistic human faces in references (platform compliance).',
   promptGuide: SEEDANCE2_PROMPT_GUIDE,
-  // kie.ai has not published per-second rates for this model yet — add
-  // estimateCredits once https://kie.ai/pricing lists Seedance 2.0.
+  // Indicative per-second rates by resolution — align with https://kie.ai/pricing.
+  // A video-input run is billed differently (price × (input + output) seconds, at
+  // a lower unit price: 11.5 / 25 / 62 / 128 cr/s); `estimateCredits` only sees
+  // params, never the wired handles, so the no-video rate is what we quote — the
+  // higher per-output-second of the two, i.e. the estimate never under-sells.
+  estimateCredits: (params) =>
+    ({ '480p': 19, '720p': 41, '1080p': 102, '4k': 208 })[params.resolution] * params.duration,
   buildPayload: ({ params, inputs }) => {
     const first = inputs.first_frame_url?.[0]
     const last = inputs.last_frame_url?.[0]

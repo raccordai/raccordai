@@ -228,6 +228,12 @@ constants with a comment pointing at <https://kie.ai/pricing>; the kie
 dashboard is the authority, this is an order of magnitude. Omit entirely if no
 reliable rate is known — the UI then shows nothing (never guess).
 
+The signature takes **params only** — never the wired inputs. When a model
+prices a run differently depending on what is connected (the Seedance 2 family
+bills a video-input run as `price × (input + output)` seconds at a lower unit
+price), quote the no-video rate: it is the higher per-output-second of the two,
+so the preview never under-sells the run.
+
 ### `draftEquivalent` — draft mode (§6.1)
 
 Optional cheap stand-in used while the video's **draft mode** is on:

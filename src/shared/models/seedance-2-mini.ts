@@ -122,8 +122,12 @@ export const seedance2Mini: ModelDefinition<Params> = {
     'For 10s+ outputs, use numbered shots or "[cut]" beats — never exact timestamps (officially unstable).\n' +
     'Total uploads cap: ≤ 12 files combined. Restriction: no realistic human faces in references (platform compliance).',
   promptGuide: SEEDANCE2_PROMPT_GUIDE,
-  // kie.ai has not published per-second rates for this model yet — add
-  // estimateCredits once https://kie.ai/pricing lists Seedance 2.0 Mini.
+  // Indicative per-second rates by resolution — align with https://kie.ai/pricing.
+  // A video-input run is billed differently (price × (input + output) seconds, at
+  // a lower unit price: 6 cr/s at 480p, 12.5 at 720p); `estimateCredits` only sees
+  // params, never the wired handles, so the no-video rate is what we quote — the
+  // higher per-output-second of the two, i.e. the estimate never under-sells.
+  estimateCredits: (params) => ({ '480p': 9.5, '720p': 20.5 })[params.resolution] * params.duration,
   buildPayload: ({ params, inputs }) => {
     const first = inputs.first_frame_url?.[0]
     const last = inputs.last_frame_url?.[0]
