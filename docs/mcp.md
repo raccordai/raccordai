@@ -66,6 +66,17 @@ fields an agent can fill — and the models each recipe runs on — come back fr
 `docs "designs"` and `docs "shots"`, generated from the same registry the
 editor's form reads.
 
+The project's **cast** (§6.10) is what turns a sheet into an identity.
+`create_casting` names a published design sheet as a role of the film ("Léa IS
+this sheet"); `cast_role` then wires that sheet as a reference on every shot of
+a video AND writes its identity sentence into each prompt, as ONE undo step. It
+is idempotent (a second call reports `alreadyCast` instead of double-wiring),
+budget-aware (a shot whose reference handle is full, or whose model has no
+reference input at all, comes back in `skipped` with a reason), and
+`plan_only: true` is a free dry run. `list_castings` before generating any
+character/décor/prop sheet — a role that already exists is cast, not
+regenerated. Details: `docs "casting"`.
+
 Three free tools frame the spend (§6.3/6.4/6.5). `lint_node` applies the app's
 prompting doctrine before a run — reference wired but never addressed, design
 sheet on a frame anchor, storyboard shot without the anti-grid guard, param

@@ -14,6 +14,7 @@ import * as backupService from '../services/backup'
 import * as updaterService from '../services/updater'
 import * as chatService from '../services/chat'
 import * as assetsService from '../services/assets'
+import * as castingService from '../services/casting'
 import * as generationsService from '../services/generations'
 import * as graph from '../services/graph'
 import * as library from '../services/library'
@@ -132,6 +133,20 @@ export function registerIpcHandlers(): void {
   handle('assets:references', ({ assetId }) => assetsService.assetReferences(assetId))
   handle('assets:setTags', ({ assetId, tags }) => assetsService.setAssetTags(assetId, tags))
   handle('assets:duplicateGroups', ({ projectId }) => assetsService.duplicateAssetGroups(projectId))
+
+  handle('casting:listByProject', ({ projectId }) => castingService.listCastings(projectId))
+  handle('casting:create', (input) => castingService.createCasting(input))
+  handle('casting:update', ({ castingId, ...patch }) =>
+    castingService.updateCasting(castingId, patch)
+  )
+  handle('casting:remove', ({ castingId }) => castingService.deleteCasting(castingId))
+  handle('casting:plan', (input) => castingService.planCastRole(input))
+  // The wiring is journaled by withGraphHistoryGroup, which broadcasts
+  // event:workflowChanged on its own — no manual refresh here.
+  handle('casting:apply', (input) => castingService.castRole(input))
+  handle('casting:onVideo', ({ videoId, projectId }) =>
+    castingService.castingsOnVideo(videoId, projectId)
+  )
 
   handle('graph:get', ({ videoId }) => graph.listGraph(videoId))
   handle('graph:timelineFallbackImages', ({ videoId }) =>

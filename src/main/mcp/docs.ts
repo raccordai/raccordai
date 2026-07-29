@@ -100,7 +100,7 @@ Conventions:
     always set an AI-facing "description" so future agents know what the media depicts.
   - The user sees the graph update live in the app while you work.
 
-Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "scenario", "continuity", "styles", "designs", "shots", "templates", "template:<id>".`
+Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "scenario", "casting", "continuity", "styles", "designs", "shots", "templates", "template:<id>".`
 
 const WORKFLOW_JSON = `Workflow JSON (version 1) — the bulk import/export format (import_workflow / export_workflow):
 {
@@ -174,6 +174,50 @@ How to use it:
      key so the graph and the scenario stay readable together.
   6. get_scenario reads it back later ("reprends le plan 3"): the scenario stays the reference,
      the graph is its realization. Rewriting it replaces it wholesale.`
+
+const CASTING = `The CAST — persistent named identities, project-wide.
+
+The library already records what a sheet IS (designId: "a character sheet") and what it depicts
+(designSubject: "Léa, 20, pink hair"). It never records who that is for the FILM. Without that,
+"the girl with pink hair" is re-described from scratch in every prompt, and every re-description is
+a chance for the model to drift. The cast is the missing sentence: LÉA IS THIS SHEET.
+
+What a role buys you, that a sheet alone does not:
+  - a NAME the prompts carry between shots — a model told "@Image1 is the character sheet" keeps a
+    look, a model told "@Image1 is LÉA" keeps a person;
+  - ONE place to re-point when the sheet is regenerated (update_casting), instead of hunting the
+    shots that referenced the old one;
+  - standing direction ("always wears the red scarf") folded into every role sentence, written once.
+
+THE LOOP
+1. Generate and get the user to approve a design sheet (docs "designs").
+2. publish_design it into the project library.
+3. create_casting(projectId, name, assetId, notes?) — do this as soon as the sheet is approved. The
+   name is what every later prompt will carry, so use the name the user uses.
+4. cast_role(videoId, castingId) on each video the role appears in.
+
+CAST_ROLE, precisely. It wires the role's sheet as a reference on every SHOT of the video and
+appends the identity sentence to each prompt, in ONE undo step:
+  "@Image1 is LÉA (Léa, 20, pink hair) — the same face, hair, build and proportions as the sheet, in
+   this shot and in every other shot LÉA appears in. The sheet is a REFERENCE: it must never appear
+   on screen as a frame or a panel."
+  - It creates ONE studio/asset node for the sheet and fans it out — and reuses a node already on
+    the canvas rather than adding a second one.
+  - It is IDEMPOTENT. Calling it twice reports the shots in "alreadyCast" with the alias they
+    already answer to; it never double-wires and never appends a second sentence.
+  - It skips rather than overruns: a shot whose reference handle is full (Seedance 2: 9 images), or
+    whose model has no reference input at all (Seedance 1.5, Grok — there a role stays consistent
+    by re-anchoring every shot on the same clean still), comes back in "skipped" with a reason.
+  - Default targets are the video's shots. Name nodeIds explicitly to cast onto a still — a
+    storyboard is built FROM the sheets and wants the role too.
+  - plan_only: true is a free dry run. Use it to tell the user what would be touched before doing it.
+
+NOT the same thing as link_shots (docs "continuity"). Casting keeps a PERSON identical across cuts;
+continuity keeps two consecutive CLIPS reading as one sequence. A film usually wants both, and they
+compose: cast every role, then chain only the cuts that need the previous clip's grade.
+
+remove_casting forgets the name only — shots already cast keep their reference and their prompt.
+Re-pointing a role at a new sheet does not rewire what is already wired: run cast_role again.`
 
 const CONTINUITY = `Making consecutive shots read as ONE sequence — the transition problem.
 
@@ -572,13 +616,14 @@ ${JSON.stringify(t.workflow, null, 2)}`
 }
 
 export const DOC_TOPICS =
-  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | continuity | styles | designs | shots | templates | template:<id>'
+  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | casting | continuity | styles | designs | shots | templates | template:<id>'
 
 export function getDoc(topic: string): string {
   if (topic === 'overview') return OVERVIEW
   if (topic === 'workflow-json') return WORKFLOW_JSON
   if (topic === 'models') return modelsIndex()
   if (topic === 'scenario') return SCENARIO
+  if (topic === 'casting') return CASTING
   if (topic === 'continuity') return CONTINUITY
   if (topic.startsWith('model:')) return modelDetail(topic.slice('model:'.length))
   if (topic.startsWith('prompting:')) return promptingGuide(topic.slice('prompting:'.length))

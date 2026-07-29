@@ -48,6 +48,7 @@ import { invoke } from '@renderer/lib/ipc'
 import { Button } from '@renderer/components/ui/Button'
 import { useDismissable } from '@renderer/components/ui/useDismissable'
 import { useToast } from '@renderer/components/feedback/Feedback'
+import { CastMenu } from '@renderer/features/casting/CastMenu'
 import { Logo } from '@renderer/components/Logo'
 import { graphKeys, useIpcMutation, useProject, useVideo } from './data'
 import { useNodeCreation, type CreateRecipeArgs, type SourceNodeOption } from './useNodeCreation'
@@ -182,6 +183,9 @@ export function WorkflowToolbar({
         onFinalize={() => setFinalizeOpen(true)}
       />
       {finalizeOpen && <FinalizeModal videoId={videoId} onClose={() => setFinalizeOpen(false)} />}
+
+      {/* Casting (§6.10): wire a named role's sheet onto every shot, one undo step. */}
+      <CastMenu videoId={videoId} projectId={projectId} />
 
       <div className="mx-1.5 h-5 w-px bg-neutral-800" />
 

@@ -166,7 +166,8 @@
     "rename": "Rename",
     "delete": "Delete",
     "searchPlaceholder": "Search projects…",
-    "noMatch": "No project matches “{{query}}”."
+    "noMatch": "No project matches “{{query}}”.",
+    "save": "Save"
   },
   "videosPage": {
     "newVideo": "New video",
@@ -262,7 +263,32 @@
     "subject": "Design subject",
     "subjectPlaceholder": "e.g. Léa, 20, pink hair, yellow jacket",
     "designBadgeHint": "Published design sheet — wire it as a reference, never a frame anchor",
-    "deleteReferencedConfirm": "Delete asset “{{name}}”? {{count}} node(s) use it in: {{videos}}. Those nodes will lose their media."
+    "deleteReferencedConfirm": "Delete asset “{{name}}”? {{count}} node(s) use it in: {{videos}}. Those nodes will lose their media.",
+    "tabCasting": "Casting"
+  },
+  "castingPage": {
+    "intro": "The cast names the film's identities: \"Léa\" IS this sheet. The name is what prompts carry from shot to shot — and re-pointing a role at a regenerated sheet happens here, once, instead of hunting the shots that referenced the old one.",
+    "empty": "No roles, no sheets.",
+    "emptyHint": "Publish a design sheet first (character, décor, prop) into the library: you can then give it the name the film gives it.",
+    "none": "No role cast yet.",
+    "newRole": "New role",
+    "namePlaceholder": "Role name (e.g. Léa)",
+    "notesPlaceholder": "Standing direction (e.g. always wears the red scarf)",
+    "deleteConfirm": "Forget the role \"{{name}}\"? Shots already cast keep their reference and their prompt.",
+    "castOnAllShots": "Cast on every shot",
+    "castTitle": "Cast {{name}}",
+    "castNothing": "Nothing to wire: every shot already carries this role.",
+    "castWillWire_one": "{{count}} shot will receive the sheet and its role sentence.",
+    "castWillWire_other": "{{count}} shots will receive the sheet and their role sentence.",
+    "castAlready_one": "{{count}} shot already carries it.",
+    "castAlready_other": "{{count}} shots already carry it.",
+    "castSkipped_one": "{{count}} shot is skipped:",
+    "castSkipped_other": "{{count}} shots are skipped:",
+    "castConfirm": "Cast",
+    "castDone_one": "{{name}} cast on {{count}} shot.",
+    "castDone_other": "{{name}} cast on {{count}} shots.",
+    "noRoles": "No role in this project.",
+    "noRolesHint": "Roles are created from the project page, Casting tab."
   },
   "editor": {
     "addNode": "Add node",

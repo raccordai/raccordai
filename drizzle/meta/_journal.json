@@ -85,6 +85,13 @@
       "when": 1785139073989,
       "tag": "0011_glossy_nick_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1785348669076,
+      "tag": "0012_gigantic_franklin_richards",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,14 @@ import * as graphHistory from '../services/graphHistory'
 import { createEditNodeFromAnnotations, listAnnotations } from '../services/annotations'
 import { linkShots } from '../services/continuity'
 import {
+  castRole,
+  createCasting,
+  deleteCasting,
+  listCastings,
+  planCastRole,
+  updateCasting
+} from '../services/casting'
+import {
   createCheckpoint,
   diffAgainstCurrent,
   listCheckpoints,
@@ -660,6 +668,106 @@ export const AGENT_TOOLS: AgentTool[] = [
     risk: 'write',
     execute: ({ videoId, nodeIds }) =>
       linkShots(String(videoId), (Array.isArray(nodeIds) ? nodeIds : []).map(String))
+  },
+  {
+    name: 'list_castings',
+    description:
+      'The project’s cast: the named identities of the film ("Léa" = this published sheet) with their subject and standing notes. Check it BEFORE generating a sheet for a character/décor/prop that already has a role.',
+    inputSchema: obj({ projectId: str() }, ['projectId']),
+    scope: 'project',
+    risk: 'read',
+    execute: ({ projectId }) =>
+      listCastings(String(projectId)).map((c) => ({
+        id: c.id,
+        name: c.name,
+        assetId: c.assetId,
+        sheet: c.assetName,
+        designId: c.designId,
+        subject: c.designSubject,
+        notes: c.notes
+      }))
+  },
+  {
+    name: 'create_casting',
+    description:
+      'Name a published design sheet as a role of the film ("Léa is this character sheet"), project-wide. Do it once the user approves a sheet — the name is what later prompts carry. Notes are standing direction folded into every role sentence.',
+    inputSchema: obj(
+      {
+        projectId: str(),
+        name: str('The name the film calls this role, e.g. "Léa" — unique in the project.'),
+        assetId: str('A published design sheet of the project (image asset).'),
+        notes: str('Standing direction, e.g. "always wears the red scarf".')
+      },
+      ['projectId', 'name', 'assetId']
+    ),
+    scope: 'project',
+    risk: 'write',
+    execute: ({ projectId, name, assetId, notes }) =>
+      createCasting({
+        projectId: String(projectId),
+        name: String(name),
+        assetId: String(assetId),
+        ...(notes !== undefined ? { notes: String(notes) } : {})
+      })
+  },
+  {
+    name: 'update_casting',
+    description:
+      'Rename a role, re-point it at a regenerated sheet, or change its standing notes. Re-pointing does NOT rewire the shots already cast — re-run cast_role for that.',
+    inputSchema: obj({ castingId: str(), name: str(), assetId: str(), notes: str() }, [
+      'castingId'
+    ]),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ castingId, name, assetId, notes }) =>
+      updateCasting(String(castingId), {
+        ...(name !== undefined ? { name: String(name) } : {}),
+        ...(assetId !== undefined ? { assetId: String(assetId) } : {}),
+        ...(notes !== undefined ? { notes: String(notes) } : {})
+      })
+  },
+  {
+    name: 'cast_role',
+    description:
+      'Cast a role onto a video: its sheet is wired as a reference on every shot and its identity sentence written into each prompt, in ONE undo step. Idempotent — a second call reports "alreadyCast" instead of double-wiring. Shots it cannot wire come back in "skipped". Pass plan_only first to show the user what it would touch. Details: docs "casting".',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        castingId: str(),
+        nodeIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Defaults to every shot of the video. Name stills explicitly (a storyboard).'
+        },
+        plan_only: {
+          type: 'boolean',
+          description: 'Dry run: report what would be wired without touching the graph.'
+        }
+      },
+      ['videoId', 'castingId']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, castingId, nodeIds, plan_only }) => {
+      const args = {
+        videoId: String(videoId),
+        castingId: String(castingId),
+        ...(Array.isArray(nodeIds) ? { nodeIds: nodeIds.map(String) } : {})
+      }
+      return plan_only === true ? planCastRole(args) : castRole(args)
+    }
+  },
+  {
+    name: 'remove_casting',
+    description:
+      'Forget a role. Shots already cast keep their reference and their prompt — this only removes the name from the project’s cast.',
+    inputSchema: obj({ castingId: str() }, ['castingId']),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ castingId }) => {
+      deleteCasting(String(castingId))
+      return { ok: true }
+    }
   },
   {
     name: 'remove_node',

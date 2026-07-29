@@ -116,6 +116,15 @@ QC verdict) and **6.6** variants ×N + compare grid. Details in CLAUDE.md and
 `docs/mcp.md`; only the ambient layer below is still open, and it is
 deliberately last — it feeds on the signals the loop now produces.
 
+Three later steps extended the same track without changing its thesis: **6.8**
+recipes (one registry for every pre-configured node, design sheets and shot
+presets), **6.9** the prompting doctrine as data plus an assembler, and **6.10**
+casting — the film's named identities. The library already stored what a sheet
+IS; nothing stored who that is for the film, so "the girl with pink hair" was
+re-described in every prompt and drifted a little each time. A role names a
+published sheet once, and casting it wires that sheet on every shot with its
+identity sentence, in one undo step.
+
 Two deviations from the original proposals, both deliberate: a checkpoint
 restore replays the raw rows through undo's diff-restore instead of
 `importWorkflow(replace)` (which would delete every generation of the video),

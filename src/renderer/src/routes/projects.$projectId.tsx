@@ -11,6 +11,7 @@ import {
   getWorkflowTemplate
 } from '@shared/templates/registry'
 import { AssetCard } from '@renderer/components/AssetCard'
+import { CastingTab } from '@renderer/features/casting/CastingTab'
 import { LibraryCard } from '@renderer/components/LibraryCard'
 import { useConfirm } from '@renderer/components/feedback/Feedback'
 import { useProject } from '@renderer/features/workflow/data'
@@ -36,7 +37,7 @@ function VideosPage(): React.JSX.Element {
   const confirmModal = useConfirm()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<'videos' | 'assets'>('videos')
+  const [tab, setTab] = useState<'videos' | 'assets' | 'casting'>('videos')
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState<string | null>(null)
@@ -95,6 +96,10 @@ function VideosPage(): React.JSX.Element {
   const assets = useQuery({
     queryKey: ['assets', 'project', projectId],
     queryFn: () => invoke('assets:listByProject', { projectId })
+  })
+  const castings = useQuery({
+    queryKey: ['casting', 'project', projectId],
+    queryFn: () => invoke('casting:listByProject', { projectId })
   })
   const [assetQuery, setAssetQuery] = useState('')
   // 'all' | a design category present in the library | 'media' (non-design assets)
@@ -215,7 +220,7 @@ function VideosPage(): React.JSX.Element {
             >
               <Plus className="h-4 w-4" /> {t('videosPage.newVideo')}
             </button>
-          ) : (
+          ) : tab === 'assets' ? (
             <button
               onClick={() => importAssets.mutate()}
               disabled={importAssets.isPending}
@@ -223,7 +228,7 @@ function VideosPage(): React.JSX.Element {
             >
               <FolderInput className="h-4 w-4" /> {t('assetsPage.import')}
             </button>
-          )}
+          ) : null}
         </div>
 
         {(creditsUsage.data?.generationCount ?? 0) > 0 && (
@@ -237,7 +242,7 @@ function VideosPage(): React.JSX.Element {
 
         {/* Videos / Assets tabs — the asset library is project-wide, shared by every video. */}
         <div className="mt-5 flex gap-1 border-b border-neutral-800">
-          {(['videos', 'assets'] as const).map((key) => (
+          {(['videos', 'assets', 'casting'] as const).map((key) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -249,7 +254,9 @@ function VideosPage(): React.JSX.Element {
             >
               {key === 'videos'
                 ? `${t('assetsPage.tabVideos')} (${videos.data?.length ?? 0})`
-                : `${t('assetsPage.tabAssets')} (${assets.data?.length ?? 0})`}
+                : key === 'assets'
+                  ? `${t('assetsPage.tabAssets')} (${assets.data?.length ?? 0})`
+                  : `${t('assetsPage.tabCasting')} (${castings.data?.length ?? 0})`}
             </button>
           ))}
         </div>
@@ -366,7 +373,9 @@ function VideosPage(): React.JSX.Element {
         </form>
       )}
 
-      {tab === 'assets' ? (
+      {tab === 'casting' ? (
+        <CastingTab projectId={projectId} assets={assets.data ?? []} />
+      ) : tab === 'assets' ? (
         (assets.data?.length ?? 0) === 0 ? (
           <div className="island flex flex-col items-center gap-3 px-8 py-16 text-center">
             <ImageIcon className="h-10 w-10 text-neutral-700" />

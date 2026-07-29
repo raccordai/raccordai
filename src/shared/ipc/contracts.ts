@@ -182,6 +182,55 @@ export type Asset = z.infer<typeof assetSchema>
 export const assetWithUrlSchema = assetSchema.extend({ url: z.string().nullable() })
 export type AssetWithUrl = z.infer<typeof assetWithUrlSchema>
 
+/**
+ * A cast role (§6.10): the film's name for a published design sheet. The sheet
+ * markers are resolved on the way out so the UI and the agents never have to
+ * re-query the library to render "Léa — character sheet".
+ */
+export const castingSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  /** The name the film calls this role, e.g. "Léa" — unique within the project. */
+  name: z.string(),
+  assetId: z.string(),
+  /** Standing direction folded into every role sentence ("always wears the red scarf"). */
+  notes: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  assetName: z.string(),
+  designId: z.string().nullable(),
+  designSubject: z.string().nullable()
+})
+export type Casting = z.infer<typeof castingSchema>
+
+/** What casting a role onto a video would do — same shape dry-run or applied. */
+export const castRolePlanSchema = z.object({
+  castingId: z.string(),
+  name: z.string(),
+  /** The node already carrying the sheet in this video — null until the first cast. */
+  sourceNodeId: z.string().nullable(),
+  cast: z.array(
+    z.object({
+      nodeId: z.string(),
+      label: z.string(),
+      alias: z.string(),
+      /** The sentence that would be appended; empty when the prompt already has it. */
+      role: z.string()
+    })
+  ),
+  alreadyCast: z.array(z.object({ nodeId: z.string(), label: z.string(), alias: z.string() })),
+  skipped: z.array(z.object({ nodeId: z.string(), label: z.string(), reason: z.string() }))
+})
+
+export const castRoleResultSchema = z.object({
+  castingId: z.string(),
+  name: z.string(),
+  sourceNodeId: z.string(),
+  cast: z.array(z.object({ nodeId: z.string(), alias: z.string() })),
+  alreadyCast: z.array(z.object({ nodeId: z.string(), alias: z.string() })),
+  skipped: z.array(z.object({ nodeId: z.string(), reason: z.string() }))
+})
+
 export const positionSchema = z.object({ x: z.number(), y: z.number() })
 
 export const graphNodeSchema = z.object({
@@ -547,6 +596,56 @@ export const ipcContracts = {
   'assets:duplicateGroups': {
     input: z.object({ projectId: z.string() }),
     output: z.array(z.array(z.string()))
+  },
+
+  /** Casting (§6.10) — the project's named identities. */
+  'casting:listByProject': {
+    input: z.object({ projectId: z.string() }),
+    output: z.array(castingSchema)
+  },
+  'casting:create': {
+    input: z.object({
+      projectId: z.string(),
+      name: z.string().trim().min(1),
+      assetId: z.string(),
+      notes: z.string().nullable().optional()
+    }),
+    output: castingSchema
+  },
+  'casting:update': {
+    input: z.object({
+      castingId: z.string(),
+      name: z.string().trim().min(1).optional(),
+      /** Re-point the role at a regenerated sheet — shots keep their wiring. */
+      assetId: z.string().optional(),
+      notes: z.string().nullable().optional()
+    }),
+    output: castingSchema
+  },
+  /** Forgets the role. Shots already cast keep their reference and their prompt. */
+  'casting:remove': { input: z.object({ castingId: z.string() }), output: z.void() },
+  /** Dry run: what `casting:apply` would wire, without touching the graph. */
+  'casting:plan': {
+    input: z.object({
+      videoId: z.string(),
+      castingId: z.string(),
+      nodeIds: z.array(z.string()).optional()
+    }),
+    output: castRolePlanSchema
+  },
+  'casting:apply': {
+    input: z.object({
+      videoId: z.string(),
+      castingId: z.string(),
+      /** Defaults to every shot of the video. */
+      nodeIds: z.array(z.string()).optional()
+    }),
+    output: castRoleResultSchema
+  },
+  /** Roles whose sheet is already on this video's canvas, by node id. */
+  'casting:onVideo': {
+    input: z.object({ videoId: z.string(), projectId: z.string() }),
+    output: z.array(z.object({ castingId: z.string(), nodeId: z.string() }))
   },
 
   'graph:get': {

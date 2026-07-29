@@ -62,6 +62,41 @@ export const assets = sqliteTable(
   ]
 )
 
+/**
+ * Casting (§6.10) — the film's named identities, project-scoped.
+ *
+ * A published design sheet says WHAT it is (`assets.design_id`) and what it
+ * depicts (`design_subject`); it never says who that is for the film. This is
+ * the missing sentence: "Léa IS that sheet". It buys two things the library
+ * alone cannot — a name the prompts can carry between shots, and a single
+ * place to re-point when the sheet is regenerated.
+ *
+ * `asset_id` cascades: a role whose sheet was deleted has nothing left to mean.
+ */
+export const castings = sqliteTable(
+  'castings',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** The name the film calls this role, e.g. "Léa" — unique within the project. */
+    name: text('name').notNull(),
+    /** The published design sheet this role IS. */
+    assetId: text('asset_id')
+      .notNull()
+      .references(() => assets.id, { onDelete: 'cascade' }),
+    /** Standing direction appended to every role sentence ("always wears the red scarf"). */
+    notes: text('notes'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+  },
+  (table) => [
+    index('castings_by_project').on(table.projectId),
+    uniqueIndex('castings_by_project_name').on(table.projectId, table.name)
+  ]
+)
+
 export const videos = sqliteTable(
   'videos',
   {

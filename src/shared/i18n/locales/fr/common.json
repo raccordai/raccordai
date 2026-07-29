@@ -166,7 +166,8 @@
     "rename": "Renommer",
     "delete": "Supprimer",
     "searchPlaceholder": "Rechercher un projet…",
-    "noMatch": "Aucun projet ne correspond à « {{query}} »."
+    "noMatch": "Aucun projet ne correspond à « {{query}} ».",
+    "save": "Enregistrer"
   },
   "videosPage": {
     "newVideo": "Nouvelle vidéo",
@@ -262,7 +263,32 @@
     "subject": "Sujet du design",
     "subjectPlaceholder": "ex. Léa, 20 ans, cheveux roses, veste jaune",
     "designBadgeHint": "Planche de design publiée — à brancher en référence, jamais en frame anchor",
-    "deleteReferencedConfirm": "Supprimer l'asset « {{name}} » ? {{count}} nœud(s) l'utilisent dans : {{videos}}. Ces nœuds perdront leur média."
+    "deleteReferencedConfirm": "Supprimer l'asset « {{name}} » ? {{count}} nœud(s) l'utilisent dans : {{videos}}. Ces nœuds perdront leur média.",
+    "tabCasting": "Casting"
+  },
+  "castingPage": {
+    "intro": "Le casting nomme les identités du film : « Léa », c'est cette planche. Le nom est ce que les prompts transportent d'un plan à l'autre — et repointer un rôle vers une planche régénérée se fait ici, une fois, au lieu de courir après les plans qui référençaient l'ancienne.",
+    "empty": "Aucun rôle, aucune planche.",
+    "emptyHint": "Publie d'abord une planche de design (personnage, décor, accessoire) dans la bibliothèque : tu pourras ensuite lui donner le nom que le film lui donne.",
+    "none": "Aucun rôle casté pour l'instant.",
+    "newRole": "Nouveau rôle",
+    "namePlaceholder": "Nom du rôle (ex. Léa)",
+    "notesPlaceholder": "Direction permanente (ex. porte toujours l'écharpe rouge)",
+    "deleteConfirm": "Oublier le rôle « {{name}} » ? Les plans déjà castés gardent leur référence et leur prompt.",
+    "castOnAllShots": "Caster sur tous les plans",
+    "castTitle": "Caster {{name}}",
+    "castNothing": "Rien à câbler : tous les plans portent déjà ce rôle.",
+    "castWillWire_one": "{{count}} plan va recevoir la planche et sa phrase de rôle.",
+    "castWillWire_other": "{{count}} plans vont recevoir la planche et leur phrase de rôle.",
+    "castAlready_one": "{{count}} plan la porte déjà.",
+    "castAlready_other": "{{count}} plans la portent déjà.",
+    "castSkipped_one": "{{count}} plan est ignoré :",
+    "castSkipped_other": "{{count}} plans sont ignorés :",
+    "castConfirm": "Caster",
+    "castDone_one": "{{name}} castée sur {{count}} plan.",
+    "castDone_other": "{{name}} castée sur {{count}} plans.",
+    "noRoles": "Aucun rôle dans ce projet.",
+    "noRolesHint": "Le casting se crée depuis la page du projet, onglet Casting."
   },
   "editor": {
     "addNode": "Ajouter un nœud",
