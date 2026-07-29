@@ -26,6 +26,7 @@ import {
 } from '../services/checkpoints'
 import { lintNodeById } from '../services/lint'
 import { createRecipeNode } from '../services/recipes'
+import * as scenarioGraph from '../services/scenarioGraph'
 import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
 import * as renderService from '../services/render'
@@ -458,6 +459,12 @@ export const AGENT_TOOLS: AgentTool[] = [
                 enum: [...SCREEN_DIRECTIONS],
                 description: 'Which way the subject travels — continuity across the cut'
               },
+              roles: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'Cast roles appearing in this beat, by name (list_castings). WHO is in a shot cannot be derived from the script — name them here and build_graph_from_scenario wires each sheet on exactly the shots it belongs to.'
+              },
               boardDriven: {
                 type: 'boolean',
                 description: 'True if a storyboard/shot board will be wired on this shot'
@@ -497,6 +504,37 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'video',
     risk: 'read',
     execute: ({ videoId }) => videos.getVideoScenario(String(videoId))
+  },
+  {
+    name: 'build_graph_from_scenario',
+    description:
+      'Realize the video’s scenario as a graph: one shot-preset node per shot, camera move read from the shot’s own `camera` line, duration, frames and screen direction filled in, and the scenario’s roles cast onto the shots naming them — ONE undo step. Prefer it to hand-writing an import_workflow. Re-running only adds new shots; plan_only is free. Details: docs "scenario".',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        shotKeys: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Scenario shot keys to build. Defaults to every shot not built yet.'
+        },
+        plan_only: {
+          type: 'boolean',
+          description: 'Dry run: report what would be created without touching the graph.'
+        }
+      },
+      ['videoId']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, shotKeys, plan_only }) => {
+      const args = {
+        videoId: String(videoId),
+        ...(Array.isArray(shotKeys) ? { shotKeys: shotKeys.map(String) } : {})
+      }
+      return plan_only === true
+        ? scenarioGraph.planScenarioGraph(args)
+        : scenarioGraph.buildGraphFromScenario(args)
+    }
   },
   {
     name: 'export_workflow',

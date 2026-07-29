@@ -394,7 +394,15 @@
       "target": "brief: {{target}}",
       "asked": "asked {{seconds}}",
       "mergedFrom": "Merged from: {{beats}}",
-      "editHint": "The scenario is edited through the assistant — one author keeps the shot list, the durations and the graph consistent."
+      "editHint": "The scenario is edited through the assistant — one author keeps the shot list, the durations and the graph consistent.",
+      "build": "Build the graph",
+      "buildHint": "One shot node per scenario shot, with the camera move, the duration and the opening/closing frames already filled in. Nothing runs: you review before generating.",
+      "nothingToBuild": "Every shot of the scenario is already on the canvas.",
+      "alreadyBuilt_one": "{{count}} shot already built, left untouched.",
+      "alreadyBuilt_other": "{{count}} shots already built, left untouched.",
+      "unknownRoles": "Roles the cast does not know, left unwired: {{roles}}",
+      "confirmBuild_one": "Create {{count}} shot",
+      "confirmBuild_other": "Create {{count}} shots"
     },
     "lint": {
       "fix": {

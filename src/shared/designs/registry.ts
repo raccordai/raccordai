@@ -1,5 +1,6 @@
 import type { StyleTemplate } from '../styles/registry'
 import {
+  clampParamToField,
   defaultParamsFor,
   getModel,
   getModelOrThrow,
@@ -410,6 +411,14 @@ export interface RecipePromptArgs {
   style?: StyleTemplate
   /** The mode the node is being created in — decides the from-source wording. */
   mode?: RecipeMode
+  /**
+   * Clip length in seconds, when the caller owns it (a scenario shot's legal
+   * duration, §6.11) instead of taking the preset's default. A shot prompt is a
+   * TIMELINE — its beat brackets are computed from this — so the number that
+   * lands in `params.duration` and the number the beats are written against
+   * must be the same one, or a 4 s clip ships with 8 s of bracketed action.
+   */
+  durationSeconds?: number
 }
 
 export interface Recipe {
@@ -1145,7 +1154,7 @@ function buildShotBody(preset: ShotPresetSpec, args: RecipePromptArgs): string {
   const bracketId = register.doctrine === 'disembodied' ? preset.bracketKinetic : preset.bracket
   const bracket = bracketFor(bracketId, register.doctrine)
   const size = getShotSize(text(values, 'shotSize') ?? preset.shotSize)
-  const seconds = preset.seconds
+  const seconds = args.durationSeconds ?? preset.seconds
   const ranges = beatRanges(seconds, beatCountFor(seconds))
   const camera = cameraSentenceFor(preset, register, values)
   const opensOn = text(values, 'opensOn')
@@ -1259,7 +1268,8 @@ const EXTEND_RECIPE: Recipe = {
       register.doctrine === 'disembodied' ? 'ramp-on-the-steal' : 'steadicam-glide',
       register.doctrine
     )
-    const ranges = beatRanges(6, beatCountFor(6))
+    const seconds = args.durationSeconds ?? 6
+    const ranges = beatRanges(seconds, beatCountFor(seconds))
     const opensOn = text(values, 'opensOn')
     const closesOn = text(values, 'closesOn')
     const beats: SeedanceBeat[] = ranges.map((range, index) => {
@@ -1389,6 +1399,12 @@ export function recipeNodeParams(args: {
   style?: StyleTemplate
   /** The video's format defaults — applied only when the recipe follows them. */
   videoDefaults?: { defaultAspectRatio?: string | null; defaultResolution?: string | null } | null
+  /**
+   * Overrides the recipe's default clip length (a scenario shot's own duration).
+   * Snapped to the model's `duration` field, then used for BOTH the param and
+   * the prompt's beat timeline — they can never disagree.
+   */
+  durationSeconds?: number
 }): Record<string, unknown> {
   const modelId = args.modelId ?? args.mode.modelId
   if (!args.recipe.supportedModels.includes(modelId)) {
@@ -1396,8 +1412,13 @@ export function recipeNodeParams(args: {
       `Model "${modelId}" is not supported by recipe "${args.recipe.id}" (${args.recipe.supportedModels.join(', ')}).`
     )
   }
-  getModelOrThrow(modelId)
+  const model = getModelOrThrow(modelId)
   const subject = (args.values.description ?? '').trim()
+  const durationField = model.paramFields.find((f) => f.key === 'duration' && f.type === 'number')
+  const duration =
+    args.durationSeconds !== undefined && durationField
+      ? clampParamToField(args.durationSeconds, durationField)
+      : undefined
   return {
     ...defaultParamsFor(modelId),
     ...args.recipe.params,
@@ -1408,10 +1429,12 @@ export function recipeNodeParams(args: {
     ...(args.recipe.followsVideoFormat
       ? videoDefaultParams(modelId, args.videoDefaults ?? null)
       : {}),
+    ...(duration !== undefined ? { duration } : {}),
     prompt: buildRecipePrompt(args.recipe, modelId, {
       values: args.values,
       ...(args.style ? { style: args.style } : {}),
-      mode: args.mode
+      mode: args.mode,
+      ...(duration !== undefined ? { durationSeconds: duration } : {})
     }),
     recipeId: args.recipe.id,
     recipeMode: args.mode.id,

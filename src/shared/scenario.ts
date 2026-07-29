@@ -51,6 +51,17 @@ export interface ScenarioBeat {
   /** The frame the beat closes on — what the NEXT shot opens on. */
   closesOn?: string
   screenDirection?: ScreenDirection
+  /**
+   * Cast roles appearing in this beat, by name (`castings.name`, §6.10).
+   *
+   * WHO is in a shot is the one thing a graph builder cannot derive from the
+   * script — a character sheet wired on every shot of the film is wrong as
+   * often as it is right. Naming the roles here is what lets §6.11 build the
+   * graph without asking a model again at the last mile. Unknown names are
+   * reported, never fatal: the scenario may legitimately be written before the
+   * sheets are published.
+   */
+  roles?: string[]
   /** True when the shot will be driven by a storyboard/shot board reference. */
   boardDriven?: boolean
   /**
@@ -87,6 +98,8 @@ export interface ScenarioShot {
   opensOn: string
   closesOn: string
   screenDirection?: ScreenDirection
+  /** Cast roles appearing in this shot, normalized (trimmed, deduplicated). */
+  roles?: string[]
   /** Titles of the beats folded into this shot (only when more than one). */
   mergedFrom?: string[]
   /** The continuity paragraph the shot's prompt is written on top of. */
@@ -126,6 +139,26 @@ function durationFieldOf(modelId: string): ParamField | null {
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
 
+/**
+ * Role names, cleaned once: trimmed, blanks dropped, deduplicated
+ * case-insensitively — the same rule `createCasting` normalizes a role name
+ * with, so a beat naming "Léa" and a beat naming "léa" reach the graph builder
+ * as the same person instead of two.
+ */
+export function normalizeRoles(roles: string[] | undefined): string[] {
+  const seen = new Set<string>()
+  const kept: string[] = []
+  for (const raw of roles ?? []) {
+    const name = raw.trim().replace(/\s+/g, ' ')
+    if (name === '') continue
+    const folded = name.toLocaleLowerCase()
+    if (seen.has(folded)) continue
+    seen.add(folded)
+    kept.push(name)
+  }
+  return kept
+}
+
 /** Beats folded into one shot: titles joined, actions chained in order. */
 function combine(beats: ScenarioBeat[]): ScenarioBeat & { sources: ScenarioBeat[] } {
   const first = beats[0]!
@@ -149,6 +182,8 @@ function combine(beats: ScenarioBeat[]): ScenarioBeat & { sources: ScenarioBeat[
         .map((b) => b.sound?.trim())
         .filter(Boolean)
         .join(' ') || undefined,
+    // Everyone who appears in any of the folded beats appears in the shot.
+    roles: normalizeRoles(beats.flatMap((b) => b.roles ?? [])),
     // The merged shot opens where the first beat did and closes where the last did.
     ...(first.opensOn ? { opensOn: first.opensOn } : {}),
     ...(last.closesOn ? { closesOn: last.closesOn } : {}),
@@ -302,6 +337,7 @@ export function planScenario(input: PlanScenarioInput): Scenario {
       opensOn: openingOf(beat, previous),
       closesOn: beat.closesOn?.trim() ?? '',
       ...(beat.screenDirection ? { screenDirection: beat.screenDirection } : {}),
+      ...(normalizeRoles(beat.roles).length > 0 ? { roles: normalizeRoles(beat.roles) } : {}),
       ...(beat.sources.length > 1 ? { mergedFrom: beat.sources.map((b) => b.title) } : {}),
       promptScaffold: ''
     }

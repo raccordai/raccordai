@@ -66,6 +66,19 @@ fields an agent can fill — and the models each recipe runs on — come back fr
 `docs "designs"` and `docs "shots"`, generated from the same registry the
 editor's form reads.
 
+A brief becomes a graph in two deterministic steps (§6.7 → §6.11).
+`write_scenario` turns the beats of the script into a shot list that is legal by
+construction; `build_graph_from_scenario` then REALIZES that list — one shot
+preset per shot, its camera move matched from the shot's own `camera` line
+("travelling avant" → push-in), its legal duration carried into both the
+`duration` param and the prompt's beat timeline, its opening/closing frames and
+screen direction filled in, and the roles each beat named cast onto exactly
+those shots. One undo step, no model call, no credit. It is idempotent by node
+key, so re-running after extending the scenario only adds the new shots, and
+`plan_only: true` reports which preset each shot lands on and why. That is the
+path to prefer over hand-writing an `import_workflow` payload for a scenario;
+what the presets cannot express stays an explicit import.
+
 The project's **cast** (§6.10) is what turns a sheet into an identity.
 `create_casting` names a published design sheet as a role of the film ("Léa IS
 this sheet"); `cast_role` then wires that sheet as a reference on every shot of

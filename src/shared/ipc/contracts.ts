@@ -109,6 +109,8 @@ export const scenarioShotSchema = z.object({
   opensOn: z.string(),
   closesOn: z.string(),
   screenDirection: z.enum(SCREEN_DIRECTIONS).optional(),
+  /** Cast roles (§6.10) appearing in the shot, by name — what §6.11 wires. */
+  roles: z.array(z.string()).optional(),
   mergedFrom: z.array(z.string()).optional(),
   promptScaffold: z.string()
 })
@@ -229,6 +231,47 @@ export const castRoleResultSchema = z.object({
   cast: z.array(z.object({ nodeId: z.string(), alias: z.string() })),
   alreadyCast: z.array(z.object({ nodeId: z.string(), alias: z.string() })),
   skipped: z.array(z.object({ nodeId: z.string(), reason: z.string() }))
+})
+
+/** Scenario → graph (§6.11): what building the shot list would create. */
+export const scenarioGraphPlanSchema = z.object({
+  videoId: z.string(),
+  modelId: z.string(),
+  shotCount: z.number(),
+  build: z.array(
+    z.object({
+      key: z.string(),
+      title: z.string(),
+      recipeId: z.string(),
+      modelId: z.string(),
+      seconds: z.number(),
+      /** Why this preset — the camera words that matched, or the fallback rule. */
+      reason: z.string(),
+      notes: z.array(z.string()),
+      roles: z.array(z.object({ name: z.string(), castingId: z.string().nullable() }))
+    })
+  ),
+  alreadyBuilt: z.array(z.object({ key: z.string(), title: z.string() })),
+  skipped: z.array(z.object({ key: z.string(), title: z.string(), reason: z.string() })),
+  unknownRoles: z.array(z.string())
+})
+
+export type ScenarioGraphPlan = z.infer<typeof scenarioGraphPlanSchema>
+
+export const scenarioGraphResultSchema = z.object({
+  videoId: z.string(),
+  created: z.array(z.object({ nodeId: z.string(), key: z.string(), recipeId: z.string() })),
+  alreadyBuilt: z.array(z.object({ key: z.string(), title: z.string() })),
+  skipped: z.array(z.object({ key: z.string(), title: z.string(), reason: z.string() })),
+  cast: z.array(
+    z.object({
+      castingId: z.string(),
+      name: z.string(),
+      nodeIds: z.array(z.string()),
+      skipped: z.array(z.object({ nodeId: z.string(), reason: z.string() }))
+    })
+  ),
+  unknownRoles: z.array(z.string())
 })
 
 export const positionSchema = z.object({ x: z.number(), y: z.number() })
@@ -641,6 +684,19 @@ export const ipcContracts = {
       nodeIds: z.array(z.string()).optional()
     }),
     output: castRoleResultSchema
+  },
+  /**
+   * Scenario → graph (§6.11). `plan` is free and touches nothing; `build`
+   * creates one shot-preset node per shot and casts the roles the scenario
+   * named, in ONE undo step.
+   */
+  'scenario:planGraph': {
+    input: z.object({ videoId: z.string(), shotKeys: z.array(z.string()).optional() }),
+    output: scenarioGraphPlanSchema
+  },
+  'scenario:buildGraph': {
+    input: z.object({ videoId: z.string(), shotKeys: z.array(z.string()).optional() }),
+    output: scenarioGraphResultSchema
   },
   /** Roles whose sheet is already on this video's canvas, by node id. */
   'casting:onVideo': {

@@ -15,6 +15,7 @@ import * as updaterService from '../services/updater'
 import * as chatService from '../services/chat'
 import * as assetsService from '../services/assets'
 import * as castingService from '../services/casting'
+import * as scenarioGraph from '../services/scenarioGraph'
 import * as generationsService from '../services/generations'
 import * as graph from '../services/graph'
 import * as library from '../services/library'
@@ -147,6 +148,11 @@ export function registerIpcHandlers(): void {
   handle('casting:onVideo', ({ videoId, projectId }) =>
     castingService.castingsOnVideo(videoId, projectId)
   )
+
+  handle('scenario:planGraph', (input) => scenarioGraph.planScenarioGraph(input))
+  // Same rule as casting: the whole build is one history group, which broadcasts
+  // event:workflowChanged itself.
+  handle('scenario:buildGraph', (input) => scenarioGraph.buildGraphFromScenario(input))
 
   handle('graph:get', ({ videoId }) => graph.listGraph(videoId))
   handle('graph:timelineFallbackImages', ({ videoId }) =>

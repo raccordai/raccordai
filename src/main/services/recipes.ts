@@ -40,6 +40,16 @@ export interface CreateRecipeNodeArgs {
   /** The media feeding a `from-image`/`from-video` mode. Exactly one of the two. */
   source?: { assetId?: string; nodeId?: string }
   position?: { x: number; y: number }
+  /**
+   * Node key. Left out, the graph assigns a random one; the scenario builder
+   * (§6.11) passes the shot's own key so the graph and the shot list stay
+   * readable together — and so a second build recognizes what it already made.
+   */
+  key?: string
+  /** Overrides the label built from the recipe and its subject (a shot title). */
+  label?: string
+  /** Overrides the recipe's default clip length — see `recipeNodeParams`. */
+  durationSeconds?: number
 }
 
 export interface CreateRecipeNodeResult {
@@ -114,7 +124,8 @@ export function createRecipeNode(args: CreateRecipeNodeArgs): CreateRecipeNodeRe
     modelId,
     values: args.values,
     ...(style ? { style } : {}),
-    videoDefaults: video
+    videoDefaults: video,
+    ...(args.durationSeconds !== undefined ? { durationSeconds: args.durationSeconds } : {})
   })
   const subject = (args.values.description ?? '').trim()
   const name = recipe.label
@@ -159,7 +170,8 @@ export function createRecipeNode(args: CreateRecipeNodeArgs): CreateRecipeNodeRe
       modelId,
       position,
       params,
-      label: subject ? `${name} — ${subject.slice(0, 40)}` : name,
+      ...(args.key !== undefined ? { key: args.key } : {}),
+      label: args.label ?? (subject ? `${name} — ${subject.slice(0, 40)}` : name),
       intent: recipeIntent(recipe, args.values)
     })
     if (sourceNodeId && handle) {

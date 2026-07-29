@@ -125,6 +125,15 @@ re-described in every prompt and drifted a little each time. A role names a
 published sheet once, and casting it wires that sheet on every shot with its
 identity sentence, in one undo step.
 
+**6.11** closes the brief → film path: the scenario (§6.7) already produced, per
+shot, exactly the values a shot preset (§6.8) asks for, but nothing consumed
+them — only the assistant went from shot list to graph, freehand, and re-derived
+the same decisions differently every time. `build_graph_from_scenario` makes that
+step deterministic: a pure matcher reads each shot's camera line to pick its
+preset, the shot's own legal duration lands in both the param and the prompt's
+beat timeline, and the roles the scenario named are cast on exactly the shots
+that name them — one undo step, no model call at the last mile.
+
 Two deviations from the original proposals, both deliberate: a checkpoint
 restore replays the raw rows through undo's diff-restore instead of
 `importWorkflow(replace)` (which would delete every generation of the video),

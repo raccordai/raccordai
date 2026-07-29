@@ -41,7 +41,9 @@ Typical session:
   1. list_projects → list_videos → get_workflow (ids of everything)
   1b. Asked for a film from a brief? Write the SCENARIO first — write_scenario turns beats into a
      shot list whose durations the model accepts, chained cut to cut, before any graph exists
-     (docs "scenario"). It is the step where the constraints are cheap to respect.
+     (docs "scenario"). It is the step where the constraints are cheap to respect. Then
+     build_graph_from_scenario realizes it: one shot preset per shot, camera move, duration and
+     frames already filled in, roles cast — do not retype that shot list as an import_workflow.
   2. docs "models" then docs "model:<id>" for the models you plan to use;
      read docs "doctrine" ONCE (how a video prompt is built: the opening
      declaration, the camera's ontology, the bracketed timeline, imperfection)
@@ -141,8 +143,9 @@ returns the shot list made legal and chained:
   ├ camera       camera intent                ├ opensOn         explicit, or handed over by shot N-1
   ├ sound        dialogue and sound           ├ closesOn        what shot N+1 will open on
   ├ opensOn      entry frame (optional)       ├ mergedFrom      the beats folded into this shot
-  ├ closesOn     EXIT frame — write it        └ promptScaffold  the continuity paragraph to build on
-  ├ screenDirection  which way it travels
+  ├ closesOn     EXIT frame — write it        ├ promptScaffold  the continuity paragraph to build on
+  ├ screenDirection  which way it travels     └ roles           the cast roles appearing in it
+  ├ roles        cast roles in this beat
   ├ boardDriven  a board will be wired here
   └ mergeWithNext  fold into the next beat
 
@@ -161,17 +164,40 @@ What it enforces, so you never have to remember it:
     is flagged — that reversal reads as a different scene. It is a warning, not a fix: some
     reversals are deliberate.
 
+FROM THE SCENARIO TO THE GRAPH — build_graph_from_scenario, not a hand-written payload.
+
+Everything a shot preset asks for is already in the shot: the camera line, the legal duration,
+the opening and closing frames, the screen direction, the sound. build_graph_from_scenario reads
+them and creates one shot-preset node per shot — the camera move matched from the \`camera\` line
+("travelling avant" → push-in, "gros plan" → reaction close-up), the duration carried into BOTH
+the param and the prompt's beat timeline, the frames written in — then casts the roles each shot
+named onto exactly those shots. One undo step, no credits, nothing runs.
+
+  - It is DETERMINISTIC. The same scenario builds the same graph, which is the point: the
+    decisions were made in the scenario, where they were cheap to change.
+  - Write \`camera\` on every beat, in either language. It is what picks the preset; without it
+    the builder falls back on the shot's place and length and says so.
+  - Write \`roles\` on every beat, naming the roles from list_castings. WHO is in a shot cannot be
+    derived from the script. A name the cast does not know comes back in \`unknownRoles\` — it is
+    reported, never fatal.
+  - Read what comes back: \`reason\` per shot (which words chose the preset), \`notes\` (a preset
+    the model cannot run and what replaced it, a missing closing frame), \`skipped\`. Report them.
+  - Re-running only adds the shots that do not exist yet, so extending a scenario is safe.
+  - Then edit what the plan got wrong (change_node_params / replace the preset) instead of
+    rebuilding the graph by hand.
+
 How to use it:
   1. Read the brief. Ask only what you cannot infer (length, ratio, tone).
   2. list_models → pick the video model, note its duration min/max.
-  3. write_scenario with the beats. It is stored on the video and shown to the user in the
-     editor's Scenario panel, so it survives the conversation.
+  3. write_scenario with the beats — including \`camera\` and \`roles\`. It is stored on the video
+     and shown to the user in the editor's Scenario panel, so it survives the conversation.
   4. Report the warnings in plain language and let the user arbitrate anything editorial
      (a total that drifted, a merge that changes the cut list).
-  5. present_plan (models + credits) → import_workflow, writing each shot's prompt ON TOP OF its
-     promptScaffold: the scaffold carries the cut, the opening and closing frames, the screen
-     direction and — when boardDriven — the anti-grid guard. Reuse each shot's \`key\` as the node
-     key so the graph and the scenario stay readable together.
+  5. build_graph_from_scenario (plan_only first if the user wants to see it) — that is the graph.
+     Hand-write an import_workflow payload only for a graph the presets cannot express; when you
+     do, write each prompt ON TOP OF the shot's promptScaffold (it carries the cut, the frames,
+     the screen direction and — when boardDriven — the anti-grid guard) and reuse each shot's
+     \`key\` as the node key so the graph and the scenario stay readable together.
   6. get_scenario reads it back later ("reprends le plan 3"): the scenario stays the reference,
      the graph is its realization. Rewriting it replaces it wholesale.`
 

@@ -394,7 +394,15 @@
       "target": "brief : {{target}}",
       "asked": "demandé {{seconds}}",
       "mergedFrom": "Fusionné depuis : {{beats}}",
-      "editHint": "Le scénario se modifie via l'assistant — il garde le découpage, les durées et le graphe cohérents."
+      "editHint": "Le scénario se modifie via l'assistant — il garde le découpage, les durées et le graphe cohérents.",
+      "build": "Construire le graphe",
+      "buildHint": "Un nœud de plan par plan du scénario, avec le mouvement de caméra, la durée et les images d'ouverture/fermeture déjà remplis. Rien n'est lancé : tu relis avant de générer.",
+      "nothingToBuild": "Tous les plans du scénario sont déjà sur le canvas.",
+      "alreadyBuilt_one": "{{count}} plan déjà construit, laissé intact.",
+      "alreadyBuilt_other": "{{count}} plans déjà construits, laissés intacts.",
+      "unknownRoles": "Rôles inconnus du casting, non câblés : {{roles}}",
+      "confirmBuild_one": "Créer {{count}} plan",
+      "confirmBuild_other": "Créer {{count}} plans"
     },
     "lint": {
       "fix": {

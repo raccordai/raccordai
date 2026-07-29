@@ -1,10 +1,12 @@
-import { AlertTriangle, ArrowRight, Clapperboard, X } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, ArrowRight, Clapperboard, Loader2, Workflow, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { ScenarioGraphPlan } from '@shared/ipc/contracts'
 import { formatSeconds } from '@renderer/lib/formatSeconds'
-import { useVideo } from './data'
+import { graphKeys, useInvalidateWorkflow, useIpcMutation, useVideo } from './data'
 
 /**
- * Scenario (§6.7) — the shot list the graph realizes, read-only.
+ * Scenario (§6.7) — the shot list, and the button that realizes it (§6.11).
  *
  * It is written by the assistant (`write_scenario`) from the user's brief, with
  * the durations already made legal for the target model and every shot chained
@@ -12,12 +14,23 @@ import { useVideo } from './data'
  * the film BEFORE any node exists, and come back to it later: the scenario is
  * stored on the video, not in the conversation.
  *
- * Changes go through the assistant — one author keeps the shot list, the
- * durations and the graph consistent.
+ * Building the graph is deliberately a two-step gesture: the plan is free and
+ * says which preset each shot lands on and why, so the user arbitrates the
+ * camera choices BEFORE a single node exists. The build itself is one undo step.
+ *
+ * Editing the shot list still goes through the assistant — one author keeps the
+ * shot list, the durations and the graph consistent.
  */
 export function ScenarioPanel({ videoId, onClose }: { videoId: string; onClose: () => void }) {
   const { t } = useTranslation()
   const scenario = useVideo(videoId).data?.scenario ?? null
+  const [plan, setPlan] = useState<ScenarioGraphPlan | null>(null)
+  const invalidate = useInvalidateWorkflow(videoId)
+
+  const planGraph = useIpcMutation('scenario:planGraph')
+  const buildGraph = useIpcMutation('scenario:buildGraph', [graphKeys.graph(videoId)])
+  const busy = planGraph.isPending || buildGraph.isPending
+  const error = planGraph.error ?? buildGraph.error
 
   return (
     <aside className="island flex w-96 flex-col overflow-hidden px-4 py-3">
@@ -130,6 +143,112 @@ export function ScenarioPanel({ videoId, onClose }: { videoId: string; onClose: 
           <p className="mt-2 text-[10px] leading-relaxed text-neutral-600 italic">
             {t('editor.scenario.editHint')}
           </p>
+        </div>
+      )}
+
+      {scenario !== null && (
+        <div className="mt-2 flex-shrink-0 border-t border-neutral-800 pt-2">
+          {plan === null ? (
+            <>
+              <button
+                onClick={() =>
+                  planGraph.mutate({ videoId }, { onSuccess: (result) => setPlan(result) })
+                }
+                disabled={busy}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md bg-highlight px-2 py-1.5 text-xs font-medium text-neutral-900 hover:brightness-105 disabled:opacity-50"
+              >
+                {busy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Workflow className="h-3.5 w-3.5" />
+                )}
+                {t('editor.scenario.build')}
+              </button>
+              <p className="mt-1 text-[9px] leading-snug text-neutral-600">
+                {t('editor.scenario.buildHint')}
+              </p>
+            </>
+          ) : (
+            <div className="max-h-64 overflow-y-auto">
+              {plan.build.length === 0 ? (
+                <p className="text-[10px] leading-relaxed text-neutral-500 italic">
+                  {t('editor.scenario.nothingToBuild')}
+                </p>
+              ) : (
+                <ol className="space-y-1">
+                  {plan.build.map((entry) => (
+                    <li key={entry.key} className="text-[10px] leading-snug">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="min-w-0 flex-1 truncate text-neutral-300">
+                          {entry.title}
+                        </span>
+                        <span className="flex-shrink-0 font-mono text-[9px] text-accent">
+                          {t(`designs.${entry.recipeId}.name` as never)}
+                        </span>
+                      </div>
+                      {/* Why this preset — the user arbitrates the camera, not the wiring. */}
+                      <div className="text-[9px] text-neutral-600">
+                        {formatSeconds(entry.seconds)} · {entry.reason}
+                        {entry.roles.length > 0 &&
+                          ` · ${entry.roles.map((r) => r.name).join(', ')}`}
+                      </div>
+                      {entry.notes.map((note) => (
+                        <div key={note} className="text-[9px] text-warning">
+                          {note}
+                        </div>
+                      ))}
+                    </li>
+                  ))}
+                </ol>
+              )}
+
+              {plan.alreadyBuilt.length > 0 && (
+                <p className="mt-1.5 text-[9px] text-neutral-600">
+                  {t('editor.scenario.alreadyBuilt', { count: plan.alreadyBuilt.length })}
+                </p>
+              )}
+              {plan.unknownRoles.length > 0 && (
+                <p className="mt-1.5 text-[9px] text-warning">
+                  {t('editor.scenario.unknownRoles', { roles: plan.unknownRoles.join(', ') })}
+                </p>
+              )}
+              {plan.skipped.map((entry) => (
+                <p key={entry.key} className="mt-1.5 text-[9px] text-warning">
+                  {entry.title} — {entry.reason}
+                </p>
+              ))}
+
+              <div className="mt-2 flex gap-1.5">
+                <button
+                  onClick={() => setPlan(null)}
+                  disabled={busy}
+                  className="rounded-md border border-neutral-700 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  onClick={() =>
+                    buildGraph.mutate(
+                      { videoId },
+                      {
+                        onSuccess: () => {
+                          setPlan(null)
+                          invalidate()
+                        }
+                      }
+                    )
+                  }
+                  disabled={busy || plan.build.length === 0}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-highlight px-2 py-1 text-[11px] font-medium text-neutral-900 hover:brightness-105 disabled:opacity-50"
+                >
+                  {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+                  {t('editor.scenario.confirmBuild', { count: plan.build.length })}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="mt-1.5 text-[10px] text-danger">{error.message}</p>}
         </div>
       )}
     </aside>
