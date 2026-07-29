@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import { lintNode, type LintConnection, type LintFinding } from '@shared/promptLint'
 import { getModel } from '@shared/models'
 import { getDb } from '../db/client'
-import { assets, edges, nodes } from '../db/schema'
+import { assets, edges, nodes, videos } from '../db/schema'
 
 /**
  * Prompt lint (§6.5) — the I/O half: read a node's model, params and wiring
@@ -61,11 +61,21 @@ export function connectionsFor(nodeId: string): LintConnection[] {
 
 /** Lint one node by id (empty for an unknown node — nothing to say). */
 export function lintNodeById(nodeId: string): LintFinding[] {
-  const node = getDb().select().from(nodes).where(eq(nodes.id, nodeId)).get()
+  const db = getDb()
+  const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
   if (!node) return []
+  // The §6.9 doctrine rules judge the PAYLOAD, and for a styled video node the
+  // payload is the sandwich the video's art direction wraps around the stored
+  // prompt — so the style has to come along.
+  const video = db
+    .select({ styleId: videos.styleId })
+    .from(videos)
+    .where(eq(videos.id, node.videoId))
+    .get()
   return lintNode({
     modelId: node.modelId,
     params: (node.params ?? {}) as Record<string, unknown>,
-    connections: connectionsFor(nodeId)
+    connections: connectionsFor(nodeId),
+    ...(video?.styleId ? { styleId: video.styleId } : {})
   })
 }

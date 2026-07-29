@@ -11,6 +11,15 @@ import {
   workflowTemplateIds
 } from './registry'
 
+/** Params a recipe node carries on purpose (stripped at run by the model schema). */
+const RECIPE_MARKERS: string[] = [
+  'applyVideoStyle',
+  'recipeId',
+  'recipeMode',
+  'designId',
+  'designSubject'
+]
+
 describe('workflow template registry', () => {
   it('has unique ids and resolves by id', () => {
     expect(new Set(workflowTemplateIds).size).toBe(WORKFLOW_TEMPLATES.length)
@@ -43,8 +52,9 @@ describe('workflow template registry', () => {
           const model = getModel(node.modelId)!
           const known = new Set(model.paramFields.map((f) => f.key))
           for (const key of Object.keys(node.params)) {
-            // The style-at-payload marker is deliberately not a model field.
-            if (key === 'applyVideoStyle') continue
+            // Recipe markers are deliberately not model fields: run-time zod
+            // validation strips them, and the lint/library read them instead.
+            if (RECIPE_MARKERS.includes(key)) continue
             expect(known.has(key), `${node.key}: param "${key}" is not a ${model.id} field`).toBe(
               true
             )

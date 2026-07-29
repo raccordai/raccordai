@@ -56,6 +56,7 @@ import { useLastFrameExtractor } from './useLastFrameExtractor'
 import { graphKeys, useGraph, useIpcMutation, useProjectAssets } from './data'
 import { useNodeCreation } from './useNodeCreation'
 import { MODELS, getModel } from '@shared/models'
+import { getDesignRecipe } from '@shared/designs/registry'
 
 const NODE_TYPES = {
   modelNode: ModelNode,
@@ -395,7 +396,9 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
             ? (projectAssets?.find((a) => a.id === sourceParams.assetId)?.designId ?? undefined)
             : undefined)
         let resolvedTargetHandle = targetHandle
-        if (designId) {
+        // A style frame or a pack-shot is MEANT to be the opening frame — the
+        // recipe declares it, so the guard only fires on true references.
+        if (designId && getDesignRecipe(designId)?.anchorSafe !== true) {
           const target = graph?.nodes.find((n) => n.id === targetId)
           const targetModel = target ? getModel(target.modelId) : undefined
           const handle = targetModel?.inputs.find((h) => h.key === targetHandle)
@@ -985,11 +988,14 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
               void nodeCreation.addNode(modelId, paneMenu.flow)
               setPaneMenu(null)
             }}
-            onAddDesign={(recipeId, description) => {
-              void nodeCreation.addDesignNode(recipeId, description, paneMenu.flow)
+            onAddRecipe={(args) => {
+              void nodeCreation.addRecipeNode(args, paneMenu.flow)
               setPaneMenu(null)
             }}
             libraryAssets={nodeCreation.designAssets}
+            projectAssets={nodeCreation.projectAssets}
+            sourceNodes={nodeCreation.sourceNodes}
+            style={nodeCreation.style}
             onAddFromLibrary={(asset) => {
               void nodeCreation.addLibraryDesignNode(asset, paneMenu.flow)
               setPaneMenu(null)

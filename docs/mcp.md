@@ -24,21 +24,25 @@ claude mcp add raccord --transport http http://127.0.0.1:4517/mcp \
 Tool descriptions are 1–2 lines; the depth lives in the `docs(topic)` tool
 that agents call **on demand**:
 
-| Topic            | Content                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `overview`       | Data model, typical session, conventions (positions, labels, intents)                                                     |
-| `workflow-json`  | Import/export format specification (version 1)                                                                            |
-| `models`         | Compact model index (one line each)                                                                                       |
-| `model:<id>`     | Full sheet: edge inputs, outputs, params, prompting notes                                                                 |
-| `prompting:<id>` | Long-form prompting guide (anatomy, camera vocabulary, dialogue syntax, pitfalls, examples) — read before writing prompts |
-| `styles`         | Style templates (art directions): style bible, per-media fragments, music hint, recommended params                        |
-| `templates`      | Workflow blueprint index (ready-to-import graphs with `[SLOTS]`)                                                          |
-| `template:<id>`  | One blueprint's full workflow JSON, ready for `import_workflow`                                                           |
+| Topic            | Content                                                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `overview`       | Data model, typical session, conventions (positions, labels, intents)                                                        |
+| `workflow-json`  | Import/export format specification (version 1)                                                                               |
+| `models`         | Compact model index (one line each)                                                                                          |
+| `model:<id>`     | Full sheet: edge inputs, outputs, params, prompting notes                                                                    |
+| `prompting:<id>` | Long-form prompting guide (anatomy, camera vocabulary, dialogue syntax, pitfalls, examples) — read before writing prompts    |
+| `styles`         | Style templates (art directions): style bible, per-media fragments, music hint, recommended params                           |
+| `doctrine`       | How a video prompt is built: opening declaration, camera ontology, bracketed timeline, imperfection, optics, anti-AI lexicon |
+| `designs`        | Design-sheet recipes: modes, fields, supported models, the prompt they build                                                 |
+| `shots`          | Shot presets: the camera move written per model, plus the continuity fields (`opensOn`/`closesOn`/`screenDirection`)         |
+| `templates`      | Workflow blueprint index (ready-to-import graphs with `[SLOTS]`)                                                             |
+| `template:<id>`  | One blueprint's full workflow JSON, ready for `import_workflow`                                                              |
 
 The `models`, `model:<id>` and `prompting:<id>` topics are **generated from the
-model registry** (`src/shared/models/`), `styles` from `src/shared/styles/` and
-`templates` from `src/shared/templates/` — the docs cannot drift from the real
-capabilities. An agent discovering the app pays ~0 tokens of fixed context and
+model registry** (`src/shared/models/`), `styles` from `src/shared/styles/`,
+`designs`/`shots` from `src/shared/designs/`, `doctrine` from
+`src/shared/prompting/` and `templates` from `src/shared/templates/` — the docs
+cannot drift from the real capabilities. An agent discovering the app pays ~0 tokens of fixed context and
 fetches exactly the reference it needs.
 
 A video can carry a **style template** (art direction): `get_workflow` returns
@@ -52,6 +56,15 @@ and promotes them, `plan_only: true` for the draft-vs-final cost preview), and
 `review_generation` runs the vision QC on a successful image generation
 (automatic at settle when the video's QC option is on — verdict and notes come
 back in `get_generations`).
+
+`add_recipe_node` is the preferred way to create any node a **recipe** covers
+(§6.8): a design sheet or a shot preset. It builds the prompt for the target
+model and the video's style, stamps the markers the app reads (`recipeId`,
+`designId` on reference sheets only, `applyVideoStyle`), and in a `from-image` /
+`from-video` mode it creates and wires the source node in ONE undo step. The
+fields an agent can fill — and the models each recipe runs on — come back from
+`docs "designs"` and `docs "shots"`, generated from the same registry the
+editor's form reads.
 
 Three free tools frame the spend (§6.3/6.4/6.5). `lint_node` applies the app's
 prompting doctrine before a run — reference wired but never addressed, design

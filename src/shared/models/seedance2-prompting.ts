@@ -21,7 +21,13 @@ import { TRANSITION_CONTRACT } from '../shotContinuity'
 export const ANTI_GRID_GUARD =
   'Render one single full-frame shot: no storyboard grid of any kind (no 3x3 grid, no 2x2 grid), no panel borders, no panel numbers, no split-screen or comic-panel layout.'
 
-export const SEEDANCE2_PROMPT_GUIDE = `ANATOMY (official ByteDance order):
+export const SEEDANCE2_PROMPT_GUIDE = `READ FIRST: the app's prompting doctrine — docs "doctrine" (§6.9,
+  \`src/shared/prompting/seedance.ts\`). It governs HOW a clip prompt is shaped: the opening capture
+  declaration (added from the video's style at payload time), the camera's ontology (a body or a
+  ghost, never both), the bracketed timeline with one camera mode per beat, imperfection, and the
+  closing booster stack. What follows is the MODEL-SPECIFIC half — Seedance 2.0's own syntax.
+
+ANATOMY (official ByteDance order):
   Precise subject + action detail + scene/environment + lighting & color tone + camera movement
   + visual style + image quality + constraints.
 Think of the prompt as a short shot brief: who, doing what, where, shot how, what it sounds like.

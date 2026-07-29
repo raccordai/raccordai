@@ -70,7 +70,7 @@
     "newThread": "New chat",
     "renameThread": "Rename conversation",
     "deleteThread": "Delete conversation",
-    "deleteThreadConfirm": "Delete \u201c{{name}}\u201d and its whole history? This cannot be undone.",
+    "deleteThreadConfirm": "Delete “{{name}}” and its whole history? This cannot be undone.",
     "threadVideo": "Legacy video thread · {{name}}",
     "placeholder": "Ask for an action or a question…",
     "send": "Send",
@@ -276,7 +276,8 @@
       "image": "Image",
       "video": "Video",
       "audio": "Audio",
-      "asset": "Studio"
+      "asset": "Studio",
+      "shot": "Shots"
     },
     "designHint": "Describe the subject in a few words — the prompt is built for the model and the video's style. Then wire this node into your shots' “reference” inputs.",
     "designAdd": "Create node",
@@ -495,7 +496,20 @@
       "confirm_one": "Generate {{count}} generation",
       "confirm_other": "Generate {{count}} generations"
     },
-    "mentionInputs": "Connected inputs"
+    "mentionInputs": "Connected inputs",
+    "recipeMode": "Mode",
+    "recipeModel": "Model",
+    "recipeSource": "Source",
+    "recipeSourcePlaceholder": "Pick an image from the library…",
+    "recipeSourceRequired": "This recipe needs a source.",
+    "recipeSourceNone": "No published design in this project — publish a sheet from a generation first.",
+    "recipePreview": "Generated prompt",
+    "recipePreviewShow": "Show the generated prompt",
+    "recipePreviewHide": "Hide the prompt",
+    "recipeMore": "Options",
+    "promptGuide": "Model prompting guide",
+    "promptGuideShow": "Read the prompting guide",
+    "promptGuideHide": "Hide the guide"
   },
   "mcp": {
     "title": "MCP server",
@@ -522,6 +536,10 @@
     "documentary": {
       "name": "Documentary",
       "desc": "Naturalistic — available light, observational camera"
+    },
+    "kinetic-action": {
+      "name": "Kinetic action",
+      "desc": "Choreographed and impossible — weightless camera, speed ramps, hero framing"
     }
   },
   "designs": {
@@ -554,6 +572,76 @@
       "name": "Storyboard",
       "desc": "9-panel grid of the scene — preview the staging before generating video",
       "placeholder": "e.g. Léa crosses the rooftop and leaps at sunset"
+    },
+    "expressions": {
+      "name": "Expression sheet",
+      "desc": "A 6-panel grid — the same character, one emotion per panel",
+      "placeholder": "e.g. Léa, 20, pink hair"
+    },
+    "wardrobe": {
+      "name": "Wardrobe / variants",
+      "desc": "The same character in several outfits — built from an approved sheet",
+      "placeholder": "e.g. Léa in city, rain and evening outfits"
+    },
+    "packshot": {
+      "name": "Product pack-shot",
+      "desc": "The hero product image — built from the client's own photo",
+      "placeholder": "e.g. Aurora headphones, matte finish"
+    },
+    "shot-establishing": {
+      "name": "Establishing shot",
+      "desc": "Opens the scene: wide frame, slow move, the location reads before the action",
+      "placeholder": "e.g. the harbour at dawn, a figure on the quay"
+    },
+    "shot-tracking": {
+      "name": "Tracking shot",
+      "desc": "The camera travels alongside the subject at its own speed",
+      "placeholder": "e.g. Maya weaves between two vans"
+    },
+    "shot-push-in": {
+      "name": "Push-in",
+      "desc": "A slow dolly toward the subject — raise intensity without a cut",
+      "placeholder": "e.g. Léa's face as she understands"
+    },
+    "shot-pull-back": {
+      "name": "Pull-back reveal",
+      "desc": "Starts tight and pulls back to disclose the context",
+      "placeholder": "e.g. the hand on the handle, then the empty hall"
+    },
+    "shot-orbit": {
+      "name": "Orbit",
+      "desc": "The camera arcs around the subject — the product and hero shot",
+      "placeholder": "e.g. the headphones on their stand"
+    },
+    "shot-insert": {
+      "name": "Insert / macro detail",
+      "desc": "A very short detail shot — the cutaway that lets an edit breathe",
+      "placeholder": "e.g. droplets on brushed metal"
+    },
+    "shot-reaction": {
+      "name": "Reaction close-up",
+      "desc": "Near-static frame carried entirely by the performance",
+      "placeholder": "e.g. Léa takes the news without a word"
+    },
+    "shot-pov-handheld": {
+      "name": "POV / handheld",
+      "desc": "Subjective, unstable framing — presence and urgency",
+      "placeholder": "e.g. the run down the corridor, short of breath"
+    },
+    "shot-whip-pan": {
+      "name": "Whip-pan transition",
+      "desc": "A fast pan that blurs out — cut it against the next shot's whip in",
+      "placeholder": "e.g. whip from the quay to the city"
+    },
+    "shot-locked-off": {
+      "name": "Locked-off frame",
+      "desc": "A rigid frame where only the subject moves — the most reliable shot on every model",
+      "placeholder": "e.g. the workshop door, nobody comes in yet"
+    },
+    "shot-extend": {
+      "name": "Continue the previous clip",
+      "desc": "The only genuine continuity: the previous clip becomes an @Video reference",
+      "placeholder": "e.g. Maya leaves frame and reaches the avenue"
     }
   },
   "templates": {
@@ -595,5 +683,212 @@
     "generationFailed": "“{{label}}” failed",
     "batchTitle": "Generations finished",
     "batchSummary": "{{succeeded}} succeeded, {{failed}} failed"
+  },
+  "recipeModes": {
+    "text": {
+      "label": "Describe it"
+    },
+    "from-image": {
+      "label": "Start from an image"
+    },
+    "from-video": {
+      "label": "Start from a clip"
+    }
+  },
+  "recipeFields": {
+    "description": {
+      "label": "Subject"
+    },
+    "views": {
+      "label": "Views",
+      "options": {
+        "turnaround": "3-view turnaround",
+        "five-view": "5-view turnaround",
+        "bust": "Bust, 3 angles"
+      }
+    },
+    "wardrobe": {
+      "label": "Wardrobe",
+      "placeholder": "e.g. yellow jacket, worn boots"
+    },
+    "background": {
+      "label": "Background",
+      "options": {
+        "neutral-light": "Neutral light",
+        "neutral-dark": "Neutral dark",
+        "grid": "Neutral + proportion grid"
+      }
+    },
+    "emotions": {
+      "label": "Emotions",
+      "placeholder": "e.g. neutral, joy, anger, fear, sadness, determination"
+    },
+    "variants": {
+      "label": "Variants",
+      "placeholder": "e.g. city outfit, rain outfit, evening outfit"
+    },
+    "timeOfDay": {
+      "label": "Time of day",
+      "options": {
+        "day": "Daylight",
+        "golden-hour": "Golden hour",
+        "blue-hour": "Blue hour",
+        "night": "Night"
+      }
+    },
+    "weather": {
+      "label": "Weather",
+      "options": {
+        "clear": "Clear",
+        "rain": "Rain",
+        "fog": "Fog",
+        "snow": "Snow"
+      }
+    },
+    "scale": {
+      "label": "Scale",
+      "options": {
+        "establishing": "Establishing",
+        "interior": "Interior",
+        "detail": "Signature detail"
+      }
+    },
+    "angles": {
+      "label": "Angles",
+      "options": {
+        "three-angle": "3 angles + detail",
+        "exploded": "Assembled + exploded",
+        "single-hero": "Single hero angle"
+      }
+    },
+    "material": {
+      "label": "Materials",
+      "placeholder": "e.g. patinated brass, black leather"
+    },
+    "framing": {
+      "label": "Framing",
+      "options": {
+        "wide": "Wide",
+        "medium": "Medium",
+        "close-up": "Close-up",
+        "extreme-close-up": "Extreme close-up"
+      }
+    },
+    "lighting": {
+      "label": "Lighting",
+      "options": {
+        "soft-key": "Soft",
+        "hard-key": "Hard directional",
+        "backlit": "Backlit",
+        "low-key": "Low-key"
+      }
+    },
+    "lensLook": {
+      "label": "Lens look",
+      "options": {
+        "wide-angle": "Wide angle",
+        "standard": "Standard",
+        "telephoto": "Telephoto",
+        "macro": "Macro"
+      }
+    },
+    "palette": {
+      "label": "Palette",
+      "placeholder": "e.g. dusty pink, lavender, concrete grey"
+    },
+    "surface": {
+      "label": "Surface",
+      "options": {
+        "seamless-white": "Seamless white",
+        "dark-gradient": "Dark gradient",
+        "lifestyle": "Lifestyle surface",
+        "floating": "Floating"
+      }
+    },
+    "coverage": {
+      "label": "Panel coverage",
+      "placeholder": "e.g. panels 1-3 the arrival, 4-6 the action, 7-9 the payoff"
+    },
+    "opensOn": {
+      "label": "Opening frame",
+      "placeholder": "e.g. the hand on the handle, door closed"
+    },
+    "closesOn": {
+      "label": "Closing frame",
+      "placeholder": "e.g. the door wide open, the corridor empty"
+    },
+    "sound": {
+      "label": "Sound",
+      "placeholder": "e.g. rain on metal, one line: “let's go”"
+    },
+    "screenDirection": {
+      "label": "Screen direction",
+      "options": {
+        "left-to-right": "Left to right",
+        "right-to-left": "Right to left",
+        "toward-camera": "Toward camera",
+        "away-from-camera": "Away from camera",
+        "static": "Stays put"
+      }
+    },
+    "pace": {
+      "label": "Pace",
+      "options": {
+        "slow": "Slow",
+        "steady": "Steady",
+        "fast": "Fast"
+      }
+    },
+    "preserve": {
+      "label": "Preserve",
+      "options": {
+        "identity": "Identity (face, build)",
+        "identity-and-outfit": "Identity and outfit",
+        "geometry": "Geometry and materials",
+        "subject-only": "Subject only, the rest is rebuilt"
+      }
+    },
+    "shotSize": {
+      "label": "Shot size",
+      "options": {
+        "ecu": "Extreme close-up",
+        "cu": "Close-up",
+        "mcu": "Medium close-up",
+        "ms": "Medium shot",
+        "ws": "Wide shot",
+        "ews": "Extreme wide"
+      }
+    },
+    "fov": {
+      "label": "Field of view",
+      "options": {
+        "180": "180° — fisheye",
+        "107": "107° — ultra wide",
+        "84": "84° — wide",
+        "63": "63° — observational",
+        "47": "47° — neutral perspective",
+        "29": "29° — portrait compression",
+        "18": "18° — tight portrait",
+        "12": "12° — tele detail",
+        "8": "8° — extreme compression"
+      }
+    },
+    "whiteBalance": {
+      "label": "White balance",
+      "options": {
+        "3200": "3200 K — tungsten",
+        "4000": "4000 K — warm neutral",
+        "5600": "5600 K — daylight",
+        "8500": "8500 K — cold shade"
+      }
+    },
+    "atmosphere": {
+      "label": "Atmosphere",
+      "placeholder": "e.g. fog density 40%, visible at 15 m"
+    },
+    "life": {
+      "label": "Uncontrolled life",
+      "placeholder": "e.g. kids run across the frame"
+    }
   }
 }

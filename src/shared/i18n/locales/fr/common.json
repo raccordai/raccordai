@@ -276,7 +276,8 @@
       "image": "Image",
       "video": "Vidéo",
       "audio": "Audio",
-      "asset": "Studio"
+      "asset": "Studio",
+      "shot": "Plans"
     },
     "designHint": "Décris le sujet en quelques mots — le prompt est généré pour le modèle et le style de la vidéo. Branche ensuite ce nœud en entrée « reference » de tes plans.",
     "designAdd": "Créer le nœud",
@@ -495,7 +496,20 @@
       "confirm_one": "Générer {{count}} génération",
       "confirm_other": "Générer {{count}} générations"
     },
-    "mentionInputs": "Entrées connectées"
+    "mentionInputs": "Entrées connectées",
+    "recipeMode": "Mode",
+    "recipeModel": "Modèle",
+    "recipeSource": "Source",
+    "recipeSourcePlaceholder": "Choisir une image de la bibliothèque…",
+    "recipeSourceRequired": "Cette recette a besoin d'une source.",
+    "recipeSourceNone": "Aucun design publié dans ce projet — publie une planche depuis une génération.",
+    "recipePreview": "Prompt généré",
+    "recipePreviewShow": "Voir le prompt généré",
+    "recipePreviewHide": "Masquer le prompt",
+    "recipeMore": "Options",
+    "promptGuide": "Guide de prompt du modèle",
+    "promptGuideShow": "Lire le guide de prompt",
+    "promptGuideHide": "Masquer le guide"
   },
   "mcp": {
     "title": "Serveur MCP",
@@ -522,6 +536,10 @@
     "documentary": {
       "name": "Documentaire",
       "desc": "Naturaliste — lumière disponible, caméra observationnelle"
+    },
+    "kinetic-action": {
+      "name": "Action stylisée",
+      "desc": "Chorégraphié et impossible — caméra sans poids, ramps de vitesse, cadres héroïques"
     }
   },
   "designs": {
@@ -554,6 +572,76 @@
       "name": "Storyboard",
       "desc": "Grille de 9 cases de la scène — aperçu de la mise en scène avant de générer la vidéo",
       "placeholder": "ex. Léa traverse le toit et saute au coucher du soleil"
+    },
+    "expressions": {
+      "name": "Feuille d'expressions",
+      "desc": "Grille de 6 panneaux — le même personnage, une émotion par case",
+      "placeholder": "ex. Léa, 20 ans, cheveux roses"
+    },
+    "wardrobe": {
+      "name": "Garde-robe / variantes",
+      "desc": "Le même personnage en plusieurs tenues — part d'une planche validée",
+      "placeholder": "ex. Léa en tenue de ville, de pluie et de soirée"
+    },
+    "packshot": {
+      "name": "Packshot produit",
+      "desc": "L'image héro du produit — part de la photo client",
+      "placeholder": "ex. casque Aurora, finition mate"
+    },
+    "shot-establishing": {
+      "name": "Plan d'ensemble",
+      "desc": "Ouvre la scène : cadre large, mouvement lent, le lieu se lit avant l'action",
+      "placeholder": "ex. le port au lever du jour, une silhouette sur le quai"
+    },
+    "shot-tracking": {
+      "name": "Travelling latéral",
+      "desc": "La caméra accompagne le sujet à sa vitesse",
+      "placeholder": "ex. Maya slalome entre deux camionnettes"
+    },
+    "shot-push-in": {
+      "name": "Avancée caméra",
+      "desc": "Travelling lent vers le sujet — monter l'intensité sans couper",
+      "placeholder": "ex. le visage de Léa qui comprend"
+    },
+    "shot-pull-back": {
+      "name": "Recul révélateur",
+      "desc": "Part serré et recule pour dévoiler le contexte",
+      "placeholder": "ex. la main sur la poignée, puis toute la salle vide"
+    },
+    "shot-orbit": {
+      "name": "Orbite",
+      "desc": "La caméra tourne autour du sujet — le plan produit et le plan héro",
+      "placeholder": "ex. le casque posé sur son socle"
+    },
+    "shot-insert": {
+      "name": "Insert / détail macro",
+      "desc": "Un très court plan de détail — le plan de coupe qui aère le montage",
+      "placeholder": "ex. les gouttes sur le métal brossé"
+    },
+    "shot-reaction": {
+      "name": "Gros plan de réaction",
+      "desc": "Cadre quasi fixe, tout repose sur le jeu",
+      "placeholder": "ex. Léa encaisse la nouvelle sans un mot"
+    },
+    "shot-pov-handheld": {
+      "name": "Caméra portée / POV",
+      "desc": "Cadre subjectif et instable — présence et urgence",
+      "placeholder": "ex. la course dans le couloir, souffle court"
+    },
+    "shot-whip-pan": {
+      "name": "Filé de transition",
+      "desc": "Panoramique rapide qui file — se coupe contre le filé du plan suivant",
+      "placeholder": "ex. filé du quai vers la ville"
+    },
+    "shot-locked-off": {
+      "name": "Plan fixe",
+      "desc": "Cadre rigide, seul le sujet bouge — le plan le plus fiable sur tous les modèles",
+      "placeholder": "ex. la porte de l'atelier, personne n'entre encore"
+    },
+    "shot-extend": {
+      "name": "Continuer le plan précédent",
+      "desc": "Le seul vrai raccord : le clip précédent devient une référence @Video",
+      "placeholder": "ex. Maya sort du cadre et débouche sur l'avenue"
     }
   },
   "templates": {
@@ -595,5 +683,212 @@
     "generationFailed": "« {{label}} » en échec",
     "batchTitle": "Générations terminées",
     "batchSummary": "{{succeeded}} réussie(s), {{failed}} en échec"
+  },
+  "recipeModes": {
+    "text": {
+      "label": "Décrire"
+    },
+    "from-image": {
+      "label": "Partir d'une image"
+    },
+    "from-video": {
+      "label": "Partir d'un clip"
+    }
+  },
+  "recipeFields": {
+    "description": {
+      "label": "Sujet"
+    },
+    "views": {
+      "label": "Vues",
+      "options": {
+        "turnaround": "Turnaround 3 vues",
+        "five-view": "Turnaround 5 vues",
+        "bust": "Buste, 3 angles"
+      }
+    },
+    "wardrobe": {
+      "label": "Tenue",
+      "placeholder": "ex. veste jaune, bottes usées"
+    },
+    "background": {
+      "label": "Fond",
+      "options": {
+        "neutral-light": "Neutre clair",
+        "neutral-dark": "Neutre sombre",
+        "grid": "Neutre + grille de proportions"
+      }
+    },
+    "emotions": {
+      "label": "Émotions",
+      "placeholder": "ex. neutre, joie, colère, peur, tristesse, détermination"
+    },
+    "variants": {
+      "label": "Variantes",
+      "placeholder": "ex. tenue de ville, de pluie, de soirée"
+    },
+    "timeOfDay": {
+      "label": "Heure",
+      "options": {
+        "day": "Plein jour",
+        "golden-hour": "Heure dorée",
+        "blue-hour": "Heure bleue",
+        "night": "Nuit"
+      }
+    },
+    "weather": {
+      "label": "Météo",
+      "options": {
+        "clear": "Dégagé",
+        "rain": "Pluie",
+        "fog": "Brouillard",
+        "snow": "Neige"
+      }
+    },
+    "scale": {
+      "label": "Échelle",
+      "options": {
+        "establishing": "Plan d'ensemble",
+        "interior": "Intérieur",
+        "detail": "Détail signature"
+      }
+    },
+    "angles": {
+      "label": "Angles",
+      "options": {
+        "three-angle": "3 angles + détail",
+        "exploded": "Assemblé + éclaté",
+        "single-hero": "Un seul angle héro"
+      }
+    },
+    "material": {
+      "label": "Matières",
+      "placeholder": "ex. laiton patiné, cuir noir"
+    },
+    "framing": {
+      "label": "Cadrage",
+      "options": {
+        "wide": "Large",
+        "medium": "Moyen",
+        "close-up": "Gros plan",
+        "extreme-close-up": "Très gros plan"
+      }
+    },
+    "lighting": {
+      "label": "Lumière",
+      "options": {
+        "soft-key": "Douce",
+        "hard-key": "Dure et directionnelle",
+        "backlit": "Contre-jour",
+        "low-key": "Clair-obscur"
+      }
+    },
+    "lensLook": {
+      "label": "Optique",
+      "options": {
+        "wide-angle": "Grand angle",
+        "standard": "Standard",
+        "telephoto": "Téléobjectif",
+        "macro": "Macro"
+      }
+    },
+    "palette": {
+      "label": "Palette",
+      "placeholder": "ex. rose poussière, lavande, gris béton"
+    },
+    "surface": {
+      "label": "Support",
+      "options": {
+        "seamless-white": "Fond blanc infini",
+        "dark-gradient": "Dégradé sombre",
+        "lifestyle": "Surface lifestyle",
+        "floating": "En lévitation"
+      }
+    },
+    "coverage": {
+      "label": "Découpage des cases",
+      "placeholder": "ex. cases 1-3 l'arrivée, 4-6 l'action, 7-9 la chute"
+    },
+    "opensOn": {
+      "label": "Image d'ouverture",
+      "placeholder": "ex. la main sur la poignée, porte fermée"
+    },
+    "closesOn": {
+      "label": "Image de fermeture",
+      "placeholder": "ex. la porte grande ouverte, le couloir vide"
+    },
+    "sound": {
+      "label": "Son",
+      "placeholder": "ex. pluie sur la tôle, une réplique : « on y va »"
+    },
+    "screenDirection": {
+      "label": "Direction d'écran",
+      "options": {
+        "left-to-right": "De gauche à droite",
+        "right-to-left": "De droite à gauche",
+        "toward-camera": "Vers la caméra",
+        "away-from-camera": "Vers le fond",
+        "static": "Sur place"
+      }
+    },
+    "pace": {
+      "label": "Rythme",
+      "options": {
+        "slow": "Lent",
+        "steady": "Régulier",
+        "fast": "Rapide"
+      }
+    },
+    "preserve": {
+      "label": "À préserver",
+      "options": {
+        "identity": "L'identité (visage, morphologie)",
+        "identity-and-outfit": "L'identité et la tenue",
+        "geometry": "La géométrie et les matières",
+        "subject-only": "Le sujet seul, le reste est refait"
+      }
+    },
+    "shotSize": {
+      "label": "Taille de plan",
+      "options": {
+        "ecu": "Très gros plan",
+        "cu": "Gros plan",
+        "mcu": "Plan poitrine",
+        "ms": "Plan moyen",
+        "ws": "Plan large",
+        "ews": "Très large"
+      }
+    },
+    "fov": {
+      "label": "Champ (FOV)",
+      "options": {
+        "180": "180° — fisheye",
+        "107": "107° — ultra grand-angle",
+        "84": "84° — grand-angle",
+        "63": "63° — observation",
+        "47": "47° — perspective neutre",
+        "29": "29° — compression portrait",
+        "18": "18° — portrait serré",
+        "12": "12° — télé détail",
+        "8": "8° — compression extrême"
+      }
+    },
+    "whiteBalance": {
+      "label": "Balance des blancs",
+      "options": {
+        "3200": "3200 K — tungstène",
+        "4000": "4000 K — neutre chaud",
+        "5600": "5600 K — lumière du jour",
+        "8500": "8500 K — ombre froide"
+      }
+    },
+    "atmosphere": {
+      "label": "Atmosphère",
+      "placeholder": "ex. brouillard 40 %, visible à 15 m"
+    },
+    "life": {
+      "label": "Vie incontrôlée",
+      "placeholder": "ex. des gamins traversent le cadre en courant"
+    }
   }
 }

@@ -4,7 +4,7 @@ import { extname, join } from 'node:path'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { describeParamsError, estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
 import { remapDraftInputs, resolveDraftRun } from '@shared/models/draft'
-import { appendStyleBible, getStyle, nodeAppliesVideoStyle } from '@shared/styles/registry'
+import { getStyle, nodeAppliesVideoStyle, wrapPromptWithStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes, videos } from '../db/schema'
 import { emitGenerationSettled, onGenerationSettled } from '../bus'
@@ -294,17 +294,21 @@ async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Prom
     throw new Error(`Invalid params: ${describeParamsError(err, model)}`, { cause: err })
   }
 
-  // Style-at-payload: nodes flagged `applyVideoStyle` get the video's CURRENT
-  // style bible appended to their prompt here — before the input snapshot is
-  // persisted, so retries and re-queues replay the exact same payload. Stored
-  // prompts stay business-only; a style change propagates on the next run.
+  // Style-at-payload (§6.9): nodes flagged `applyVideoStyle` get the video's
+  // CURRENT art direction composed into their prompt here — before the input
+  // snapshot is persisted, so retries and re-queues replay the exact same
+  // payload. Stored prompts stay business-only; a style change propagates on
+  // the next run. Stills get the bible appended; MOVING IMAGES get the full
+  // sandwich (capture declaration + compressed bible on top, booster stack at
+  // the bottom), because for a clip the opening declaration is what selects the
+  // universe and the closing stack is what keeps it from decaying.
   if (model.kind !== 'audio' && nodeAppliesVideoStyle(node.params)) {
     const style = video?.styleId ? getStyle(video.styleId) : undefined
     const prompt = (validatedParams as { prompt?: unknown }).prompt
     if (style && typeof prompt === 'string') {
       validatedParams = {
         ...(validatedParams as Record<string, unknown>),
-        prompt: appendStyleBible(prompt, style.styleBible)
+        prompt: wrapPromptWithStyle({ prompt, style, kind: model.kind })
       }
     }
   }

@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRightToLine,
   ChevronDown,
+  Clapperboard,
   FileImage,
   FlaskConical,
   FileVideo,
@@ -31,16 +32,25 @@ import type {
   VideoAspectRatio,
   VideoResolution
 } from '@shared/ipc/contracts'
-import { MODELS, videoDefaultParams } from '@shared/models'
-import { STYLES } from '@shared/styles/registry'
-import { DESIGN_RECIPES, type DesignRecipe } from '@shared/designs/registry'
+import { MODELS, getModel, videoDefaultParams } from '@shared/models'
+import { STYLES, type StyleTemplate } from '@shared/styles/registry'
+import {
+  RECIPES,
+  buildRecipePrompt,
+  defaultModeOf,
+  getRecipeMode,
+  recipeFieldsFor,
+  recipeModelChoices,
+  type Recipe,
+  type RecipeValues
+} from '@shared/designs/registry'
 import { invoke } from '@renderer/lib/ipc'
 import { Button } from '@renderer/components/ui/Button'
 import { useDismissable } from '@renderer/components/ui/useDismissable'
 import { useToast } from '@renderer/components/feedback/Feedback'
 import { Logo } from '@renderer/components/Logo'
 import { graphKeys, useIpcMutation, useProject, useVideo } from './data'
-import { useNodeCreation } from './useNodeCreation'
+import { useNodeCreation, type CreateRecipeArgs, type SourceNodeOption } from './useNodeCreation'
 import type { LayoutDirection } from './autoLayout'
 
 interface Props {
@@ -149,10 +159,11 @@ export function WorkflowToolbar({
       {/* Right: actions */}
       <AddNodeMenu
         onAdd={(modelId) => void nodeCreation.addNode(modelId, spawnPosition())}
-        onAddDesign={(recipeId, description) =>
-          void nodeCreation.addDesignNode(recipeId, description, spawnPosition())
-        }
+        onAddRecipe={(args) => void nodeCreation.addRecipeNode(args, spawnPosition())}
         libraryAssets={nodeCreation.designAssets}
+        projectAssets={nodeCreation.projectAssets}
+        sourceNodes={nodeCreation.sourceNodes}
+        style={nodeCreation.style}
         onAddFromLibrary={(asset) => void nodeCreation.addLibraryDesignNode(asset, spawnPosition())}
       />
 
@@ -259,11 +270,11 @@ export function WorkflowToolbar({
 interface AddEntry {
   id: string
   label: string
-  /** Secondary line: what the entry does (localized for designs/asset, product data for models). */
+  /** Secondary line: what the entry does (localized for recipes/asset, product data for models). */
   desc: string
-  kind: 'design' | 'image' | 'video' | 'audio' | 'asset'
-  /** Set on design entries — choosing one opens the description step instead of adding. */
-  recipe?: DesignRecipe
+  kind: 'design' | 'shot' | 'image' | 'video' | 'audio' | 'asset'
+  /** Set on recipe entries — choosing one opens the recipe form instead of adding. */
+  recipe?: Recipe
   /** Set on the "from library" entry — choosing it opens the design-asset picker step. */
   library?: boolean
   /** Use-case tags from ModelDefinition.recommendedFor — badges + recommended sort. */
@@ -272,13 +283,15 @@ interface AddEntry {
 
 const KIND_ICONS: Record<AddEntry['kind'], React.ReactNode> = {
   design: <PenTool className="h-3.5 w-3.5 text-highlight" />,
+  shot: <Clapperboard className="h-3.5 w-3.5 text-accent" />,
   image: <FileImage className="h-3.5 w-3.5 text-accent-soft" />,
   video: <FileVideo className="h-3.5 w-3.5 text-accent" />,
   audio: <Music className="h-3.5 w-3.5 text-highlight-soft" />,
   asset: <FolderInput className="h-3.5 w-3.5 text-warning" />
 }
-// Designs first: the guided entries are the beginner-friendly starting point.
-const KIND_ORDER: AddEntry['kind'][] = ['design', 'image', 'video', 'audio', 'asset']
+// Recipes first: the guided entries are the beginner-friendly starting point,
+// and a shot preset is a better default than a bare video model.
+const KIND_ORDER: AddEntry['kind'][] = ['design', 'shot', 'image', 'video', 'audio', 'asset']
 
 /** Lowercase + strip accents so an accented query still matches "Seedance". */
 function normalize(s: string): string {
@@ -290,11 +303,17 @@ function normalize(s: string): string {
 
 export interface AddNodeActions {
   onAdd: (modelId: string) => void
-  /** Adds a design-recipe node to the canvas. */
-  onAddDesign?: (recipeId: string, description: string) => void
+  /** Adds a recipe node (design sheet or shot preset), source wired in one undo step. */
+  onAddRecipe?: (args: CreateRecipeArgs) => void
   /** Published design sheets of the project. */
   libraryAssets?: AssetWithUrl[]
   onAddFromLibrary?: (asset: AssetWithUrl) => void
+  /** Every project asset — the pool a from-image/from-video mode picks from. */
+  projectAssets?: AssetWithUrl[]
+  /** Graph nodes usable as a recipe source (the previous clip, a validated sheet). */
+  sourceNodes?: SourceNodeOption[]
+  /** The video's art direction, so the form previews the prompt that will really run. */
+  style?: StyleTemplate
 }
 
 /** Toolbar trigger around the shared panel (the pane right-click reuses AddNodePanel). */
@@ -327,28 +346,29 @@ function AddNodeMenu(props: AddNodeActions) {
 }
 
 /**
- * Type-to-filter node catalogue (models, design recipes, library sheets,
- * asset entry) — shared between the toolbar button and the canvas
- * right-click menu (§4.6). Unmounting on close resets every step.
+ * Type-to-filter node catalogue (models, recipes, library sheets, asset entry)
+ * — shared between the toolbar button and the canvas right-click menu (§4.6).
+ * Unmounting on close resets every step.
  */
 export function AddNodePanel({
   onAdd,
-  onAddDesign,
+  onAddRecipe,
   libraryAssets,
   onAddFromLibrary,
+  projectAssets,
+  sourceNodes,
+  style,
   onClose
 }: AddNodeActions & { onClose: () => void }) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
-  /** Non-null while the second step (design subject description) is showing. */
-  const [pendingDesign, setPendingDesign] = useState<DesignRecipe | null>(null)
-  const [designDesc, setDesignDesc] = useState('')
+  /** Non-null while the second step (the recipe form) is showing. */
+  const [pendingRecipe, setPendingRecipe] = useState<Recipe | null>(null)
   /** True while the design-asset picker step is showing. */
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryQuery, setLibraryQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
-  const designInputRef = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
   const entries = useMemo<AddEntry[]>(
     () => [
@@ -363,12 +383,12 @@ export function AddNodePanel({
             }
           ]
         : []),
-      ...(onAddDesign
-        ? DESIGN_RECIPES.map((r) => ({
-            id: `design:${r.id}`,
+      ...(onAddRecipe
+        ? RECIPES.map((r) => ({
+            id: `recipe:${r.id}`,
             label: t(`designs.${r.id}.name` as never) as string,
             desc: t(`designs.${r.id}.desc` as never) as string,
-            kind: 'design' as const,
+            kind: (r.kind === 'shot' ? 'shot' : 'design') as AddEntry['kind'],
             recipe: r
           }))
         : []),
@@ -387,7 +407,7 @@ export function AddNodePanel({
         kind: 'asset'
       }
     ],
-    [t, onAddDesign, onAddFromLibrary, libraryAssets]
+    [t, onAddRecipe, onAddFromLibrary, libraryAssets]
   )
 
   const q = normalize(query.trim())
@@ -415,12 +435,8 @@ export function AddNodePanel({
   }, [query])
 
   useEffect(() => {
-    if (!pendingDesign && !libraryOpen) inputRef.current?.focus()
-  }, [pendingDesign, libraryOpen])
-
-  useEffect(() => {
-    if (pendingDesign) designInputRef.current?.focus()
-  }, [pendingDesign])
+    if (!pendingRecipe && !libraryOpen) inputRef.current?.focus()
+  }, [pendingRecipe, libraryOpen])
 
   useEffect(() => {
     if (libraryOpen) libraryInputRef.current?.focus()
@@ -440,18 +456,11 @@ export function AddNodePanel({
       return
     }
     if (entry.recipe) {
-      // Second step: ask for the subject before building the prompt.
-      setPendingDesign(entry.recipe)
-      setDesignDesc('')
+      // Second step: the recipe form (fields + mode + prompt preview).
+      setPendingRecipe(entry.recipe)
       return
     }
     onAdd(entry.id)
-    close()
-  }
-
-  function confirmDesign() {
-    if (!pendingDesign) return
-    onAddDesign?.(pendingDesign.id, designDesc)
     close()
   }
 
@@ -471,57 +480,23 @@ export function AddNodePanel({
   }
 
   return (
-    <div className="w-80 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl">
-      {pendingDesign ? (
-        <div className="p-2.5">
-          <div className="flex items-center gap-2">
-            <button
-              onMouseDown={(e) => {
-                e.preventDefault()
-                setPendingDesign(null)
-              }}
-              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-              title={t('editor.designBack')}
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-            </button>
-            {KIND_ICONS.design}
-            <span className="text-sm font-medium text-neutral-100">
-              {t(`designs.${pendingDesign.id}.name` as never)}
-            </span>
-          </div>
-          <p className="mt-1.5 text-[11px] leading-snug text-neutral-500">
-            {t('editor.designHint')}
-          </p>
-          <input
-            ref={designInputRef}
-            value={designDesc}
-            onChange={(e) => setDesignDesc(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                confirmDesign()
-              } else if (e.key === 'Escape') {
-                e.stopPropagation()
-                setPendingDesign(null)
-              }
-            }}
-            placeholder={t(`designs.${pendingDesign.id}.placeholder` as never)}
-            className="mt-2 w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
-          />
-          <div className="mt-2 flex justify-end">
-            <Button
-              variant="primary"
-              size="sm"
-              onMouseDown={(e) => {
-                e.preventDefault()
-                confirmDesign()
-              }}
-            >
-              <Plus className="h-3.5 w-3.5" /> {t('editor.designAdd')}
-            </Button>
-          </div>
-        </div>
+    <div
+      className={`overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 shadow-xl ${
+        pendingRecipe ? 'w-96' : 'w-80'
+      }`}
+    >
+      {pendingRecipe ? (
+        <RecipeForm
+          recipe={pendingRecipe}
+          style={style}
+          projectAssets={projectAssets ?? []}
+          sourceNodes={sourceNodes ?? []}
+          onBack={() => setPendingRecipe(null)}
+          onSubmit={(args) => {
+            onAddRecipe?.(args)
+            close()
+          }}
+        />
       ) : libraryOpen ? (
         <div className="p-2.5">
           <div className="flex items-center gap-2">
@@ -664,6 +639,286 @@ export function AddNodePanel({
             ))}
           </div>
         </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Step 2 of the add-node menu: the recipe FORM (§6.8). One free-text box used
+ * to be the whole guidance — the user typed a subject and bought a prompt they
+ * never saw. Here every choice the recipe knows how to make is an enumerated
+ * field, the mode says whether the node is described or built from an existing
+ * image/clip, and the exact prompt that will run is one click away: the same
+ * pure builder the main service will use, so the preview cannot drift from the
+ * result.
+ */
+function RecipeForm({
+  recipe,
+  style,
+  projectAssets,
+  sourceNodes,
+  onBack,
+  onSubmit
+}: {
+  recipe: Recipe
+  style?: StyleTemplate
+  projectAssets: AssetWithUrl[]
+  sourceNodes: SourceNodeOption[]
+  onBack: () => void
+  onSubmit: (args: CreateRecipeArgs) => void
+}) {
+  const { t } = useTranslation()
+  const [modeId, setModeId] = useState(defaultModeOf(recipe).id)
+  const [modelId, setModelId] = useState(defaultModeOf(recipe).modelId)
+  const [values, setValues] = useState<RecipeValues>({})
+  const [sourceRef, setSourceRef] = useState('')
+  const [showPreview, setShowPreview] = useState(false)
+  const [showMore, setShowMore] = useState(false)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    descriptionRef.current?.focus()
+  }, [])
+
+  const mode = getRecipeMode(recipe, modeId) ?? defaultModeOf(recipe)
+  const fields = recipeFieldsFor(recipe, mode)
+  const [subjectField, ...optionFields] = fields
+  // A shot preset reads the same across the Seedance 2 tiers; a design recipe
+  // switches model by switching mode, so it offers no choice here.
+  const modelChoices = recipeModelChoices(recipe, mode)
+  const effectiveModelId = modelChoices.includes(modelId) ? modelId : mode.modelId
+
+  const sourceOptions = mode.source
+    ? [
+        ...sourceNodes
+          .filter((n) => n.kind === mode.source!.accepts)
+          .map((n) => ({ value: `node:${n.id}`, label: n.label })),
+        ...projectAssets
+          .filter((a) => a.kind === mode.source!.accepts)
+          .map((a) => ({ value: `asset:${a.id}`, label: a.name }))
+      ]
+    : []
+
+  const prompt = buildRecipePrompt(recipe, effectiveModelId, {
+    values,
+    ...(style ? { style } : {}),
+    mode
+  })
+  const missingSubject = (values.description ?? '').trim() === ''
+  const missingSource = mode.source?.required === true && sourceRef === ''
+  const canSubmit = !missingSubject && !missingSource
+
+  function submit() {
+    if (!canSubmit) return
+    const [kind, id] = sourceRef.split(':')
+    onSubmit({
+      recipeId: recipe.id,
+      modeId: mode.id,
+      ...(effectiveModelId === mode.modelId ? {} : { modelId: effectiveModelId }),
+      values,
+      ...(kind && id ? { source: kind === 'asset' ? { assetId: id } : { nodeId: id } } : {})
+    })
+  }
+
+  const inputClass =
+    'w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-accent focus:outline-none'
+
+  return (
+    <div className="max-h-[32rem] overflow-y-auto p-2.5">
+      <div className="flex items-center gap-2">
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            onBack()
+          }}
+          className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+          title={t('editor.designBack')}
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+        </button>
+        {KIND_ICONS[recipe.kind === 'shot' ? 'shot' : 'design']}
+        <span className="text-sm font-medium text-neutral-100">
+          {t(`designs.${recipe.id}.name` as never)}
+        </span>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-snug text-neutral-500">{t('editor.designHint')}</p>
+
+      {recipe.modes.length > 1 && (
+        <div className="mt-2.5 flex gap-1 rounded-md bg-neutral-950 p-0.5">
+          {recipe.modes.map((m) => (
+            <button
+              key={m.id}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                setModeId(m.id)
+                setModelId(m.modelId)
+                setSourceRef('')
+              }}
+              className={`flex-1 rounded px-2 py-1 text-[11px] ${
+                m.id === mode.id
+                  ? 'bg-accent/20 font-medium text-accent-soft'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              {t(`recipeModes.${m.id}.label` as never)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <label className="mt-2.5 block text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+        {t(`recipeFields.${subjectField!.key}.label` as never)}
+      </label>
+      <textarea
+        ref={descriptionRef}
+        rows={2}
+        value={values.description ?? ''}
+        onChange={(e) => setValues((v) => ({ ...v, description: e.target.value }))}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            submit()
+          } else if (e.key === 'Escape') {
+            e.stopPropagation()
+            onBack()
+          }
+        }}
+        placeholder={t(`designs.${recipe.id}.placeholder` as never)}
+        className={`mt-1 resize-none ${inputClass}`}
+      />
+
+      {mode.source && (
+        <>
+          <label className="mt-2 block text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+            {t('editor.recipeSource')}
+          </label>
+          <select
+            value={sourceRef}
+            onChange={(e) => setSourceRef(e.target.value)}
+            className={`mt-1 ${inputClass}`}
+          >
+            <option value="">{t('editor.recipeSourcePlaceholder')}</option>
+            {sourceOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          {sourceOptions.length === 0 && (
+            <p className="mt-1 text-[10px] leading-snug text-warning">
+              {t('editor.recipeSourceNone')}
+            </p>
+          )}
+        </>
+      )}
+
+      {optionFields.length > 0 && (
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            setShowMore((v) => !v)
+          }}
+          className="mt-2 flex items-center gap-1 text-[11px] text-neutral-400 hover:text-neutral-200"
+        >
+          <ChevronDown className={`h-3 w-3 transition-transform ${showMore ? 'rotate-180' : ''}`} />
+          {t('editor.recipeMore')}
+        </button>
+      )}
+
+      {showMore && (
+        <div className="mt-1.5 space-y-2">
+          {modelChoices.length > 1 && (
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                {t('editor.recipeModel')}
+              </label>
+              <select
+                value={effectiveModelId}
+                onChange={(e) => setModelId(e.target.value)}
+                className={`mt-1 ${inputClass}`}
+              >
+                {modelChoices.map((id) => (
+                  <option key={id} value={id}>
+                    {getModel(id)?.label ?? id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {optionFields.map((field) => (
+            <div key={field.key}>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                {t(`recipeFields.${field.key}.label` as never)}
+              </label>
+              {field.options ? (
+                <select
+                  value={values[field.key] ?? field.defaultValue ?? ''}
+                  onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                  className={`mt-1 ${inputClass}`}
+                >
+                  {field.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {t(`recipeFields.${field.key}.options.${o.value}` as never)}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={values[field.key] ?? ''}
+                  onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                  placeholder={t(`recipeFields.${field.key}.placeholder` as never)}
+                  className={`mt-1 ${inputClass}`}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* The prompt the run will really use — built by the same pure function
+          the main service calls, so what is previewed is what is created. */}
+      <button
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setShowPreview((v) => !v)
+        }}
+        className="mt-2 flex items-center gap-1 text-[11px] text-neutral-400 hover:text-neutral-200"
+      >
+        <ChevronDown
+          className={`h-3 w-3 transition-transform ${showPreview ? 'rotate-180' : ''}`}
+        />
+        {showPreview ? t('editor.recipePreviewHide') : t('editor.recipePreviewShow')}
+      </button>
+      {showPreview && (
+        <div className="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-neutral-800 bg-neutral-950 p-2 text-[10px] leading-relaxed text-neutral-300">
+          {prompt}
+          {style && (
+            <p className="mt-1.5 italic text-neutral-500">
+              {t('editor.styleAppliedAtRun', { style: t(`styles.${style.id}.name` as never) })}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="mt-2.5 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-[10px] text-neutral-600">
+          {getModel(effectiveModelId)?.label ?? effectiveModelId}
+        </span>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!canSubmit}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            submit()
+          }}
+        >
+          <Plus className="h-3.5 w-3.5" /> {t('editor.designAdd')}
+        </Button>
+      </div>
+      {missingSource && sourceOptions.length > 0 && (
+        <p className="mt-1 text-[10px] text-neutral-500">{t('editor.recipeSourceRequired')}</p>
       )}
     </div>
   )

@@ -9,6 +9,13 @@
  */
 
 import { ANTI_GRID_GUARD } from '../models/seedance2-prompting'
+import {
+  defaultModeOf,
+  getRecipe,
+  getRecipeMode,
+  recipeNodeParams,
+  type RecipeValues
+} from '../designs/registry'
 
 export interface WorkflowTemplateNode {
   key: string
@@ -90,6 +97,48 @@ const SLOTS = {
   hook: { token: '[HOOK]', i18nKey: 'templates.slots.hook', example: 'Your feed stops here.' }
 } satisfies Record<string, WorkflowTemplateSlot>
 
+/**
+ * A blueprint node built BY THE RECIPE REGISTRY instead of a hand-copied prompt.
+ *
+ * The prompts used to be duplicated here, which cost more than duplication: the
+ * copies carried no `designId`, so on a graph that came from a template — the
+ * beginner path — the frame-anchor guard, the anti-grid rule and the design
+ * library promotion were all blind. Going through the registry keeps one source
+ * of truth for the wording AND stamps the markers the rest of the app reads.
+ *
+ * No style is passed: a blueprint is style-agnostic, and `applyVideoStyle`
+ * makes the run engine append the video's own bible at payload time.
+ */
+function recipeNode(args: {
+  key: string
+  recipeId: string
+  /** Defaults to the recipe's first mode model (text-to-image for design sheets). */
+  modelId?: string
+  modeId?: string
+  values: RecipeValues
+  label: string
+  intent: string
+  position: { x: number; y: number }
+  /** Blueprint-level param overrides (aspect ratio of a vertical ad, …). */
+  params?: Record<string, unknown>
+}): WorkflowTemplateNode {
+  const recipe = getRecipe(args.recipeId)
+  if (!recipe) throw new Error(`Unknown recipe "${args.recipeId}" in a workflow template.`)
+  const mode = getRecipeMode(recipe, args.modeId) ?? defaultModeOf(recipe)
+  const modelId = args.modelId ?? mode.modelId
+  return {
+    key: args.key,
+    modelId,
+    label: args.label,
+    intent: args.intent,
+    position: args.position,
+    params: {
+      ...recipeNodeParams({ recipe, mode, modelId, values: args.values }),
+      ...args.params
+    }
+  }
+}
+
 /** Grid helpers so every template lays out the same way (left-to-right flow). */
 const col = (i: number): number => i * 420
 const row = (i: number): number => i * 350
@@ -105,22 +154,21 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     workflow: {
       version: 1,
       nodes: [
-        {
+        recipeNode({
           key: 'hero-image',
-          modelId: 'gpt-image-2-text-to-image',
+          recipeId: 'packshot',
+          values: {
+            description: '[PRODUCT] in [SETTING]',
+            surface: 'seamless-white',
+            lighting: 'soft-key',
+            framing: 'medium'
+          },
           label: '00 — Hero product shot',
           intent:
             'The ad-ready hero image of the product, anchoring the first frame of every shot.',
           position: { x: col(0), y: row(0) },
-          params: {
-            prompt:
-              'Hero product photograph of [PRODUCT] on a seamless studio backdrop in [SETTING]. ' +
-              'Centered composition with generous negative space, soft key light with crisp speculars, subtle reflection under the product.',
-            aspect_ratio: '16:9',
-            applyVideoStyle: true,
-            resolution: '1K'
-          }
-        },
+          params: { aspect_ratio: '16:9' }
+        }),
         {
           key: 'shot-1',
           modelId: 'bytedance/seedance-1.5-pro',
@@ -223,21 +271,16 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     workflow: {
       version: 1,
       nodes: [
-        {
+        recipeNode({
           key: 'key-visual',
-          modelId: 'gpt-image-2-text-to-image',
+          recipeId: 'character',
+          values: { description: '[CHARACTER], as seen in [PLACE]', views: 'turnaround' },
           label: '00 — Key visual',
           intent:
             'Character design reference for every shot (wired as @Image1) — it guides identity and style, it must never appear as a frame.',
           position: { x: col(0), y: row(0) },
-          params: {
-            prompt:
-              'Anime key visual of [CHARACTER] standing in [PLACE], full-body, three-quarter view, character design sheet quality.',
-            aspect_ratio: '16:9',
-            applyVideoStyle: true,
-            resolution: '1K'
-          }
-        },
+          params: { aspect_ratio: '16:9' }
+        }),
         {
           key: 'shot-1',
           modelId: 'bytedance/seedance-2-fast',
@@ -346,41 +389,34 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     workflow: {
       version: 1,
       nodes: [
-        {
+        recipeNode({
           key: 'character-sheet',
-          modelId: 'gpt-image-2-text-to-image',
+          recipeId: 'character',
+          values: { description: '[CHARACTER]', views: 'turnaround', background: 'neutral-light' },
           label: '00 — Character sheet',
           intent:
             'Character design reference — wired into the storyboard and every shot (@Image1), it must never appear as a frame.',
           position: { x: col(0), y: row(0) },
-          params: {
-            prompt:
-              'Character design sheet of [CHARACTER]: full-body turnaround with three aligned views of the SAME character — front, three-quarter and profile — in a neutral standing pose. ' +
-              'Identical proportions, outfit, hairstyle and colors across all views. Plain light background, no scenery, no text labels, no watermarks.',
-            aspect_ratio: '16:9',
-            applyVideoStyle: true,
-            resolution: '1K'
-          }
-        },
-        {
+          params: { aspect_ratio: '16:9' }
+        }),
+        recipeNode({
           key: 'storyboard',
-          modelId: 'gpt-image-2-image-to-image',
+          recipeId: 'storyboard',
+          // Built FROM the sheet: identity is locked at the storyboard stage,
+          // which is the whole point of this blueprint.
+          modeId: 'from-image',
+          values: {
+            description: '[CHARACTER] in [PLACE]: the scene where [CHARACTER] [ACTION]',
+            coverage:
+              'panels 1-3 establish [PLACE] and the character entering, panels 4-6 cover the action ([ACTION]), panels 7-9 land the emotional close-up finale',
+            screenDirection: 'left-to-right'
+          },
           label: '01 — Storyboard (9 panels)',
           intent:
             'The 9-panel storyboard of the scene — the review gate before running the shots. Wired as a reference (@Image2) on every shot; it must never appear on screen.',
           position: { x: col(1), y: row(0) },
-          params: {
-            prompt:
-              'Create a storyboard of [CHARACTER] in [PLACE]: the scene where [CHARACTER] [ACTION]. ' +
-              'A single 3x3 grid of 9 sequential panels telling the scene beat by beat, read left to right, top to bottom, a small panel number in the corner of each panel: ' +
-              'panels 1-3 establish [PLACE] and the character entering, panels 4-6 cover the action ([ACTION]), panels 7-9 land the emotional close-up finale. ' +
-              'Keep the character exactly consistent with the connected design sheet (Image 1) across all panels. ' +
-              'Framing varies like a film — establishing wide, mediums, close-ups. Clear readable compositions, no speech bubbles, no captions, no other text, no watermarks.',
-            aspect_ratio: '16:9',
-            applyVideoStyle: true,
-            resolution: '1K'
-          }
-        },
+          params: { aspect_ratio: '16:9' }
+        }),
         {
           key: 'shot-1',
           modelId: 'bytedance/seedance-2-fast',
@@ -589,21 +625,20 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     workflow: {
       version: 1,
       nodes: [
-        {
+        recipeNode({
           key: 'product-image',
-          modelId: 'gpt-image-2-text-to-image',
+          recipeId: 'packshot',
+          values: {
+            description: '[PRODUCT], bold centered composition with room at the top for a caption',
+            surface: 'dark-gradient',
+            lighting: 'hard-key',
+            framing: 'medium'
+          },
           label: '00 — Product visual',
           intent: 'The vertical product visual used as @Image1 first frame on both shots.',
           position: { x: col(0), y: row(0) },
-          params: {
-            prompt:
-              'Vertical (9:16) product photograph of [PRODUCT], bold centered composition, vibrant gradient backdrop, ' +
-              'punchy studio lighting, room at the top for a caption.',
-            aspect_ratio: '9:16',
-            applyVideoStyle: true,
-            resolution: '1K'
-          }
-        },
+          params: { aspect_ratio: '9:16' }
+        }),
         {
           key: 'shot-1',
           modelId: 'bytedance/seedance-2-fast',

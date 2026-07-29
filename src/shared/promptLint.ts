@@ -1,6 +1,16 @@
 import { clampParamToField, getModel, type ModelDefinition, type ParamField } from './models'
 import { ANTI_GRID_GUARD } from './models/seedance2-prompting'
-import { getDesignRecipe } from './designs/registry'
+import { getDesignRecipe, getRecipe, resolveRecipeHandle } from './designs/registry'
+import { getStyle, nodeAppliesVideoStyle, wrapPromptWithStyle } from './styles/registry'
+import {
+  MAX_CAPS_TRANSIENTS,
+  countCapsTransients,
+  detectCameraDoctrines,
+  findAntiAiTerms,
+  getCaptureDeclaration,
+  hasRampSpine,
+  mentionsSpeedRamp
+} from './prompting/seedance'
 
 /**
  * Prompt lint (§6.5) — the prompting knowledge of `seedance2-prompting.ts` and
@@ -34,6 +44,11 @@ export interface LintFinding {
     | 'param-out-of-enum'
     | 'param-out-of-range'
     | 'reference-budget-exceeded'
+    | 'recipe-source-missing'
+    | 'camera-doctrine-mixed'
+    | 'anti-ai-lexicon'
+    | 'speed-ramps-undeclared'
+    | 'caps-transients-overused'
   severity: LintSeverity
   /** Agent- and user-facing English sentence (the UI localizes by `rule`). */
   message: string
@@ -65,6 +80,14 @@ export interface LintInput {
   modelId: string
   params: Record<string, unknown> | null | undefined
   connections: LintConnection[]
+  /**
+   * The video's art direction. The doctrine rules (§6.9) lint what will
+   * ACTUALLY run, and for a styled video node that is the sandwich — capture
+   * declaration on top, stored body in the middle, booster stack at the
+   * bottom — not the stored prompt alone. Without it those rules fall back to
+   * the stored prompt and to the terms that hurt in every register.
+   */
+  styleId?: string
 }
 
 /**
@@ -144,6 +167,15 @@ function isBoardRecipe(designId: string): boolean {
   return getDesignRecipe(designId)?.board === true
 }
 
+/**
+ * True when the sheet may legitimately BE a frame (style frame, pack-shot).
+ * Everything else a recipe produces is a reference and belongs on a reference
+ * handle — that distinction is declared by the recipe, never guessed here.
+ */
+function isAnchorSafe(designId: string): boolean {
+  return getDesignRecipe(designId)?.anchorSafe === true
+}
+
 function promptOf(params: Record<string, unknown> | null | undefined): string {
   const prompt = (params ?? {})['prompt']
   return typeof prompt === 'string' ? prompt : ''
@@ -189,6 +221,15 @@ function roleSentenceFor(connection: LintConnection): string {
   if (connection.designId === 'prop') {
     return `${alias} is the prop sheet${label} — keep the same object design.`
   }
+  if (connection.designId === 'expressions') {
+    return `${alias} is the expression sheet${label} — the same face across every emotion; match the panel closest to this beat.`
+  }
+  if (connection.designId === 'wardrobe') {
+    return `${alias} is the wardrobe sheet${label} — keep the same character and use the outfit this shot calls for.`
+  }
+  if (connection.designId === 'packshot') {
+    return `${alias} is the product pack-shot${label} — keep the product's exact shape, materials and markings.`
+  }
   return `${alias} is the reference${label} — describe here what it must contribute to the shot.`
 }
 
@@ -202,6 +243,16 @@ export function lintNode(input: LintInput): LintFinding[] {
   const params = (input.params ?? {}) as Record<string, unknown>
   const prompt = promptOf(params)
   const findings: LintFinding[] = []
+
+  // What the model will really receive. The rules above this line judge the
+  // node as authored (an empty stored prompt is empty whatever the wrap adds);
+  // the doctrine rules below judge the payload.
+  const style = input.styleId ? getStyle(input.styleId) : undefined
+  const effectivePrompt =
+    style && nodeAppliesVideoStyle(params)
+      ? wrapPromptWithStyle({ prompt, style, kind: model.kind })
+      : prompt
+  const mode = style ? getCaptureDeclaration(style.captureId)?.mode : undefined
 
   const hasPromptField = model.paramFields.some((f) => f.key === 'prompt')
   if (hasPromptField && prompt.trim() === '') {
@@ -232,7 +283,11 @@ export function lintNode(input: LintInput): LintFinding[] {
   for (const connection of input.connections) {
     // A design sheet on a frame anchor puts the sheet itself on screen — the
     // single most expensive mistake in the app (a wasted video generation).
-    if (connection.designId && anchorKeys.has(connection.handleKey)) {
+    if (
+      connection.designId &&
+      anchorKeys.has(connection.handleKey) &&
+      !isAnchorSafe(connection.designId)
+    ) {
       const handleLabel =
         model.inputs.find((h) => h.key === connection.handleKey)?.label ?? connection.handleKey
       findings.push({
@@ -358,6 +413,25 @@ export function lintNode(input: LintInput): LintFinding[] {
     })
   }
 
+  // A recipe node created in a `from-image`/`from-video` mode whose source was
+  // never wired (undone, deleted, or an agent that skipped the `source` arg):
+  // its prompt says "build this from the connected source" and there is none.
+  // The model's own `required` flag cannot catch it — the handle is optional
+  // for everyone else — so the recipe marker is what makes it knowable.
+  const recipe = getRecipe(String(params.recipeId ?? ''))
+  const recipeMode = recipe?.modes.find((m) => m.id === params.recipeMode)
+  if (recipe && recipeMode?.source?.required) {
+    const handle = resolveRecipeHandle(model.id, recipeMode.source)
+    if (handle && !input.connections.some((c) => c.handleKey === handle.key)) {
+      findings.push({
+        rule: 'recipe-source-missing',
+        severity: 'error',
+        subject: handle.key,
+        message: `This node was built as "${recipe.label}" from a source ${recipeMode.source.accepts}, but nothing is wired to "${handle.label}" — the prompt refers to a source that does not exist.`
+      })
+    }
+  }
+
   // Reference handles with a combined-duration budget (Seedance 2: ≤ 15 s of
   // video, ≤ 15 s of audio across the handle). Only the DECLARED lengths of the
   // source nodes are knowable before the media exists, so this stays a warning.
@@ -372,6 +446,61 @@ export function lintNode(input: LintInput): LintFinding[] {
       subject: handle.key,
       message: `"${handle.label}" carries ~${total}s of source media across ${wired.length} connections — this model accepts ${handle.maxTotalSeconds}s combined. Unwire one or shorten the sources.`
     })
+  }
+
+  // ── §6.9 doctrine ─────────────────────────────────────────────────────────
+  if (model.kind === 'video' && effectivePrompt.trim() !== '') {
+    // The camera is either a body or a ghost. Asking for both lands in the ugly
+    // middle — too smooth to be filmed, too clumsy to be designed — and the
+    // model resolves it by giving neither.
+    const doctrines = detectCameraDoctrines(effectivePrompt)
+    if (doctrines.embodied && doctrines.disembodied) {
+      findings.push({
+        rule: 'camera-doctrine-mixed',
+        severity: 'error',
+        subject: 'prompt',
+        message:
+          'This prompt asks for an unsteady operator AND a weightless invisible camera. The two doctrines are exclusive — keep the handheld language or keep the ghost, not both.'
+      })
+    }
+
+    // Undeclared ramps get flattened into a single average speed: the governing
+    // style has to be stated in the opening, before any beat.
+    if (mentionsSpeedRamp(effectivePrompt) && !hasRampSpine(effectivePrompt)) {
+      findings.push({
+        rule: 'speed-ramps-undeclared',
+        severity: 'warning',
+        subject: 'prompt',
+        message:
+          'The prompt asks for a speed ramp but never declares ramping as the governing style up front — written only inside a beat, it is flattened to one average speed.'
+      })
+    }
+
+    // Uppercase marks the INSTANT of change and the model reads it as a
+    // beat-internal cut point. Past a handful they stop meaning anything.
+    const caps = countCapsTransients(effectivePrompt)
+    if (caps > MAX_CAPS_TRANSIENTS) {
+      findings.push({
+        rule: 'caps-transients-overused',
+        severity: 'warning',
+        subject: 'prompt',
+        message: `${caps} uppercase transient markers — they mark the instant of change, so past ${MAX_CAPS_TRANSIENTS} they stop reading as beats and become emphasis.`
+      })
+    }
+  }
+
+  // Words that look harmless and actively degrade the output. Register-aware:
+  // "epic" and "8K" fight a medium declaration in a realism prompt and are
+  // accurate in a stylized one, so this only fires where the term actually hurts.
+  if (effectivePrompt.trim() !== '') {
+    for (const term of findAntiAiTerms(effectivePrompt, mode)) {
+      findings.push({
+        rule: 'anti-ai-lexicon',
+        severity: 'warning',
+        subject: 'prompt',
+        message: `"${term.term}" carries no actionable content and pushes the output toward illustration — ${term.instead}.`
+      })
+    }
   }
 
   return findings

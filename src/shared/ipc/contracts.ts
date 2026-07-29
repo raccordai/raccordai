@@ -569,6 +569,35 @@ export const ipcContracts = {
     }),
     output: graphNodeSchema
   },
+  /**
+   * §6.8 — create a pre-configured node from a recipe (design sheet or shot
+   * preset), optionally wired to its source in ONE undo step. The renderer
+   * builds the same prompt locally for the preview; only this channel writes.
+   */
+  'recipes:createNode': {
+    input: z.object({
+      videoId: z.string(),
+      recipeId: z.string(),
+      /** Defaults to the recipe's first mode. */
+      modeId: z.string().optional(),
+      /** Overrides the mode's model — must be one of the recipe's supportedModels. */
+      modelId: z.string().optional(),
+      values: z.record(z.string(), z.string()),
+      /** The media feeding a from-image/from-video mode: an asset OR a node. */
+      source: z
+        .object({ assetId: z.string().optional(), nodeId: z.string().optional() })
+        .optional(),
+      position: positionSchema.optional()
+    }),
+    output: z.object({
+      nodeId: z.string(),
+      modelId: z.string(),
+      modeId: z.string(),
+      prompt: z.string(),
+      sourceNodeId: z.string().nullable(),
+      handleKey: z.string().nullable()
+    })
+  },
   'nodes:updateParams': {
     input: z.object({ nodeId: z.string(), params: z.unknown() }),
     output: z.void()

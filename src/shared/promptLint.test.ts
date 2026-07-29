@@ -105,6 +105,157 @@ describe('lintNode', () => {
     expect(rules(findings)).not.toContain('reference-role-undeclared')
   })
 
+  it('lets an anchor-safe sheet BE the frame it was made to be', () => {
+    // A style frame or a pack-shot is routinely the opening frame of a shot —
+    // the recipe declares it, so the guard must not treat it as a mistake.
+    const findings = lintNode({
+      modelId: VIDEO_MODEL,
+      params: { prompt: 'The product turns, camera orbiting.' },
+      connections: [
+        reference({ handleKey: 'first_frame_url', alias: undefined, designId: 'packshot' })
+      ]
+    })
+    expect(rules(findings)).not.toContain('storyboard-on-frame-anchor')
+  })
+
+  it('flags a recipe node whose required source was never wired', () => {
+    const findings = lintNode({
+      modelId: IMAGE_MODEL,
+      params: {
+        prompt: 'Wardrobe sheet of Mira: build this from the connected source image.',
+        recipeId: 'wardrobe',
+        recipeMode: 'from-image'
+      },
+      connections: []
+    })
+    const finding = findings.find((f) => f.rule === 'recipe-source-missing')
+    expect(finding?.severity).toBe('error')
+    expect(finding?.subject).toBe('input_urls')
+    expect(hasBlockingFinding(findings)).toBe(true)
+  })
+
+  it('says nothing once that source is wired, or in a mode that needs none', () => {
+    expect(
+      rules(
+        lintNode({
+          modelId: IMAGE_MODEL,
+          params: {
+            prompt: 'Wardrobe sheet of Mira.',
+            recipeId: 'wardrobe',
+            recipeMode: 'from-image'
+          },
+          connections: [reference({ handleKey: 'input_urls', alias: undefined })]
+        })
+      )
+    ).not.toContain('recipe-source-missing')
+    expect(
+      rules(
+        lintNode({
+          modelId: 'gpt-image-2-text-to-image',
+          params: {
+            prompt: 'Character sheet of Mira.',
+            recipeId: 'character',
+            recipeMode: 'text'
+          },
+          connections: []
+        })
+      )
+    ).not.toContain('recipe-source-missing')
+  })
+
+  // ── §6.9 doctrine ─────────────────────────────────────────────────────────
+
+  it('blocks a prompt that asks for a body AND a ghost', () => {
+    const findings = lintNode({
+      modelId: VIDEO_MODEL,
+      params: {
+        prompt:
+          'Heavy shoulder-mounted handheld shake as the camera is a weightless invisible presence orbiting the fight.'
+      },
+      connections: []
+    })
+    const finding = findings.find((f) => f.rule === 'camera-doctrine-mixed')
+    expect(finding?.severity).toBe('error')
+    expect(hasBlockingFinding(findings)).toBe(true)
+  })
+
+  it('says nothing when the prompt commits to one doctrine', () => {
+    for (const prompt of [
+      'The operator moves through the crowd, no stabilization, the frame catching up late.',
+      'The camera is a weightless invisible presence, never part of the scene, arcing around the blade.'
+    ]) {
+      expect(
+        rules(lintNode({ modelId: VIDEO_MODEL, params: { prompt }, connections: [] }))
+      ).not.toContain('camera-doctrine-mixed')
+    }
+  })
+
+  it('flags a ramp written into a beat but never declared up front', () => {
+    const prompt =
+      '3-6s: the blade ramps into extreme slow motion, camera arcing with it, then the impact.'
+    const findings = lintNode({ modelId: VIDEO_MODEL, params: { prompt }, connections: [] })
+    expect(rules(findings)).toContain('speed-ramps-undeclared')
+    // Declared as the governing style in the opening, it survives.
+    expect(
+      rules(
+        lintNode({
+          modelId: VIDEO_MODEL,
+          params: {
+            prompt: `Single continuous take with aggressive in-camera speed ramps. ${prompt}`
+          },
+          connections: []
+        })
+      )
+    ).not.toContain('speed-ramps-undeclared')
+  })
+
+  it('flags uppercase used as emphasis instead of as beat markers', () => {
+    const findings = lintNode({
+      modelId: VIDEO_MODEL,
+      params: {
+        prompt:
+          'SNAP IN. SNAP OUT. CRASH ZOOM. HOLD. WHIP LEFT. SLAM DOWN. RIP BACK. The camera tracks her.'
+      },
+      connections: []
+    })
+    expect(rules(findings)).toContain('caps-transients-overused')
+  })
+
+  it('flags the anti-AI lexicon only where the register makes it hurt', () => {
+    const params = {
+      prompt: 'An epic shot of the harbour, 8K, camera pushing in.',
+      applyVideoStyle: true
+    }
+    // Documentary register: "epic" and "8K" fight the medium declaration.
+    expect(
+      rules(lintNode({ modelId: VIDEO_MODEL, params, connections: [], styleId: 'documentary' }))
+    ).toContain('anti-ai-lexicon')
+    // Stylized register: they are accurate descriptions of the target.
+    expect(
+      rules(lintNode({ modelId: VIDEO_MODEL, params, connections: [], styleId: 'kinetic-action' }))
+    ).not.toContain('anti-ai-lexicon')
+    // Register unknown: only what hurts everywhere is reported.
+    expect(rules(lintNode({ modelId: VIDEO_MODEL, params, connections: [] }))).not.toContain(
+      'anti-ai-lexicon'
+    )
+  })
+
+  it('lints the payload, not just the stored prompt', () => {
+    // The stored body says nothing about a camera; the video's art direction
+    // wraps it in a handheld declaration at payload time, and adding ghost
+    // language to the body is what makes the pair illegal.
+    const findings = lintNode({
+      modelId: VIDEO_MODEL,
+      params: {
+        prompt: 'The camera is a weightless invisible presence arcing around her.',
+        applyVideoStyle: true
+      },
+      connections: [],
+      styleId: 'documentary'
+    })
+    expect(rules(findings)).toContain('camera-doctrine-mixed')
+  })
+
   it('treats a design sheet on a frame anchor as an error and offers a rewire', () => {
     const findings = lintNode({
       modelId: VIDEO_MODEL,

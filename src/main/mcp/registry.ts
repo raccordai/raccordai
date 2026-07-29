@@ -17,6 +17,7 @@ import {
   restoreCheckpoint
 } from '../services/checkpoints'
 import { lintNodeById } from '../services/lint'
+import { createRecipeNode } from '../services/recipes'
 import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
 import * as renderService from '../services/render'
@@ -543,6 +544,61 @@ export const AGENT_TOOLS: AgentTool[] = [
         intent: intent ? String(intent) : undefined,
         params
       })
+  },
+  {
+    name: 'add_recipe_node',
+    description:
+      'Create a PRE-CONFIGURED node from a recipe: a design sheet (docs "designs") or a shot preset (docs "shots"). Builds the prompt for the model and the video’s style, sets the markers, and wires the source of a from-image/from-video mode in ONE undo step. Prefer it over add_node whenever a recipe fits.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        recipeId: str('Recipe id — docs "designs" / docs "shots"'),
+        modeId: str(
+          '"text" (default), "from-image" or "from-video" — a source mode needs `source`'
+        ),
+        modelId: str('Override the mode’s model; must be one of the recipe’s supported models'),
+        values: {
+          type: 'object',
+          description:
+            'Field values keyed by field id, e.g. {"description":"Léa, pink hair","views":"turnaround"}. "description" is required; unknown keys are ignored and blank selects fall back to their default.'
+        },
+        source: {
+          type: 'object',
+          description:
+            'The media a from-image/from-video mode is built on: {"assetId"} (a library asset — an asset node is created and wired) or {"nodeId"} (an existing node of this video).',
+          properties: { assetId: str(), nodeId: str() }
+        },
+        x: { type: 'number', description: 'Canvas x. Omit BOTH x and y for the next free slot.' },
+        y: { type: 'number', description: 'Canvas y.' }
+      },
+      ['videoId', 'recipeId', 'values']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, recipeId, modeId, modelId, values, source, x, y }) => {
+      const raw = (values ?? {}) as Record<string, unknown>
+      const src = (source ?? {}) as { assetId?: unknown; nodeId?: unknown }
+      return createRecipeNode({
+        videoId: String(videoId),
+        recipeId: String(recipeId),
+        ...(modeId === undefined ? {} : { modeId: String(modeId) }),
+        ...(modelId === undefined ? {} : { modelId: String(modelId) }),
+        values: Object.fromEntries(
+          Object.entries(raw).map(([key, value]) => [key, value == null ? '' : String(value)])
+        ),
+        ...(src.assetId || src.nodeId
+          ? {
+              source: {
+                ...(src.assetId ? { assetId: String(src.assetId) } : {}),
+                ...(src.nodeId ? { nodeId: String(src.nodeId) } : {})
+              }
+            }
+          : {}),
+        ...(x === undefined && y === undefined
+          ? {}
+          : { position: { x: Number(x ?? 0), y: Number(y ?? 0) } })
+      })
+    }
   },
   {
     name: 'update_node',

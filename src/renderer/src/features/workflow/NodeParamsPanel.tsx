@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  BookOpen,
   Check,
   ChevronDown,
   ChevronUp,
@@ -396,6 +397,7 @@ function ModelNodeEditor({
   // Prompt lint (§6.5): pure, computed locally from the graph the panel already
   // holds — no round trip, so it re-runs live as the user types params.
   const projectAssets = useProjectAssets(projectId).data
+  const styleId = video?.styleId ?? null
   const lintFindings = useMemo(() => {
     const designIdOf = (source: GraphNode | undefined): string | undefined => {
       const sourceParams = (source?.params ?? {}) as { designId?: unknown; assetId?: unknown }
@@ -412,6 +414,9 @@ function ModelNodeEditor({
     return lintNode({
       modelId: node.modelId,
       params,
+      // The doctrine rules lint the payload, which for a styled video node is
+      // the sandwich the video's art direction wraps around this prompt.
+      ...(styleId ? { styleId } : {}),
       connections: connections.map((c) => ({
         edgeId: c.edge.id,
         handleKey: c.edge.targetHandle,
@@ -423,7 +428,7 @@ function ModelNodeEditor({
           : {})
       }))
     })
-  }, [node.modelId, params, connections, projectAssets])
+  }, [node.modelId, params, connections, projectAssets, styleId])
 
   if (!model) {
     return (
@@ -709,6 +714,22 @@ function ModelNodeEditor({
         <div className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 p-3 text-[11px] leading-relaxed text-neutral-400 whitespace-pre-wrap">
           {model.promptingNotes}
         </div>
+      )}
+
+      {/* The model's full prompting guide. It used to be agent-only (the MCP
+          `prompting:<id>` topic), so the one actor who needs guidance — the
+          person writing in the box above — was the only one who could not read
+          it. Collapsed by default: it is reference, not chrome. */}
+      {model.promptGuide && (
+        <details className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+          <summary className="cursor-pointer select-none text-[11px] font-semibold text-neutral-300">
+            <BookOpen className="mr-1 inline h-3 w-3 text-accent-soft" />
+            {t('editor.promptGuide')}
+          </summary>
+          <p className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-neutral-400">
+            {model.promptGuide}
+          </p>
+        </details>
       )}
 
       {showFaceWarning && (

@@ -13,7 +13,10 @@ import { startKieMock } from '../harness/kie-mock.mjs'
 import { check, checkEqual, defer, ok, spec, step, waitFor } from '../harness/spec.mjs'
 
 const PROMPT = 'A samurai cat sharpens a blade on a rainy porch, slow push-in.'
-const BIBLE_FRAGMENT = '2D anime, hand-drawn cel animation'
+/** Present in the anime style's COMPRESSED bible, which rides in the opening. */
+const BIBLE_FRAGMENT = 'flat two-tone shading'
+/** Present only in the FULL bible — a clip prompt must not carry it. */
+const FULL_BIBLE_FRAGMENT = '2D anime, hand-drawn cel animation'
 const CREDITS = 4321
 
 await spec('generation', async () => {
@@ -60,10 +63,28 @@ await spec('generation', async () => {
 
   step('style-at-payload')
   const submitted = mock.recorded.createTask[0]
-  check(submitted.input.prompt.startsWith(PROMPT), 'the payload prompt starts with the node prompt')
-  check(submitted.input.prompt.includes(BIBLE_FRAGMENT), 'the style bible is appended at payload')
+  // §6.9: a CLIP prompt is a sandwich — the capture declaration selects the
+  // universe on top, the node's own prompt stays the pure action in the middle,
+  // the booster stack closes. Stills still get the bible appended.
+  check(
+    submitted.input.prompt.startsWith('[STYLE + CAMERA + ATMOSPHERE]'),
+    'the payload opens on the capture declaration'
+  )
+  check(submitted.input.prompt.includes(PROMPT), 'the node prompt is the body of the sandwich')
+  check(
+    submitted.input.prompt.includes(BIBLE_FRAGMENT),
+    'the compressed style bible rides in the opening declaration'
+  )
+  check(
+    submitted.input.prompt.trimEnd().includes('[STYLE & QUALITY BOOSTERS]'),
+    'the booster stack closes the payload'
+  )
   const stored = (await invoke('graph:get', { videoId: video.id })).nodes[0]
   check(!stored.params.prompt.includes(BIBLE_FRAGMENT), 'the stored prompt stays bible-free')
+  check(
+    !submitted.input.prompt.includes(FULL_BIBLE_FRAGMENT),
+    'the full bible is not duplicated into a clip payload'
+  )
 
   step('local media')
   const local = await waitFor(

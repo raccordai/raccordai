@@ -17,11 +17,12 @@ E2E_VERBOSE=1 pnpm e2e          # stream the app's main/renderer logs
 
 ## What it guarantees
 
-| Spec                 | Flow                                                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `generation.e2e.mjs` | run a node → kie submission → **poller** → local download → `media://` Range serving → canvas. Plus the style-at-payload rule.  |
-| `assistant.e2e.mjs`  | one brief to the home assistant → scripted agent (project → video → style → workflow import) → the rows and graph really exist. |
-| `render.e2e.mjs`     | heterogeneous clips + Suno music → MCP `render_video` → ffprobe on the file, music audible over the silent clip, cancellation.  |
+| Spec                 | Flow                                                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `generation.e2e.mjs` | run a node → kie submission → **poller** → local download → `media://` Range serving → canvas. Plus the style-at-payload rule.          |
+| `assistant.e2e.mjs`  | one brief to the home assistant → scripted agent (project → video → style → workflow import) → the rows and graph really exist.         |
+| `render.e2e.mjs`     | heterogeneous clips + Suno music → MCP `render_video` → ffprobe on the file, music audible over the silent clip, cancellation.          |
+| `recipes.e2e.mjs`    | recipe nodes (§6.8): the typed IPC channel, the `add_recipe_node` agent tool, video-format inheritance, source wiring in ONE undo step. |
 
 ## Isolation
 

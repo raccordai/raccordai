@@ -1,7 +1,25 @@
 import { MODELS, getModel } from '@shared/models'
 import { STYLES, getStyle } from '@shared/styles/registry'
 import { WORKFLOW_TEMPLATES, getWorkflowTemplate } from '@shared/templates/registry'
-import { DESIGN_RECIPES, buildDesignPrompt, designIntent } from '@shared/designs/registry'
+import {
+  ANTI_AI_TERMS,
+  ANTI_BEAUTY_LOCK,
+  CAMERA_MODES,
+  CAPTURE_DECLARATIONS,
+  FOV_STEPS,
+  MAX_CAPS_TRANSIENTS,
+  SHOT_SIZES,
+  WHITE_BALANCE_KELVIN
+} from '@shared/prompting/seedance'
+import {
+  DESIGN_RECIPES,
+  SHOT_RECIPES,
+  buildRecipePrompt,
+  defaultModeOf,
+  recipeFieldsFor,
+  recipeIntent,
+  type Recipe
+} from '@shared/designs/registry'
 
 /**
  * In-band, exploratory documentation for agents — served by the `docs` tool.
@@ -25,7 +43,9 @@ Typical session:
      shot list whose durations the model accepts, chained cut to cut, before any graph exists
      (docs "scenario"). It is the step where the constraints are cheap to respect.
   2. docs "models" then docs "model:<id>" for the models you plan to use;
-     read docs "prompting:<id>" BEFORE writing any prompt for that model.
+     read docs "doctrine" ONCE (how a video prompt is built: the opening
+     declaration, the camera's ontology, the bracketed timeline, imperfection)
+     and docs "prompting:<id>" BEFORE writing any prompt for that model.
      CRITICAL: image inputs are either frame ANCHORS (they appear on screen) or
      REFERENCES (they guide without appearing) — docs "models" explains which is which.
      Equally critical: between two shots you CUT to a new angle — never chain one
@@ -38,9 +58,12 @@ Typical session:
      the bible into prompts). Or start from a full blueprint:
      docs "templates" then docs "template:<id>" → import_workflow.
      Need a character/décor/prop sheet or a scene storyboard? docs "designs" has
-     ready prompt recipes (wire the resulting node as a REFERENCE, never a frame
+     ready recipes (wire the resulting node as a REFERENCE, never a frame
      anchor; the storyboard is the review gate before spending video credits)
-  4. add_node / connect_nodes / update_node — or import_workflow for a whole plan
+  4. add_recipe_node FIRST whenever a recipe fits — design sheets (docs "designs")
+     and shot presets (docs "shots", the camera move already written for the
+     model). add_node / connect_nodes / update_node for the rest — or
+     import_workflow for a whole plan
   5. run_node (COSTS MONEY — each run calls the kie.ai API); completion is
      asynchronous: poll get_generations until status is success/failed.
   6. Iterating? set_draft_mode makes every run substitute the model's cheap
@@ -77,7 +100,7 @@ Conventions:
     always set an AI-facing "description" so future agents know what the media depicts.
   - The user sees the graph update live in the app while you work.
 
-Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "scenario", "continuity", "styles", "designs", "templates", "template:<id>".`
+Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "scenario", "continuity", "styles", "designs", "shots", "templates", "template:<id>".`
 
 const WORKFLOW_JSON = `Workflow JSON (version 1) — the bulk import/export format (import_workflow / export_workflow):
 {
@@ -325,24 +348,58 @@ and a style switch would no longer propagate.
 ${entries.join('\n\n')}`
 }
 
-function designsIndex(): string {
-  const entries = DESIGN_RECIPES.map((r) => {
-    const prompt = buildDesignPrompt(r, r.defaultModelId, { description: '' })
-    const overrides = Object.keys(r.byModel ?? {}).map(
-      (id) => `\nPrompt when using ${id} instead:\n${buildDesignPrompt(r, id, { description: '' })}`
+/** One recipe entry: its modes, its fields and the prompt they build. */
+function recipeEntry(r: Recipe): string {
+  const mode = defaultModeOf(r)
+  const prompt = buildRecipePrompt(r, mode.modelId, { values: {}, mode })
+  const fields = recipeFieldsFor(r, mode)
+    .map(
+      (f) =>
+        `  ${f.key}${f.required ? ' (required)' : ''} — ${f.type}${
+          f.options
+            ? `: ${f.options.map((o) => o.value).join(' | ')} (default ${f.defaultValue})`
+            : ''
+        }`
     )
-    return `── ${r.id} — ${r.label}
+    .join('\n')
+  const modes = r.modes
+    .map(
+      (m) =>
+        `  ${m.id} → ${m.modelId}${
+          m.source
+            ? ` · needs a source ${m.source.accepts} (wired to the model's ${m.source.role} input)`
+            : ''
+        }`
+    )
+    .join('\n')
+  const extraFields = r.fields
+    .filter((f) => f.modes && !f.modes.includes(mode.id))
+    .map(
+      (f) =>
+        `  ${f.key} (mode ${f.modes!.join('/')}) — ${f.options?.map((o) => o.value).join(' | ')}`
+    )
+  return `── ${r.id} — ${r.label}
 ${r.description}
-Model: ${r.defaultModelId}${r.params ? ` · params: ${JSON.stringify(r.params)}` : ''}
-Node intent: ${designIntent(r)}
-Prompt (replace ${r.slot} with the subject; set "applyVideoStyle": true in the node params — the video's style bible is appended at run time):
-${prompt}${overrides.join('')}`
-  })
-  return `Design recipes — ready prompts for reusable design sheets (add_node with the recipe's model,
-params and prompt; give the node the recipe's intent). CRITICAL: a design node's output is a
-REFERENCE — wire it to reference inputs only (e.g. Seedance 2 "reference_image_urls" with a role
-in the prompt like "matches the design @Image1, reference only"), NEVER to a frame-anchor input
-(seedance-1.5 "input_urls", grok "image_urls") where it would appear on screen.
+Modes:
+${modes}
+Fields (values):
+${fields}${extraFields.length > 0 ? `\n${extraFields.join('\n')}` : ''}
+Supported models: ${r.supportedModels.join(', ')}${r.params ? ` · params: ${JSON.stringify(r.params)}` : ''}
+Node intent: ${recipeIntent(r)}
+Prompt with no values (${r.slot} is replaced by "description"):
+${prompt}`
+}
+
+function designsIndex(): string {
+  const entries = DESIGN_RECIPES.map(recipeEntry)
+  return `Design recipes — reusable design sheets. Create one with add_recipe_node
+({"recipeId", "values": {"description": ...}}), NOT by hand: it builds the prompt for the target
+model and the video's style, sets the markers the app reads (designId, applyVideoStyle), and in a
+"from-image" mode it also creates and wires the source node in one undo step.
+CRITICAL: a design node's output is a REFERENCE — wire it to reference inputs only (e.g. Seedance 2
+"reference_image_urls" with a role in the prompt like "matches the design @Image1, reference only"),
+NEVER to a frame-anchor input (seedance-1.5 "input_urls", grok "image_urls") where it would appear
+on screen.
 
 The pipeline: design sheets (character/decor/prop) → storyboard → video shots. The storyboard is
 the pre-visualization gate: build it FROM the sheets (gpt-image-2-image-to-image, sheets wired to
@@ -362,6 +419,128 @@ a freshly generated sheet, publish_design its generation so every video of the p
 it. Published sheets follow the same rule as design nodes: reference only, never a frame anchor.
 
 ${entries.join('\n\n')}`
+}
+
+function shotsIndex(): string {
+  const entries = SHOT_RECIPES.map(recipeEntry)
+  return `Shot presets — pre-configured VIDEO nodes: the camera move is already written for the
+models that honor it, so you pick a move instead of re-deriving each model's motion vocabulary.
+Create one with add_recipe_node ({"recipeId", "values": {"description": ..., "opensOn": ...,
+"closesOn": ..., "screenDirection": ...}}). Every preset's prompt already says how the shot moves,
+which is what the "video-prompt-without-motion" lint rule asks for.
+
+The values that carry continuity are "opensOn", "closesOn" and "screenDirection": two clips only
+read as one sequence if each prompt states the frame it OPENS ON and the one it CLOSES ON and the
+screen direction holds across the cut. A scenario (write_scenario) already produces those per shot —
+pass them straight through.
+
+Between shots you CUT, never chain: do NOT wire the previous clip's lastFrame into the next shot's
+image input (a generated closing frame is motion-blurred and compressed, so the seam glitches).
+Consistency comes from the SAME design sheets wired on every shot. When you truly need continuity,
+use the "shot-extend" preset (or link_shots): the previous CLIP becomes an @Video reference, which
+carries set, identity, grade and voice — at the cost of serializing the batch.
+
+A "from-image" mode wires its source to the model's FRAME ANCHOR: that image literally becomes the
+opening frame, so it must be a clean scene still or hero shot — never a design sheet, never a panel
+board.
+
+${entries.join('\n\n')}`
+}
+
+function doctrineIndex(): string {
+  const declarations = CAPTURE_DECLARATIONS.map(
+    (d) =>
+      `── ${d.id} — ${d.label}\n  register: ${d.mode} · camera: ${d.doctrine} · booster: ${d.boosterId}\n  ${d.text}`
+  ).join('\n')
+  const brackets = ['handheld', 'controlled', 'aerial', 'specialist', 'kinetic']
+    .map(
+      (family) =>
+        `  ${family}: ${CAMERA_MODES.filter((m) => m.family === family)
+          .map((m) => m.bracket)
+          .join(' ')}`
+    )
+    .join('\n')
+  const fov = FOV_STEPS.map((f) => `  ${f.degrees}° (${f.mmEquiv}) — ${f.purpose}`).join('\n')
+  const lexicon = ANTI_AI_TERMS.map(
+    (t) => `  "${t.term}" (hurts in: ${t.modes.join(', ')}) → ${t.instead}`
+  ).join('\n')
+
+  return `The prompting doctrine for moving images. Three ideas, in this order: what KIND of footage
+this is, WHO is holding the camera, and what is GOING WRONG. Everything below descends from them.
+
+1. THE OPENING DECLARATION is the highest-leverage element of a video prompt. The first 15-40 words
+are a domain selector: naming a medium, an era and a provenance pulls one coherent slice of footage,
+and grain, motion physics, framing habits, lighting behaviour and wardrobe logic arrive together
+already agreeing with each other. YOU DO NOT WRITE IT: the app prepends the declaration of the
+video's style at payload time (and appends the matching booster stack), for every visual node whose
+params carry "applyVideoStyle": true. Write the BODY — the bracketed timeline — and set the video's
+style with set_video_style. Never open a prompt with adjectives of quality.
+
+2. THE CAMERA IS A BODY OR A GHOST, never both, and mixing them is a BLOCKING lint finding
+("camera-doctrine-mixed"): the model resolves the contradiction by giving neither.
+  - embodied — do not describe the camera, describe the PERSON holding it: their position, their
+    motive, their physical state, and what that does to the frame. Give them an arc (composed →
+    startled → out of breath), a motive for every move, and let them lag: real operators are always
+    half a beat behind. "the operator flinches and the frame drops, then recovers" beats "shaky cam".
+  - disembodied — declare the absence of a body ("never a person's viewpoint, never part of the
+    scene"), then grant weightlessness, agency (the camera may ABANDON the subject and come back)
+    and rhythm. Score impacts as event → named camera answer, varying direction.
+
+3. IMPERFECTION, most to least important: motion (shake, drift, lag, overshoot — the number-one tell
+and the one everyone forgets), optical, exposure, sensor, human. Grain on a stabilized clip still
+reads as AI. For any human subject in a realism register, state the anti-beauty lock:
+"${ANTI_BEAUTY_LOCK}"
+
+THE TIMELINE. Ranges with a bracketed camera mode, ONE camera behaviour and ONE primary subject
+action per beat (background life encouraged, a second subject action not). 5s → 2-3 beats, 10s →
+3-4, 15s → 4-6. Escalate: establish → develop → turn → payoff → aftermath. Only ONE element may be
+fast in a beat. End on an aftermath beat (realism — real footage does not cut on the beat) or a
+locked hero frame with residual motion inside it (stylized).
+
+  0-3s: [Close Handheld Tracking] one action. one camera behaviour. one atmospheric detail.
+  3-7s: [Unsteady Following Shot] ...
+
+CAMERA MODE BRACKETS (verbatim, and the kinetic family requires the ghost):
+${brackets}
+
+OPTICS. FOV in DEGREES from these steps only — never millimetres, never an arbitrary value:
+${fov}
+Shot sizes: ${SHOT_SIZES.map((s) => `${s.abbr} (${s.inFrame})`).join(', ')}.
+White balance in Kelvin (${WHITE_BALANCE_KELVIN.join(' / ')}), fixed within a scene.
+
+MEASURE EVERYTHING. Speeds in km/h. Atmosphere in percent and metres ("fog density 40%, visible at
+15 m"), escalating in steps across shots. Scale by human comparison ("as tall as four humans stacked
+head to toe"), never "huge". Left/right is from the camera. Emotion through muscle movement, never a
+label. Colour as material + light beam + role, never a flat list.
+
+UNCONTROLLED LIFE. Plant at least one event nobody staged per shot — a background incident, a
+near-miss the subject physically reacts to, third-party life, weather doing its own thing. AI footage
+contains only what was requested, which is why it feels obedient and dead.
+
+MATERIAL PHYSICS. Never awe, always mass: name the materials, the contact events and the
+consequences. Destruction is an ORDERED disassembly — a direction, named layers in order, a per-layer
+failure mode, a terminal state — held close and tight, never "it explodes".
+
+ANTI-AI LEXICON (register-aware — the lint only complains where the term actually hurts):
+${lexicon}
+Positive phrasing for action and blocking, always. It relaxes ONLY for grade families and rendering
+modes (three short negatives maximum, at the end) and for the camera negation, which is load-bearing.
+
+SPEED RAMPS. Declared as the governing style in the OPENING or they are flattened to one average
+speed ("speed-ramps-undeclared"). Four maximum in 15 s, never two in the same direction back to back.
+Uppercase marks the INSTANT of change (SNAP IN, CRASH ZOOM, HOLD) — ${MAX_CAPS_TRANSIENTS} maximum,
+past that they stop reading as beats.
+
+CONTEXT ISOLATION. Every generation is a blank slate. A prompt is a sealed single-shot document: no
+scene numbers, no "as above", no unused tags, no people from a previous shot. To continue a clip,
+restate everything — location, weather, grade, character state carried forward physically (wet stays
+wet, torn stays torn) — and use the "shot-extend" preset so the previous CLIP rides as @Video1.
+
+CAPTURE DECLARATIONS (one per art direction — docs "styles" maps styles to these):
+${declarations}
+
+The shot presets (docs "shots") already obey all of this: they emit a bracketed timeline in the
+register of the video's style. Prefer add_recipe_node over writing a shot prompt by hand.`
 }
 
 function templatesIndex(): string {
@@ -393,7 +572,7 @@ ${JSON.stringify(t.workflow, null, 2)}`
 }
 
 export const DOC_TOPICS =
-  'overview | workflow-json | models | model:<id> | prompting:<id> | scenario | continuity | styles | designs | templates | template:<id>'
+  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | continuity | styles | designs | shots | templates | template:<id>'
 
 export function getDoc(topic: string): string {
   if (topic === 'overview') return OVERVIEW
@@ -405,6 +584,8 @@ export function getDoc(topic: string): string {
   if (topic.startsWith('prompting:')) return promptingGuide(topic.slice('prompting:'.length))
   if (topic === 'styles') return stylesIndex()
   if (topic === 'designs') return designsIndex()
+  if (topic === 'shots') return shotsIndex()
+  if (topic === 'doctrine') return doctrineIndex()
   if (topic === 'templates') return templatesIndex()
   if (topic.startsWith('template:')) return templateDetail(topic.slice('template:'.length))
   return `Unknown topic "${topic}". Valid topics: ${DOC_TOPICS}`

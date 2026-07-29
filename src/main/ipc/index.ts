@@ -21,6 +21,7 @@ import * as projects from '../services/projects'
 import { kieGetCredits, kieTestApiKey } from '../services/kie'
 import * as notificationsService from '../services/notifications'
 import * as qcService from '../services/qc'
+import * as recipesService from '../services/recipes'
 import * as runBatchService from '../services/runBatch'
 import * as renderService from '../services/render'
 import * as runEngine from '../services/runEngine'
@@ -137,6 +138,7 @@ export function registerIpcHandlers(): void {
     generationsService.timelineFallbackImages(videoId, graph.listGraph(videoId))
   )
   handle('nodes:create', (input) => graph.createNode(input))
+  handle('recipes:createNode', (input) => recipesService.createRecipeNode(input))
   handle('nodes:updateParams', ({ nodeId, params }) => graph.updateNodeParams(nodeId, params))
   handle('nodes:updateLabel', ({ nodeId, label }) => graph.updateNodeLabel(nodeId, label))
   handle('nodes:updateIntent', ({ nodeId, intent }) => graph.updateNodeIntent(nodeId, intent))
