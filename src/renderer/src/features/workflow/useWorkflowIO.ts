@@ -13,7 +13,7 @@ import {
 } from '@renderer/lib/exportFcpxml'
 import { fetchMediaBlob } from '@renderer/lib/mediaProxy'
 import { detectVideoFps, probeVideoDimensions } from '@renderer/lib/probeMedia'
-import { bestGeneration, collectTimelineClips } from '@shared/timeline'
+import { bestGeneration, collectTimelineClips, isStillClip } from '@shared/timeline'
 import { graphKeys, useIpcMutation, useVideo } from './data'
 
 // Workflow import/export actions, extracted from the toolbar so the app menu
@@ -165,6 +165,33 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
             i
           ): Promise<{ clip: FcpxmlClip; file?: { path: string; bytes: Uint8Array } }> => {
             const prefix = `media/${String(i + 1).padStart(2, '0')}-${clipSlug(node)}`
+
+            // 0) User-placed still (image/asset node): bundle the image itself,
+            //    held for its trim-window duration.
+            if (isStillClip(node)) {
+              let url: string | null
+              if (node.modelId === 'studio/asset') {
+                const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+                const asset = assetId ? await invoke('assets:get', { assetId }) : null
+                url = asset?.url ?? null
+              } else {
+                const gens = await invoke('generations:listForNode', { nodeId: node.id })
+                const gen = bestGeneration(node, gens)
+                url = gen?.status === 'success' ? (gen.url ?? null) : null
+              }
+              if (url) {
+                try {
+                  const blob = await fetchMediaBlob(url)
+                  const mime = blob.type || 'image/jpeg'
+                  const path = `${prefix}-still.${extForMime(mime)}`
+                  const bytes = new Uint8Array(await blob.arrayBuffer())
+                  return { clip: { node, mediaPath: path, isStill: true }, file: { path, bytes } }
+                } catch {
+                  // Unfetchable image → placeholder gap below.
+                }
+              }
+              return { clip: { node } }
+            }
 
             // 1) Best successful video output → use it (selected if successful,
             //    else the most recent success — same rule as the timeline display).

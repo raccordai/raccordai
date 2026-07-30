@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ChevronUp,
   Film,
+  ImagePlus,
   Loader2,
   Pause,
   Play,
@@ -15,11 +16,23 @@ import {
   ZoomIn,
   ZoomOut
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import type { GraphNode, TextLayer } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
-import { useTextLayers, useTimelineFallbackImages, useVideoGenerations } from './data'
+import {
+  useAssetNodeMedia,
+  useTextLayers,
+  useTimelineFallbackImages,
+  useVideoGenerations
+} from './data'
 import type { WorkflowGraph } from './workflowContext'
 import {
   bestGeneration,
@@ -27,7 +40,9 @@ import {
   clipTransitionAfter,
   clipTransitionSeconds,
   clipTrim,
-  collectTimelineClips
+  collectTimelineClips,
+  isStillClip,
+  stillClipSeconds
 } from '@shared/timeline'
 import { CLIP_TRANSITION_IDS } from '@shared/transitions'
 import { useResizableHeight } from './timelineHooks'
@@ -81,9 +96,44 @@ interface EngineClip {
   url: string | null
   /** Declared duration (params), replaced by real media duration once probed. */
   declared: number
+  /** Still image slot (image/asset node): no media clock, held for `declared`. */
+  still?: boolean
 }
 
 const DEFAULT_CLIP_SECONDS = 5
+
+/** Shortest length a resize handle can leave (clip trim window, text layer). */
+const MIN_RESIZE_SECONDS = 0.2
+/** Bounds of a still's hold time when resized by its handles. */
+const MIN_STILL_SECONDS = 0.5
+const MAX_STILL_SECONDS = 120
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+/**
+ * Edge-resize grip on a timeline block. `data-resize-handle` lets the block's
+ * HTML5 drag (reorder) recognise and refuse a drag that started on a grip.
+ */
+function EdgeHandle({
+  side,
+  onPointerDown,
+  title
+}: {
+  side: 'left' | 'right'
+  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
+  title: string
+}) {
+  return (
+    <div
+      data-resize-handle
+      onPointerDown={onPointerDown}
+      title={title}
+      className={`absolute inset-y-0 z-10 w-2 cursor-ew-resize bg-accent/60 opacity-0 group-hover:opacity-100 hover:bg-accent ${
+        side === 'left' ? 'left-0 rounded-l-md' : 'right-0 rounded-r-md'
+      }`}
+    />
+  )
+}
 
 // ── Playback engine ───────────────────────────────────────────────────────────
 
@@ -104,8 +154,16 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
     [mediaDurations]
   )
 
+  /** Raw (untrimmed) length: probed media duration, else the declared one. */
+  const rawDurationOf = useCallback(
+    (clip: EngineClip) => mediaDurations[clip.node.id] ?? clip.declared,
+    [mediaDurations]
+  )
+
   const durationOf = useCallback(
     (clip: EngineClip) => {
+      // A still has no media: its declared length IS its trim window already.
+      if (clip.still) return clip.declared
       const raw = mediaDurations[clip.node.id] ?? clip.declared
       const { start, end } = clipTrim(clip.node, raw)
       return Math.max(0, (end ?? raw) - start)
@@ -190,7 +248,7 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
   useEffect(() => {
     const probes: HTMLVideoElement[] = []
     for (const clip of [...clips, ...audioClips]) {
-      if (!clip.url || mediaDurations[clip.node.id] !== undefined) continue
+      if (clip.still || !clip.url || mediaDurations[clip.node.id] !== undefined) continue
       const probe = document.createElement('video')
       probe.preload = 'metadata'
       probe.src = clip.url
@@ -220,15 +278,28 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
     [clips]
   )
 
-  // Keep the active video on the current clip, and the standby preloading the next.
+  /** Next clip the VIDEO elements can host (stills play on the clock, not a <video>). */
+  const nextVideoFrom = useCallback(
+    (from: number) => {
+      for (let i = from; i < clips.length; i++) {
+        const clip = clips[i]
+        if (clip?.url && !clip.still) return i
+      }
+      return -1
+    },
+    [clips]
+  )
+
+  // Keep the active video on the current clip, and the standby preloading the
+  // next VIDEO clip (a still in between still wants the following video warm).
   useEffect(() => {
     const clip = clips[activeIdx]
     const active = activeVideo()
-    if (active && clip?.url && !active.src.endsWith(clip.url)) {
+    if (active && clip?.url && !clip.still && !active.src.endsWith(clip.url)) {
       active.src = clip.url
       active.load()
     }
-    const nextIdx = nextPlayableFrom(activeIdx + 1)
+    const nextIdx = nextVideoFrom(activeIdx + 1)
     const standby = standbyVideo()
     const nextUrl = nextIdx >= 0 ? clips[nextIdx]?.url : null
     if (standby && nextUrl && !standby.src.endsWith(nextUrl)) {
@@ -237,7 +308,18 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
       standby.load()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIdx, activeSlot, clips, nextPlayableFrom])
+  }, [activeIdx, activeSlot, clips, nextVideoFrom])
+
+  /**
+   * Where the still clock resumes from: set on entry into a still, cleared on
+   * any seek/play so the tick loop re-anchors at the current playhead.
+   */
+  const stillAnchorRef = useRef<{ idx: number; wall: number; offset: number } | null>(null)
+  /** Mirror of globalTime for the tick loop (state would be a stale closure). */
+  const globalTimeRef = useRef(0)
+  useEffect(() => {
+    globalTimeRef.current = globalTime
+  }, [globalTime])
 
   /** Gapless hop to the next playable clip; stops at the end of the edit. */
   const advance = useCallback(() => {
@@ -250,8 +332,14 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
       setGlobalTime(total)
       return
     }
-    const standby = standbyVideo()
     const next = clips[nextIdx]
+    if (next?.still) {
+      // A still has no media to start: the tick loop drives its clock.
+      stillAnchorRef.current = null
+      setActiveIdx(nextIdx)
+      return
+    }
+    const standby = standbyVideo()
     const expected = next?.url
     const nextStart = next ? trimOf(next).start : 0
     if (standby && expected && standby.src.endsWith(expected)) {
@@ -275,13 +363,32 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
 
   // Global clock while playing. Also the trim out-point enforcement: `ended`
   // only fires at the MEDIA's end, so a trimmed clip must advance itself.
+  // Stills have no media at all: their clock is the wall clock, anchored on
+  // entry (stillAnchorRef) and advanced here.
   useEffect(() => {
     if (!playing) return
     let raf = 0
     const tick = () => {
-      const video = activeVideo()
       const base = starts[activeIdx] ?? 0
       const clip = clips[activeIdx]
+      if (clip?.still) {
+        const now = performance.now()
+        let anchor = stillAnchorRef.current
+        if (!anchor || anchor.idx !== activeIdx) {
+          anchor = { idx: activeIdx, wall: now, offset: Math.max(0, globalTimeRef.current - base) }
+          stillAnchorRef.current = anchor
+        }
+        const elapsed = anchor.offset + (now - anchor.wall) / 1000
+        const hold = durationOf(clip)
+        setGlobalTime(base + Math.min(elapsed, hold))
+        if (elapsed >= hold) {
+          advance()
+          return
+        }
+        raf = requestAnimationFrame(tick)
+        return
+      }
+      const video = activeVideo()
       if (video && clip) {
         const trim = trimOf(clip)
         setGlobalTime(base + Math.max(0, video.currentTime - trim.start))
@@ -314,21 +421,21 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
       setActiveIdx(idx)
     }
     setPlaying(true)
+    // Re-anchor the still clock at the current playhead position.
+    stillAnchorRef.current = null
     // Give the effect a beat to (re)load the right src before playing.
     const resumeAt = starts[idx] ?? 0
     requestAnimationFrame(() => {
+      const clip = clips[idx]
       const video = activeVideo()
-      if (video) {
+      if (video && clip && !clip.still) {
         // A fresh load sits at 0 — snap into the clip's trim window.
-        const clip = clips[idx]
-        if (clip) {
-          const trim = trimOf(clip)
-          if (
-            video.currentTime < trim.start - 0.01 ||
-            (trim.end !== undefined && video.currentTime >= trim.end - 0.01)
-          ) {
-            video.currentTime = trim.start
-          }
+        const trim = trimOf(clip)
+        if (
+          video.currentTime < trim.start - 0.01 ||
+          (trim.end !== undefined && video.currentTime >= trim.end - 0.01)
+        ) {
+          video.currentTime = trim.start
         }
         void video.play().catch(() => setPlaying(false))
       }
@@ -357,12 +464,14 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
       }
       const offset = clamped - (starts[idx] ?? 0)
       setGlobalTime(clamped)
+      // Any jump invalidates the still clock's anchor — the tick re-anchors.
+      stillAnchorRef.current = null
       const clip = clips[idx]
       if (!clip) return
       if (idx !== activeIdx) setActiveIdx(idx)
       requestAnimationFrame(() => {
         const video = activeVideo()
-        if (video && clip.url) {
+        if (video && clip.url && !clip.still) {
           if (!video.src.endsWith(clip.url)) {
             video.src = clip.url
             video.load()
@@ -394,7 +503,8 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
     globalTime,
     starts,
     total,
-    durationOf
+    durationOf,
+    rawDurationOf
   }
 }
 
@@ -436,6 +546,20 @@ export function TimelineV2({
   const generations = useVideoGenerations(videoId).data
   const fallbackImages = useTimelineFallbackImages(videoId).data
   const textLayers = useTextLayers(videoId).data ?? []
+  // Asset-node media (url + mime): what an asset still displays, and how the
+  // add-image picker knows an asset is an image at all.
+  const assetMedia = useAssetNodeMedia(videoId, graph.nodes).data
+  // Add-image picker popover (anchored to the header button).
+  const [imagePicker, setImagePicker] = useState<{ x: number; y: number } | null>(null)
+  // Live edge-resize of a clip block (video/still/audio): duration override
+  // applied to the track's widths only — playback keeps the committed trim.
+  const [clipResize, setClipResize] = useState<{ id: string; duration: number } | null>(null)
+  // Live edge-resize of a text layer block (start/end override).
+  const [layerResize, setLayerResize] = useState<{
+    id: string
+    startSec: number
+    endSec: number
+  } | null>(null)
 
   // The player's pixel height sizes the layer previews (sizePct = % of height).
   useEffect(() => {
@@ -450,15 +574,18 @@ export function TimelineV2({
 
   const clips: EngineClip[] = useMemo(() => {
     return clipNodes.map((node) => {
+      const still = isStillClip(node)
       const gens = (generations ?? []).filter((g) => g.nodeId === node.id)
       const best = bestGeneration(node, gens)
+      const genUrl = best?.status === 'success' ? (best.url ?? null) : null
       return {
         node,
-        url: best?.status === 'success' ? (best.url ?? null) : null,
-        declared: clipDuration(node) ?? DEFAULT_CLIP_SECONDS
+        url: node.modelId === 'studio/asset' ? (assetMedia?.[node.id]?.url ?? null) : genUrl,
+        declared: still ? stillClipSeconds(node) : (clipDuration(node) ?? DEFAULT_CLIP_SECONDS),
+        still
       }
     })
-  }, [clipNodes, generations])
+  }, [clipNodes, generations, assetMedia])
 
   const audioClips: EngineClip[] = useMemo(() => {
     return audioNodes.map((node) => {
@@ -488,6 +615,174 @@ export function TimelineV2({
       return ratio * engine.total
     },
     [engine.total]
+  )
+
+  /**
+   * Edge-resize drag: converts pixel deltas to seconds (at the scale frozen
+   * when the drag starts) and streams them to the caller, which owns the live
+   * override state and the commit. Pointer events only — the parent clip's
+   * HTML5 drag (reorder) is suppressed via the handle's data attribute.
+   */
+  const startResize = useCallback(
+    (
+      e: ReactPointerEvent,
+      handlers: { onDelta: (deltaSec: number) => void; onCommit: (deltaSec: number) => void }
+    ) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const rect = trackRef.current?.getBoundingClientRect()
+      if (!rect || engine.total <= 0) return
+      const secPerPx = engine.total / rect.width
+      const originX = e.clientX
+      document.body.style.userSelect = 'none'
+      let last = 0
+      const move = (ev: PointerEvent) => {
+        last = (ev.clientX - originX) * secPerPx
+        handlers.onDelta(last)
+      }
+      const up = () => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+        document.body.style.userSelect = ''
+        handlers.onCommit(last)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+    },
+    [engine.total]
+  )
+
+  /** Track-display duration of a clip, honouring an in-flight edge resize. */
+  const displayDur = useCallback(
+    (clip: EngineClip) =>
+      clipResize?.id === clip.node.id ? clipResize.duration : engine.durationOf(clip),
+    [clipResize, engine]
+  )
+  const displayTotal = useMemo(
+    () => clips.reduce((acc, c) => acc + displayDur(c), 0),
+    [clips, displayDur]
+  )
+
+  // Images the add-image picker offers: image-kind nodes with a successful
+  // output, plus image assets — excluding what already sits on the timeline.
+  const imageCandidates = useMemo(() => {
+    const placed = new Set(clipNodes.map((n) => n.id))
+    const out: Array<{ node: GraphNode; url: string }> = []
+    for (const node of graph.nodes) {
+      if (placed.has(node.id)) continue
+      if (node.modelId === 'studio/asset') {
+        const media = assetMedia?.[node.id]
+        if (media?.url && media.mimeType?.startsWith('image/')) {
+          out.push({ node, url: media.url })
+        }
+      } else if (getModel(node.modelId)?.kind === 'image') {
+        const best = bestGeneration(
+          node,
+          (generations ?? []).filter((g) => g.nodeId === node.id)
+        )
+        if (best?.status === 'success' && best.url) out.push({ node, url: best.url })
+      }
+    }
+    return out
+  }, [graph.nodes, clipNodes, generations, assetMedia])
+
+  const addImageToTimeline = (nodeId: string) => {
+    setImagePicker(null)
+    void invoke('nodes:setTimelineOrder', {
+      videoId,
+      nodeIds: [...clips.map((c) => c.node.id), nodeId]
+    })
+  }
+
+  /**
+   * Edge resize of a clip block. A video/audio clip trims its media (same
+   * journaled nodes:setTrim as the scissors popover — ⌘Z undoes it); a still
+   * has no media, so either grip just changes its hold time.
+   */
+  const beginClipResize = useCallback(
+    (clip: EngineClip, side: 'left' | 'right') => (e: ReactPointerEvent) => {
+      const node = clip.node
+      if (clip.still) {
+        const orig = stillClipSeconds(node)
+        const durAt = (d: number) =>
+          clamp(side === 'right' ? orig + d : orig - d, MIN_STILL_SECONDS, MAX_STILL_SECONDS)
+        startResize(e, {
+          onDelta: (d) => setClipResize({ id: node.id, duration: durAt(d) }),
+          onCommit: (d) => {
+            setClipResize(null)
+            const dur = Math.round(durAt(d) * 10) / 10
+            if (Math.abs(dur - orig) < 0.05) return
+            void invoke('nodes:setTrim', { nodeId: node.id, trimStartSec: null, trimEndSec: dur })
+          }
+        })
+        return
+      }
+      const raw = engine.rawDurationOf(clip)
+      const { start: origStart, end } = clipTrim(node, raw)
+      const origEnd = end ?? raw
+      const startAt = (d: number) => clamp(origStart + d, 0, origEnd - MIN_RESIZE_SECONDS)
+      const endAt = (d: number) => clamp(origEnd + d, origStart + MIN_RESIZE_SECONDS, raw)
+      startResize(e, {
+        onDelta: (d) =>
+          setClipResize({
+            id: node.id,
+            duration: side === 'left' ? origEnd - startAt(d) : endAt(d) - origStart
+          }),
+        onCommit: (d) => {
+          setClipResize(null)
+          if (side === 'left') {
+            const s = Math.round(startAt(d) * 100) / 100
+            if (Math.abs(s - origStart) < 0.02) return
+            void invoke('nodes:setTrim', {
+              nodeId: node.id,
+              trimStartSec: s > 0 ? s : null,
+              trimEndSec: node.trimEndSec ?? null
+            })
+          } else {
+            const out = Math.round(endAt(d) * 100) / 100
+            if (Math.abs(out - origEnd) < 0.02) return
+            void invoke('nodes:setTrim', {
+              nodeId: node.id,
+              trimStartSec: node.trimStartSec ?? null,
+              // Back at the media's end = no out-point at all.
+              trimEndSec: out >= raw - 0.01 ? null : out
+            })
+          }
+        }
+      })
+    },
+    [engine, startResize]
+  )
+
+  /** Edge resize of a text layer block: its in/out on the final timeline. */
+  const beginLayerResize = useCallback(
+    (layer: TextLayer, side: 'left' | 'right') => (e: ReactPointerEvent) => {
+      const origStart = layer.startSec
+      const origEnd = layer.endSec
+      const startAt = (d: number) => clamp(origStart + d, 0, origEnd - MIN_RESIZE_SECONDS)
+      const endAt = (d: number) => Math.max(origStart + MIN_RESIZE_SECONDS, origEnd + d)
+      startResize(e, {
+        onDelta: (d) =>
+          setLayerResize(
+            side === 'left'
+              ? { id: layer.id, startSec: startAt(d), endSec: origEnd }
+              : { id: layer.id, startSec: origStart, endSec: endAt(d) }
+          ),
+        onCommit: (d) => {
+          setLayerResize(null)
+          if (side === 'left') {
+            const s = Math.round(startAt(d) * 10) / 10
+            if (Math.abs(s - origStart) < 0.05) return
+            void invoke('textLayers:update', { id: layer.id, patch: { startSec: s } })
+          } else {
+            const out = Math.round(endAt(d) * 10) / 10
+            if (Math.abs(out - origEnd) < 0.05) return
+            void invoke('textLayers:update', { id: layer.id, patch: { endSec: out } })
+          }
+        }
+      })
+    },
+    [startResize]
   )
 
   // Scrub with pointer capture on the track.
@@ -540,16 +835,36 @@ export function TimelineV2({
 
   if (clips.length === 0) {
     return (
-      <div className="island relative flex h-32 items-center justify-center overflow-hidden text-xs text-neutral-600">
-        <Film className="mr-2 h-4 w-4" /> {t('timeline.empty')}
-        <button
-          onClick={() => setCollapsed(true)}
-          className="absolute top-2 right-2 rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-          title={t('timeline.hide')}
-        >
-          <ChevronDown className="h-4 w-4" />
-        </button>
-      </div>
+      <>
+        <div className="island relative flex h-32 items-center justify-center overflow-hidden text-xs text-neutral-600">
+          <Film className="mr-2 h-4 w-4" /> {t('timeline.empty')}
+          <button
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setImagePicker((v) => (v ? null : { x: r.left + r.width / 2, y: r.top - 6 }))
+            }}
+            className="absolute top-2 right-8 rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            title={t('timeline.addImage')}
+          >
+            <ImagePlus className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setCollapsed(true)}
+            className="absolute top-2 right-2 rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            title={t('timeline.hide')}
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        </div>
+        {imagePicker && (
+          <ImagePickerPopover
+            candidates={imageCandidates}
+            anchor={imagePicker}
+            onPick={addImageToTimeline}
+            onClose={() => setImagePicker(null)}
+          />
+        )}
+      </>
     )
   }
 
@@ -645,6 +960,16 @@ export function TimelineV2({
             <Type className="h-3.5 w-3.5" />
           </button>
           <button
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setImagePicker((v) => (v ? null : { x: r.left + r.width / 2, y: r.top - 6 }))
+            }}
+            className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            title={t('timeline.addImage')}
+          >
+            <ImagePlus className="h-3.5 w-3.5" />
+          </button>
+          <button
             onClick={() => setZoom((z) => Math.max(1, z / 1.5))}
             disabled={zoom <= 1}
             className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-40"
@@ -693,6 +1018,14 @@ export function TimelineV2({
               className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
             />
             <audio ref={engine.audioRef} className="hidden" />
+            {/* Still slot: the image itself covers the (paused) video stack. */}
+            {activeClip?.still && activeClip.url && (
+              <img
+                src={activeClip.url}
+                alt=""
+                className="absolute inset-0 z-[5] h-full w-full bg-black object-contain"
+              />
+            )}
             {!activeClip?.url && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-[11px] text-neutral-500">
                 {fallbackImages?.[activeClip?.node.id ?? ''] ? (
@@ -847,8 +1180,7 @@ export function TimelineV2({
                   }}
                 >
                   {clips.map((clip, i) => {
-                    const width =
-                      engine.total > 0 ? (engine.durationOf(clip) / engine.total) * 100 : 0
+                    const width = displayTotal > 0 ? (displayDur(clip) / displayTotal) * 100 : 0
                     const isActive = i === engine.activeIdx
                     const still = fallbackImages?.[clip.node.id]
                     return (
@@ -861,6 +1193,11 @@ export function TimelineV2({
                         data-timeline-clip={i}
                         draggable
                         onDragStart={(e) => {
+                          // A drag born on a resize grip is a trim, not a reorder.
+                          if ((e.target as HTMLElement).closest?.('[data-resize-handle]')) {
+                            e.preventDefault()
+                            return
+                          }
                           dragFrom.current = i
                           scrubbing.current = false
                           document.body.style.userSelect = ''
@@ -889,7 +1226,13 @@ export function TimelineV2({
                           onFocusNode?.(clip.node.id)
                         }}
                       >
-                        {clip.url ? (
+                        {clip.still && clip.url ? (
+                          <img
+                            src={clip.url}
+                            alt=""
+                            className="pointer-events-none h-full w-full object-cover opacity-70 group-hover:opacity-100"
+                          />
+                        ) : clip.url ? (
                           <VideoThumb
                             src={clip.url}
                             overlay={false}
@@ -903,10 +1246,11 @@ export function TimelineV2({
                           />
                         ) : null}
                         <div className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 to-transparent px-1.5 pt-3 pb-0.5 text-[9px] text-neutral-200">
+                          {clip.still && (
+                            <ImagePlus className="mr-1 inline h-2.5 w-2.5 text-accent-soft" />
+                          )}
                           {clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key}
-                          <span className="ml-1 text-neutral-400">
-                            {fmt(engine.durationOf(clip))}
-                          </span>
+                          <span className="ml-1 text-neutral-400">{fmt(displayDur(clip))}</span>
                         </div>
                         {!clip.url && (
                           <div className="absolute inset-0 flex items-center justify-center text-[9px] text-neutral-600">
@@ -933,6 +1277,20 @@ export function TimelineV2({
                             )}
                           />
                         )}
+                        {(clip.still || clip.url) && (
+                          <>
+                            <EdgeHandle
+                              side="left"
+                              title={t(clip.still ? 'timeline.resizeStill' : 'timeline.trimIn')}
+                              onPointerDown={beginClipResize(clip, 'left')}
+                            />
+                            <EdgeHandle
+                              side="right"
+                              title={t(clip.still ? 'timeline.resizeStill' : 'timeline.trimOut')}
+                              onPointerDown={beginClipResize(clip, 'right')}
+                            />
+                          </>
+                        )}
                       </div>
                     )
                   })}
@@ -946,14 +1304,21 @@ export function TimelineV2({
                     style={{ bottom: audioClips.length > 0 ? 38 : 0 }}
                   >
                     {textLayers.map((layer) => {
-                      const start = laneDrag?.id === layer.id ? laneDrag.startSec : layer.startSec
-                      const dur = layer.endSec - layer.startSec
+                      const resizing = layerResize?.id === layer.id ? layerResize : null
+                      const start = resizing
+                        ? resizing.startSec
+                        : laneDrag?.id === layer.id
+                          ? laneDrag.startSec
+                          : layer.startSec
+                      const dur = resizing
+                        ? resizing.endSec - resizing.startSec
+                        : layer.endSec - layer.startSec
                       const left = Math.min(100, (start / engine.total) * 100)
                       const width = Math.max(1.5, Math.min(100 - left, (dur / engine.total) * 100))
                       return (
                         <div
                           key={layer.id}
-                          className="absolute flex h-full items-center gap-1 overflow-hidden rounded-md border border-accent/50 bg-accent/15 px-1.5 text-[10px] text-accent-soft"
+                          className="group absolute flex h-full items-center gap-1 overflow-hidden rounded-md border border-accent/50 bg-accent/15 px-1.5 text-[10px] text-accent-soft"
                           style={{ left: `${left}%`, width: `${width}%`, cursor: 'grab' }}
                           title={layer.content}
                           onPointerDown={(e) => {
@@ -990,6 +1355,16 @@ export function TimelineV2({
                         >
                           <Type className="h-3 w-3 flex-shrink-0" />
                           <span className="truncate">{layer.content}</span>
+                          <EdgeHandle
+                            side="left"
+                            title={t('timeline.layerStart')}
+                            onPointerDown={beginLayerResize(layer, 'left')}
+                          />
+                          <EdgeHandle
+                            side="right"
+                            title={t('timeline.layerEnd')}
+                            onPointerDown={beginLayerResize(layer, 'right')}
+                          />
                         </div>
                       )
                     })}
@@ -997,43 +1372,69 @@ export function TimelineV2({
                 )}
 
                 {/* Audio track */}
-                {audioClips.length > 0 && (
-                  <div className="absolute inset-x-0 bottom-0 flex h-8">
-                    {audioClips.map((clip, i) => {
-                      const width =
-                        engine.total > 0
-                          ? Math.min(
-                              (engine.durationOf(clip) / engine.total) * 100,
-                              100 - ((engine.audioStarts[i] ?? 0) / engine.total) * 100
-                            )
-                          : 0
-                      return (
-                        <div
-                          key={clip.node.id}
-                          className={`relative mr-px flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[10px] ${
-                            clip.url
-                              ? 'border-highlight-soft/40 bg-highlight-soft/15 text-highlight-soft'
-                              : 'border-neutral-800 bg-neutral-900/40 text-neutral-600'
-                          }`}
-                          style={{ width: `${Math.max(width, 0)}%` }}
-                          onPointerDown={(e) => {
-                            e.stopPropagation()
-                            onFocusNode?.(clip.node.id)
-                          }}
-                          title={clip.node.label ?? getModel(clip.node.modelId)?.label}
-                        >
-                          <Music className="h-3 w-3 flex-shrink-0" />
-                          <span className="truncate">
-                            {clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key}
-                          </span>
-                          <span className="ml-auto flex-shrink-0 opacity-70">
-                            {fmt(engine.durationOf(clip))}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+                {audioClips.length > 0 &&
+                  (() => {
+                    // Sequential lane starts, honouring an in-flight edge resize.
+                    const audioStarts: number[] = []
+                    let acc = 0
+                    for (const c of audioClips) {
+                      audioStarts.push(acc)
+                      acc += displayDur(c)
+                    }
+                    return (
+                      <div className="absolute inset-x-0 bottom-0 flex h-8">
+                        {audioClips.map((clip, i) => {
+                          const width =
+                            displayTotal > 0
+                              ? Math.min(
+                                  (displayDur(clip) / displayTotal) * 100,
+                                  100 - ((audioStarts[i] ?? 0) / displayTotal) * 100
+                                )
+                              : 0
+                          return (
+                            <div
+                              key={clip.node.id}
+                              className={`group relative mr-px flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[10px] ${
+                                clip.url
+                                  ? 'border-highlight-soft/40 bg-highlight-soft/15 text-highlight-soft'
+                                  : 'border-neutral-800 bg-neutral-900/40 text-neutral-600'
+                              }`}
+                              style={{ width: `${Math.max(width, 0)}%` }}
+                              onPointerDown={(e) => {
+                                e.stopPropagation()
+                                onFocusNode?.(clip.node.id)
+                              }}
+                              title={clip.node.label ?? getModel(clip.node.modelId)?.label}
+                            >
+                              <Music className="h-3 w-3 flex-shrink-0" />
+                              <span className="truncate">
+                                {clip.node.label ??
+                                  getModel(clip.node.modelId)?.label ??
+                                  clip.node.key}
+                              </span>
+                              <span className="ml-auto flex-shrink-0 opacity-70">
+                                {fmt(displayDur(clip))}
+                              </span>
+                              {clip.url && (
+                                <>
+                                  <EdgeHandle
+                                    side="left"
+                                    title={t('timeline.trimIn')}
+                                    onPointerDown={beginClipResize(clip, 'left')}
+                                  />
+                                  <EdgeHandle
+                                    side="right"
+                                    title={t('timeline.trimOut')}
+                                    onPointerDown={beginClipResize(clip, 'right')}
+                                  />
+                                </>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
 
                 {/* Playhead */}
                 {engine.total > 0 && (
@@ -1056,6 +1457,25 @@ export function TimelineV2({
           isLast={editClip.idx === clips.length - 1}
           anchor={editClip}
           onClose={() => setEditClip(null)}
+          onRemoveStill={
+            clips[editClip.idx]!.still
+              ? () => {
+                  setEditClip(null)
+                  void invoke('nodes:setTimelineOrder', {
+                    videoId,
+                    nodeIds: clips.filter((_, j) => j !== editClip.idx).map((c) => c.node.id)
+                  })
+                }
+              : undefined
+          }
+        />
+      )}
+      {imagePicker && (
+        <ImagePickerPopover
+          candidates={imageCandidates}
+          anchor={imagePicker}
+          onPick={addImageToTimeline}
+          onClose={() => setImagePicker(null)}
         />
       )}
       {editLayer &&
@@ -1115,12 +1535,15 @@ function ClipSettingsPopover({
   node,
   isLast,
   anchor,
-  onClose
+  onClose,
+  onRemoveStill
 }: {
   node: GraphNode
   isLast: boolean
   anchor: { x: number; y: number }
   onClose: () => void
+  /** Set on still slots only: removes the image from the timeline (not the graph). */
+  onRemoveStill?: () => void
 }) {
   const { t } = useTranslation()
   const ref = useRef<HTMLDivElement | null>(null)
@@ -1172,6 +1595,15 @@ function ClipSettingsPopover({
     >
       <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
         <Scissors className="h-3 w-3 text-accent" /> {t('timeline.clipSettings')}
+        {onRemoveStill && (
+          <button
+            onClick={onRemoveStill}
+            className="ml-auto rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-danger"
+            title={t('timeline.removeFromTimeline')}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Trim */}
@@ -1454,6 +1886,60 @@ function LayerSettingsPopover({
         </button>
       </div>
       <p className="mt-1.5 text-[10px] text-neutral-500">{t('timeline.layerDragHint')}</p>
+    </div>
+  )
+}
+
+/**
+ * The add-image picker: every image of the graph not already on the timeline
+ * (image-model nodes with a successful output, image assets). Picking one
+ * appends it as a STILL slot — 5 s by default, resizable by its edge grips.
+ */
+function ImagePickerPopover({
+  candidates,
+  anchor,
+  onPick,
+  onClose
+}: {
+  candidates: Array<{ node: GraphNode; url: string }>
+  anchor: { x: number; y: number }
+  onPick: (nodeId: string) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const ref = useRef<HTMLDivElement | null>(null)
+  useDismissable(true, onClose, ref)
+  return (
+    <div
+      ref={ref}
+      className="island fixed z-50 w-64 -translate-x-1/2 -translate-y-full px-2 py-2 text-[11px]"
+      style={{ left: anchor.x, top: anchor.y }}
+    >
+      <div className="mb-1.5 flex items-center gap-1.5 px-1 font-semibold text-neutral-200">
+        <ImagePlus className="h-3 w-3 text-accent" /> {t('timeline.addImage')}
+      </div>
+      {candidates.length === 0 ? (
+        <p className="px-1 pb-1 text-neutral-500">{t('timeline.addImageEmpty')}</p>
+      ) : (
+        <div className="max-h-56 overflow-y-auto">
+          {candidates.map(({ node, url }) => (
+            <button
+              key={node.id}
+              onClick={() => onPick(node.id)}
+              className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-neutral-800"
+            >
+              <img
+                src={url}
+                alt=""
+                className="h-8 w-12 flex-shrink-0 rounded border border-neutral-800 object-cover"
+              />
+              <span className="truncate text-neutral-200">
+                {node.label ?? getModel(node.modelId)?.label ?? node.key}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

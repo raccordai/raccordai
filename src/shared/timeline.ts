@@ -54,9 +54,37 @@ export function timelineOrder(nodes: GraphNode[]): GraphNode[] {
   })
 }
 
+/** Default hold time of a still clip (image placed on the timeline). */
+export const DEFAULT_STILL_SECONDS = 5
+
+/**
+ * True when the node's timeline slot holds a STILL: an image-kind node, or a
+ * `studio/asset` node (uploaded media held as a picture). Stills only enter
+ * the timeline through an explicit `timelineOrder` (see collectTimelineClips)
+ * and their duration is their trim window (see stillClipSeconds).
+ */
+export function isStillClip(node: GraphNode): boolean {
+  if (node.modelId === 'studio/asset') return true
+  return getModel(node.modelId)?.kind === 'image'
+}
+
+/**
+ * Hold time of a still on the timeline. A still has no media duration, so its
+ * trim window IS its length (resize handles write trimEndSec); without one it
+ * holds for the default.
+ */
+export function stillClipSeconds(node: GraphNode): number {
+  const start = Math.max(0, node.trimStartSec ?? 0)
+  const end = node.trimEndSec
+  if (typeof end === 'number' && end > start) return end - start
+  return DEFAULT_STILL_SECONDS
+}
+
 /**
  * The ordered list of clips that make up the timeline: every video-kind node
- * (asset nodes excluded), ordered by shot number.
+ * (asset nodes excluded), ordered by shot number — plus the stills the user
+ * explicitly placed (image/asset nodes carrying a `timelineOrder`; opt-in, so
+ * the graph's working images never leak into the edit).
  *
  * Replacement workflow: when a shot fails, the user renames another node to
  * take over its number — leaving two nodes with the same shot number. Only one
@@ -66,7 +94,7 @@ export function timelineOrder(nodes: GraphNode[]): GraphNode[] {
  */
 export function collectTimelineClips(nodes: GraphNode[]): GraphNode[] {
   const videos = nodes.filter((n) => {
-    if (n.modelId === 'studio/asset') return false
+    if (isStillClip(n)) return typeof n.timelineOrder === 'number'
     return getModel(n.modelId)?.kind === 'video'
   })
 

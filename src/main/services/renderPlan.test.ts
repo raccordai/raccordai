@@ -251,7 +251,13 @@ describe('buildLastFrameArgs', () => {
 
 describe('buildMuxArgs', () => {
   it('mixes a single music track over video audio, capped at the sequence duration', () => {
-    const args = buildMuxArgs('/tmp/video.mp4', ['/tmp/music.mp3'], true, 12.5, '/tmp/out.mp4')
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/tmp/music.mp3' }],
+      true,
+      12.5,
+      '/tmp/out.mp4'
+    )
     const filter = args[args.indexOf('-filter_complex') + 1]!
     expect(filter).toBe('[1:a]apad[mpad];[0:a][mpad]amix=inputs=2:duration=first:normalize=0[mix]')
     const joined = args.join(' ')
@@ -260,12 +266,44 @@ describe('buildMuxArgs', () => {
   })
 
   it('chains multiple music tracks and maps them directly on a silent video', () => {
-    const args = buildMuxArgs('/tmp/video.mp4', ['/a.mp3', '/b.mp3'], false, 20, '/tmp/out.mp4')
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/a.mp3' }, { path: '/b.mp3' }],
+      false,
+      20,
+      '/tmp/out.mp4'
+    )
     const filter = args[args.indexOf('-filter_complex') + 1]!
     expect(filter).toContain('[1:a][2:a]concat=n=2:v=0:a=1[mcat]')
     expect(filter).toContain('[mcat]apad[mpad]')
     expect(filter).not.toContain('amix')
     expect(args.join(' ')).toContain('-map 0:v -map [mpad]')
+  })
+
+  it('trims a single track through atrim and rebases its timestamps', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/a.mp3', trimStartSec: 2, trimEndSec: 9.5 }],
+      false,
+      20,
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('[1:a]atrim=start=2:end=9.5,asetpts=PTS-STARTPTS[t1]')
+    expect(filter).toContain('[t1]apad[mpad]')
+  })
+
+  it('only trimmed tracks go through atrim in a chained lane', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/a.mp3', trimEndSec: 8 }, { path: '/b.mp3' }],
+      false,
+      20,
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('[1:a]atrim=start=0:end=8,asetpts=PTS-STARTPTS[t1]')
+    expect(filter).toContain('[t1][2:a]concat=n=2:v=0:a=1[mcat]')
   })
 })
 

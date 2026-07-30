@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { GraphNode } from './ipc/contracts'
 import {
   CROSSFADE_SECONDS,
+  DEFAULT_STILL_SECONDS,
   bestGeneration,
   clipDuration,
   clipResolution,
@@ -9,7 +10,9 @@ import {
   clipTrim,
   collectAudioNodes,
   collectTimelineClips,
+  isStillClip,
   shotNumber,
+  stillClipSeconds,
   timelineOrder,
   transitionOverlapSeconds,
   trimmedClipDuration
@@ -143,6 +146,32 @@ describe('collectTimelineClips', () => {
     const a = node({ label: 'intro', key: 'intro' })
     const b = node({ label: 'outro', key: 'outro' })
     expect(collectTimelineClips([a, b])).toHaveLength(2)
+  })
+
+  it('includes image/asset stills only when explicitly placed (timelineOrder)', () => {
+    const video = node({ label: 'Shot 1' })
+    const placedImage = node({ modelId: 'nano-banana-2', timelineOrder: 1 })
+    const placedAsset = node({ modelId: 'studio/asset', timelineOrder: 2 })
+    const workingImage = node({ modelId: 'nano-banana-2' })
+    expect(
+      collectTimelineClips([video, placedImage, placedAsset, workingImage]).map((n) => n.id)
+    ).toEqual([placedImage.id, placedAsset.id, video.id])
+  })
+})
+
+describe('stills', () => {
+  it('isStillClip covers image models and asset nodes, never video', () => {
+    expect(isStillClip(node({ modelId: 'nano-banana-2' }))).toBe(true)
+    expect(isStillClip(node({ modelId: 'studio/asset' }))).toBe(true)
+    expect(isStillClip(node())).toBe(false)
+  })
+
+  it('stillClipSeconds reads the trim window, defaulting to 5 s', () => {
+    expect(stillClipSeconds(node())).toBe(DEFAULT_STILL_SECONDS)
+    expect(stillClipSeconds(node({ trimEndSec: 7.5 }))).toBe(7.5)
+    expect(stillClipSeconds(node({ trimStartSec: 1, trimEndSec: 7 }))).toBe(6)
+    // Inverted window → default, like clipTrim's bad-data rule.
+    expect(stillClipSeconds(node({ trimStartSec: 9, trimEndSec: 7 }))).toBe(DEFAULT_STILL_SECONDS)
   })
 })
 

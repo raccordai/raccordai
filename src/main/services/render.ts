@@ -12,12 +12,18 @@ import {
   clipTransitionSeconds,
   clipTrim,
   collectAudioNodes,
-  collectTimelineClips
+  collectTimelineClips,
+  isStillClip,
+  stillClipSeconds
 } from '@shared/timeline'
 import { xfadeNameFor } from '@shared/transitions'
 import { broadcastRenderProgress } from '../events'
 import { resolveMediaUrlToFile } from '../media/protocol'
-import { listGenerationsForNode, timelineFallbackImages } from './generations'
+import {
+  listGenerationsForNode,
+  resolveSelectedOutputUrl,
+  timelineFallbackImages
+} from './generations'
 import { listTextLayers } from './textLayers'
 import * as graphService from './graph'
 import * as videosService from './videos'
@@ -43,6 +49,7 @@ import {
   parseProgressLine,
   renderedDurationSeconds,
   sequenceDurationSeconds,
+  type MusicTrack,
   type PlannedClip,
   type RenderStep,
   type StageSpan,
@@ -228,6 +235,29 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     for (const node of timelineNodes) {
       index += 1
       const name = `src-${String(index).padStart(2, '0')}`
+      // User-placed still (image node or asset): held for its trim-window length.
+      if (isStillClip(node)) {
+        const url = resolveSelectedOutputUrl(node, 'output')
+        try {
+          const local = url ? resolveMediaUrlToFile(url) : null
+          const stillPath =
+            local?.path ?? (url ? await downloadTo(workDir, `${name}-still`, url) : null)
+          if (stillPath) {
+            clips.push({
+              path: stillPath,
+              isStill: true,
+              stillDurationSeconds: stillClipSeconds(node),
+              probe: null
+            })
+            clipNodes.push(node)
+            continue
+          }
+        } catch {
+          // Unfetchable still → skip the slot like any other missing media.
+        }
+        skipped.push(label(node))
+        continue
+      }
       const videoPath = await resolveNodeMedia(workDir, node, name)
       if (videoPath) {
         clips.push({ path: videoPath, isStill: false, stillDurationSeconds: 0, probe: null })
@@ -255,17 +285,27 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     }
     if (clips.length === 0) throw new Error('No timeline clip has a usable output to render')
 
-    // Audio lane (Suno nodes), in timeline order. Nodes without output are
-    // reported as skipped rather than silently dropped.
-    const musicPaths: string[] = []
+    // Audio lane (Suno nodes), in timeline order, each carrying its journaled
+    // trim window (the preview honours the same bounds). Nodes without output
+    // are reported as skipped rather than silently dropped.
+    const musicTracks: MusicTrack[] = []
     for (const [i, node] of collectAudioNodes(graph.nodes).entries()) {
       const path = await resolveNodeMedia(workDir, node, `music-${i + 1}`)
-      if (path) musicPaths.push(path)
-      else skipped.push(label(node))
+      if (path) {
+        // Infinity = media length unknown here (audio is never probed): an
+        // untrimmed track must NOT inherit the node's declared duration as an
+        // out-point — only an explicit trim survives the Infinity fallback.
+        const { start, end } = clipTrim(node, Number.POSITIVE_INFINITY)
+        musicTracks.push({
+          path,
+          ...(start > 0 ? { trimStartSec: start } : {}),
+          ...(end !== undefined && Number.isFinite(end) ? { trimEndSec: end } : {})
+        })
+      } else skipped.push(label(node))
     }
 
     // ── Probe ────────────────────────────────────────────────────────────
-    const probeSpansGuess = computeStageSpans(true, musicPaths.length > 0)
+    const probeSpansGuess = computeStageSpans(true, musicTracks.length > 0)
     progress(probeSpansGuess, 'probe', 0)
     for (const [i, clip] of clips.entries()) {
       if (!clip.isStill) clip.probe = await probeFile(active, clip.path)
@@ -370,7 +410,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       }
     }
     const hasBurnPass = assEvents.length > 0
-    const spans = computeStageSpans(!lossless, musicPaths.length > 0, {
+    const spans = computeStageSpans(!lossless, musicTracks.length > 0, {
       hasTransitions: hasCrossfades(clips),
       hasSubtitles: hasBurnPass
     })
@@ -490,7 +530,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
 
     // ── Mux the music lane ───────────────────────────────────────────────
     let finalPath = stagePath
-    if (musicPaths.length > 0) {
+    if (musicTracks.length > 0) {
       const concatProbe = await probeFile(active, stagePath)
       const muxOut = join(workDir, 'final.mp4')
       const muxDuration = concatProbe.durationSeconds ?? finalDuration
@@ -498,7 +538,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         active,
         ffmpegPath(),
         [
-          ...buildMuxArgs(stagePath, musicPaths, concatProbe.hasAudio, muxDuration, muxOut),
+          ...buildMuxArgs(stagePath, musicTracks, concatProbe.hasAudio, muxDuration, muxOut),
           '-progress',
           'pipe:1'
         ],

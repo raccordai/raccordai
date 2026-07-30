@@ -48,6 +48,32 @@ export function useTimelineFallbackImages(videoId: string): UseQueryResult<Recor
   })
 }
 
+/**
+ * Display media of the graph's `studio/asset` nodes, keyed by NODE id — what
+ * the timeline needs to show an asset still (url) and to know it is one
+ * (mimeType). Refreshed with the graph key so a swapped asset follows.
+ */
+export function useAssetNodeMedia(
+  videoId: string,
+  nodes: GraphNode[]
+): UseQueryResult<Record<string, { url: string; mimeType: string | null }>> {
+  const assetNodes = nodes.filter((n) => n.modelId === 'studio/asset')
+  const ids = assetNodes.map((n) => n.id).join('|')
+  return useQuery({
+    queryKey: [...graphKeys.graph(videoId), 'assetNodeMedia', ids],
+    queryFn: async () => {
+      const out: Record<string, { url: string; mimeType: string | null }> = {}
+      for (const node of assetNodes) {
+        const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+        if (!assetId) continue
+        const asset = await invoke('assets:get', { assetId })
+        if (asset?.url) out[node.id] = { url: asset.url, mimeType: asset.mimeType }
+      }
+      return out
+    }
+  })
+}
+
 /** The title track (§6.12b) — refreshed by event:workflowChanged like the graph. */
 export function useTextLayers(videoId: string): UseQueryResult<TextLayer[]> {
   return useQuery({

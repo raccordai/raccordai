@@ -725,7 +725,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'set_timeline_order',
     description:
-      'Set the timeline order of a video’s clips explicitly (one undo step). Pass ALL clip node ids in the desired sequence — the timeline, the FCPXML export and the MP4 render all follow it (it overrides the label-number ordering).',
+      'Set the timeline order of a video’s clips explicitly (one undo step). Pass ALL clip node ids in the desired sequence — playback, FCPXML and MP4 render follow it. Image/asset node ids may be included: they become STILL slots (5 s default, duration = trim window via set_clip_trim); a still left out of the list is removed from the timeline.',
     inputSchema: obj(
       {
         videoId: str(),
@@ -747,7 +747,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'set_clip_trim',
     description:
-      'Trim a clip on the timeline: in/out points in seconds within its media (null clears a bound). Applies to playback, FCPXML and the MP4 render — the generation itself is untouched, so a trim is always reversible.',
+      'Trim a clip on the timeline: in/out points in seconds within its media (null clears a bound). Applies to playback, FCPXML and the MP4 render — the generation itself is untouched, so a trim is always reversible. Works on audio nodes too, and on a STILL slot the window IS its hold time (e.g. trimEndSec 8 = 8 s on screen).',
     inputSchema: obj(
       {
         nodeId: str(),

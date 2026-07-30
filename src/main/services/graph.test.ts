@@ -597,6 +597,20 @@ describe('timeline editing (order / trim / transition)', () => {
     expect(after.get(b.id)?.timelineOrder).toBeNull()
   })
 
+  it('setTimelineOrder clears the slot of a still left out of the stamped list', () => {
+    const shot = createNode({ videoId, modelId: SEEDANCE })
+    const still = createNode({ videoId, modelId: 'gpt-image-2-text-to-image' })
+    setTimelineOrder(videoId, [shot.id, still.id])
+    expect(listGraph(videoId).nodes.find((n) => n.id === still.id)?.timelineOrder).toBe(1)
+
+    // Restamping without the still removes it from the timeline; the video
+    // clip merely falls back to label-number order and is never cleared.
+    setTimelineOrder(videoId, [shot.id])
+    const byId = new Map(listGraph(videoId).nodes.map((n) => [n.id, n]))
+    expect(byId.get(still.id)?.timelineOrder).toBeNull()
+    expect(byId.get(shot.id)?.timelineOrder).toBe(0)
+  })
+
   it('setTimelineOrder refuses ids from another video', () => {
     const mine = createNode({ videoId, modelId: SEEDANCE })
     const otherVideo = createVideo(projectId, 'Other').id

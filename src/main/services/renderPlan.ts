@@ -92,7 +92,7 @@ export interface SequenceSpec {
 }
 
 export const DEFAULT_SEQUENCE: SequenceSpec = { width: 1920, height: 1080, fps: 24 }
-export const DEFAULT_STILL_SECONDS = 5
+export { DEFAULT_STILL_SECONDS } from '@shared/timeline'
 
 /** "30000/1001" → 29.97; "25/1" → 25; garbage/zero denominators → null. */
 function parseRate(raw: unknown): number | null {
@@ -532,32 +532,52 @@ export function buildLastFrameArgs(inputPath: string, outputPath: string): strin
   ]
 }
 
+/** One audio-lane track: its file plus the node's journaled trim window. */
+export interface MusicTrack {
+  path: string
+  /** Trim window inside the track (already clamped by the shared clipTrim). */
+  trimStartSec?: number
+  trimEndSec?: number
+}
+
 /**
- * Mux the audio lane over the concatenated video: music tracks are chained in
- * timeline order, padded with silence to cover the whole sequence, then mixed
- * with the video's own audio (or used as the only track when the video is
- * silent). Video stream is copied, never re-encoded here.
+ * Mux the audio lane over the concatenated video: music tracks are trimmed to
+ * their window (atrim — the preview player honours the same bounds), chained
+ * in timeline order, padded with silence to cover the whole sequence, then
+ * mixed with the video's own audio (or used as the only track when the video
+ * is silent). Video stream is copied, never re-encoded here.
  */
 export function buildMuxArgs(
   videoPath: string,
-  musicPaths: string[],
+  music: MusicTrack[],
   videoHasAudio: boolean,
   durationSeconds: number,
   outPath: string
 ): string[] {
   const args = ['-y', '-hide_banner', '-nostdin', '-i', videoPath]
-  for (const p of musicPaths) args.push('-i', p)
+  for (const m of music) args.push('-i', m.path)
 
   const chains: string[] = []
-  let music: string
-  if (musicPaths.length > 1) {
-    const inputs = musicPaths.map((_, i) => `[${i + 1}:a]`).join('')
-    chains.push(`${inputs}concat=n=${musicPaths.length}:v=0:a=1[mcat]`)
-    music = '[mcat]'
+  // An untrimmed track feeds the chain directly — the argv stays byte-identical
+  // to the pre-trim builder; a trimmed one goes through its own atrim first
+  // (asetpts rebases timestamps so concat/apad see a stream starting at 0).
+  const labels = music.map((m, i) => {
+    const src = `[${i + 1}:a]`
+    const start = m.trimStartSec ?? 0
+    if (start <= 0 && m.trimEndSec === undefined) return src
+    const parts = [`start=${start}`]
+    if (m.trimEndSec !== undefined) parts.push(`end=${m.trimEndSec}`)
+    chains.push(`${src}atrim=${parts.join(':')},asetpts=PTS-STARTPTS[t${i + 1}]`)
+    return `[t${i + 1}]`
+  })
+  let musicLabel: string
+  if (labels.length > 1) {
+    chains.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[mcat]`)
+    musicLabel = '[mcat]'
   } else {
-    music = '[1:a]'
+    musicLabel = labels[0] ?? '[1:a]'
   }
-  chains.push(`${music}apad[mpad]`)
+  chains.push(`${musicLabel}apad[mpad]`)
   let audioMap = '[mpad]'
   if (videoHasAudio) {
     // duration=first ends the mix with the video's own audio track.

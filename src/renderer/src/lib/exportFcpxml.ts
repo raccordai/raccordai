@@ -1,6 +1,6 @@
 import type { GraphNode } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
-import { clipDuration, clipTrim } from '@shared/timeline'
+import { clipDuration, clipTrim, isStillClip, stillClipSeconds } from '@shared/timeline'
 
 /**
  * FCPXML 1.8 timeline export, bundled with its media into a ZIP.
@@ -219,8 +219,11 @@ export function buildFcpxml(
   let offsetFrames = 0
 
   clips.forEach(({ node, mediaPath, isStill, media }, i) => {
-    // Prefer the real probed media duration; fall back to the node's configured length.
-    const raw = media?.duration ?? clipDuration(node) ?? DEFAULT_CLIP_SECONDS
+    // Prefer the real probed media duration; fall back to the node's configured
+    // length — a user-placed still's length being its trim window.
+    const raw =
+      media?.duration ??
+      (isStillClip(node) ? stillClipSeconds(node) : (clipDuration(node) ?? DEFAULT_CLIP_SECONDS))
     // Timeline trim: the clip plays [start, end] of its media. Stills ignore it
     // (their hold time is the declared clip duration, there is no in-point).
     const trim = isStill ? { start: 0, end: raw } : clipTrim(node, raw)

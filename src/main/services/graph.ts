@@ -227,26 +227,39 @@ export function setSelectedGeneration(nodeId: string, generationId: string | nul
  * one journaled step — a drag stamps the whole sequence so the label-number
  * fallback can never fight the user's order afterwards. Ids must all belong
  * to the video; ids of other videos are refused rather than silently skipped.
+ *
+ * Stills (image/asset nodes) are timeline members ONLY through their explicit
+ * slot, so a still absent from the stamped list is removed from the timeline
+ * (its timelineOrder cleared) — video clips always belong and just fall back
+ * to the label-number order if ever left out.
  */
 export function setTimelineOrder(videoId: string, nodeIds: string[]): void {
   const db = getDb()
-  const owned = new Set(
-    db
-      .select({ id: nodes.id })
-      .from(nodes)
-      .where(eq(nodes.videoId, videoId))
-      .all()
-      .map((n) => n.id)
-  )
+  const rows = db
+    .select({ id: nodes.id, modelId: nodes.modelId, timelineOrder: nodes.timelineOrder })
+    .from(nodes)
+    .where(eq(nodes.videoId, videoId))
+    .all()
+  const owned = new Set(rows.map((n) => n.id))
   for (const id of nodeIds) {
     if (!owned.has(id)) throw new Error(`Node ${id} does not belong to this video.`)
   }
+  const stamped = new Set(nodeIds)
+  const droppedStills = rows.filter(
+    (n) =>
+      n.timelineOrder !== null &&
+      !stamped.has(n.id) &&
+      (n.modelId === 'studio/asset' || getModel(n.modelId)?.kind === 'image')
+  )
   withGraphHistory(videoId, () => {
     db.transaction((tx) => {
       const now = Date.now()
       nodeIds.forEach((id, index) => {
         tx.update(nodes).set({ timelineOrder: index, updatedAt: now }).where(eq(nodes.id, id)).run()
       })
+      for (const { id } of droppedStills) {
+        tx.update(nodes).set({ timelineOrder: null, updatedAt: now }).where(eq(nodes.id, id)).run()
+      }
     })
   })
   touchVideo(videoId)
