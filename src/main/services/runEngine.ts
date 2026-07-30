@@ -15,6 +15,7 @@ import {
 } from '../events'
 import { mediaDirFor, mimeTypeFor } from '../media/files'
 import { GenerationQueue, isRetryableGenerationError, withRetry } from './genQueue'
+import { logError, logInfo, logWarn } from './logger'
 import { clampVariants } from './runPlanner'
 import {
   kieCreateSunoTask,
@@ -107,8 +108,9 @@ function maybeScheduleRetry(generationId: string, errorMessage: string): boolean
   broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
   // The attempt counter is part of the queue-state payload the UI polls.
   broadcastQueueChanged()
-  console.warn(
-    `[run-engine] generation ${generationId} failed ("${errorMessage}") — retry ${attempt}/${MAX_GENERATION_RETRIES} in ${GENERATION_RETRY_DELAY_MS / 1000}s`
+  logWarn(
+    'run-engine',
+    `generation ${generationId} failed ("${errorMessage}") — retry ${attempt}/${MAX_GENERATION_RETRIES} in ${GENERATION_RETRY_DELAY_MS / 1000}s`
   )
 
   setTimeout(() => {
@@ -492,7 +494,7 @@ async function downloadResult(generationId: string): Promise<void> {
  * generation on its remote URL (kie expires results after ~3 days). */
 function downloadResultWithRetry(generationId: string): void {
   withRetry(() => downloadResult(generationId), { attempts: 3, baseDelayMs: 3000 }).catch((err) =>
-    console.error(`[run-engine] media download failed for ${generationId}`, err)
+    logError('run-engine', `media download failed for ${generationId}`, err)
   )
 }
 
@@ -589,7 +591,7 @@ function schedulePoll(generationId: string, attempt: number, delayMs = POLL_INTE
     generationId,
     setTimeout(() => {
       pollGeneration(generationId, attempt).catch((err) =>
-        console.error(`[run-engine] poll crashed for ${generationId}`, err)
+        logError('run-engine', `poll crashed for ${generationId}`, err)
       )
     }, delayMs)
   )
@@ -611,8 +613,14 @@ async function pollGeneration(generationId: string, attempt: number): Promise<vo
   let result: Awaited<ReturnType<typeof checkRemoteStatus>> | undefined
   try {
     result = await checkRemoteStatus(node.modelId, gen.kieTaskId)
-  } catch {
-    result = undefined // transient — reschedule below
+  } catch (err) {
+    // Transient — reschedule below, but leave a trace (a wedged poll used to
+    // be invisible: 40 silent failures then a bare timeout).
+    logWarn(
+      'run-engine',
+      `poll ${attempt}/${MAX_POLL_ATTEMPTS} failed for ${generationId}: ${err instanceof Error ? err.message : err}`
+    )
+    result = undefined
   }
 
   if (result?.state === 'success') {
@@ -661,7 +669,7 @@ export function resumePolling(): void {
       resubmitFromSnapshot(gen)
     }
   }
-  if (rows.length > 0) console.log(`[run-engine] resumed ${rows.length} in-flight generation(s)`)
+  if (rows.length > 0) logInfo('run-engine', `resumed ${rows.length} in-flight generation(s)`)
 
   // Self-heal: successful generations whose download failed are stuck on the
   // remote kie URL, which expires after ~3 days — retry them now, serially.
@@ -672,13 +680,13 @@ export function resumePolling(): void {
     .all()
     .filter((g) => g.resultUrl)
   if (undownloaded.length > 0) {
-    console.log(`[run-engine] backfilling ${undownloaded.length} missing media download(s)`)
+    logInfo('run-engine', `backfilling ${undownloaded.length} missing media download(s)`)
     void (async () => {
       for (const gen of undownloaded) {
         try {
           await downloadResult(gen.id)
         } catch (err) {
-          console.error(`[run-engine] backfill download failed for ${gen.id}`, err)
+          logError('run-engine', `backfill download failed for ${gen.id}`, err)
         }
       }
     })()

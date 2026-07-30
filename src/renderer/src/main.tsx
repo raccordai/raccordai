@@ -1,16 +1,32 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider, createHashHistory, createRouter } from '@tanstack/react-router'
+import { ErrorBoundary, ErrorScreen } from './components/ErrorBoundary'
+import { installGlobalErrorHandlers, reportRendererError } from './lib/errorReporter'
 import { initI18n } from './lib/i18n'
 import { routeTree } from './routeTree.gen'
 import './styles.css'
 
-const queryClient = new QueryClient()
+// Global error funnel: a failed query used to be indistinguishable from an
+// empty state, and a failed mutation without a local try/catch was silent.
+// Both now toast (deduped in Feedback.tsx) and land in main's log file.
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => reportRendererError('query', error)
+  }),
+  mutationCache: new MutationCache({
+    onError: (error) => reportRendererError('mutation', error)
+  })
+})
 
 // Hash history: under file:// the pathname is the bundle's absolute path,
 // which can never match route paths.
-const router = createRouter({ routeTree, history: createHashHistory() })
+const router = createRouter({
+  routeTree,
+  history: createHashHistory(),
+  defaultErrorComponent: ({ error }) => <ErrorScreen error={error} scope="route" />
+})
 
 declare module '@tanstack/react-router' {
   interface Register {
@@ -19,6 +35,7 @@ declare module '@tanstack/react-router' {
 }
 
 async function bootstrap(): Promise<void> {
+  installGlobalErrorHandlers()
   await initI18n()
 
   // Desktop replacement for Convex reactivity: the main process pushes an
@@ -52,9 +69,11 @@ async function bootstrap(): Promise<void> {
 
   createRoot(container).render(
     <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </ErrorBoundary>
     </StrictMode>
   )
 }

@@ -7,6 +7,7 @@ import { broadcastGenerationsChanged } from '../events'
 import { imageBlockFor } from './ai'
 import { kieClaudeMessage, type ClaudeContentBlock } from './kie'
 import { lintNodeById } from './lint'
+import { logError } from './logger'
 import {
   buildQcUserText,
   foldLintIntoVerdict,
@@ -126,7 +127,7 @@ export async function maybeRunQcOnSettle(generationId: string): Promise<QcResult
     if (!node || !isQcEligible(getModel(node.modelId)?.kind)) return null
     return await reviewGeneration(generationId)
   } catch (err) {
-    console.error(`[qc] settle hook failed for ${generationId}`, err)
+    logError('qc', `settle hook failed for ${generationId}`, err)
     return null
   }
 }

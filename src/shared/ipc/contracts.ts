@@ -1079,6 +1079,17 @@ export const ipcContracts = {
     output: z.void()
   },
 
+  // Renderer errors land in the same userData/logs/main.log as main's —
+  // window errors, unhandled rejections and global query/mutation failures.
+  'log:renderer': {
+    input: z.object({
+      level: z.enum(['warn', 'error']),
+      scope: z.string().max(100),
+      message: z.string().max(10_000)
+    }),
+    output: z.void()
+  },
+
   // Auto-update (electron-updater). 'unsupported' = dev build, no feed.
   'update:getState': { input: z.void(), output: updateStateSchema },
   'update:check': { input: z.void(), output: updateStateSchema },

@@ -5,13 +5,14 @@ import { handleMcpRequest } from '../mcp/server'
 import { app as electronApp } from 'electron'
 import { getReleaseChannel } from '../env'
 import { getLocalApiPort, getLocalApiToken } from '../services/settings'
+import { logInfo } from '../services/logger'
 
 /**
  * Local HTTP API (Hono), bound to loopback only.
  * Port and auth token are persisted settings so external clients (MCP config,
  * CLI tools) can rely on a stable address across launches.
- * This is the mounting point for the future MCP server (Streamable HTTP
- * transport under /mcp) and any external tooling integration.
+ * The MCP server (Streamable HTTP transport) is mounted under /mcp below,
+ * alongside any external tooling integration.
  */
 
 let server: ServerType | null = null
@@ -62,7 +63,7 @@ export function startLocalApi(): Promise<number> {
       (info) => {
         server = instance
         port = info.port
-        console.log(`[local-api] listening on 127.0.0.1:${info.port}`)
+        logInfo('local-api', `listening on 127.0.0.1:${info.port}`)
         resolve(info.port)
       }
     )

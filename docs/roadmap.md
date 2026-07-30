@@ -56,14 +56,21 @@ Rules and how to add a spec: `e2e/README.md`.
 
 Shipped: the arm64-native ffprobe (`@ffprobe-installer/ffprobe` replaced
 `ffprobe-static`, whose darwin/arm64 binary was actually x86_64 and broke the
-MP4 render on Apple Silicon without Rosetta 2) and disk cleanup on delete
+MP4 render on Apple Silicon without Rosetta 2); disk cleanup on delete
 (`deleteProject` removes the project's media directory; `deleteVideo` and the
 undo/checkpoint diff-restore delete the media files of the generations their
-cascade removes).
+cascade removes); and the reliability layer — a rotating file log
+(`userData/logs/main.log`, `services/logger.ts`) fed by main's services,
+`uncaughtException`/`unhandledRejection` handlers, and a renderer error funnel
+(`lib/errorReporter.ts`: ErrorBoundary + route error screen, global
+query/mutation `onError`, window error/unhandledrejection, deduped error
+toasts, everything mirrored to the log via `log:renderer`). Silent failure is
+no longer the renderer's default, and a packaged-build bug report can now
+attach a log file.
 
-| Proposal                                                  | Effort | Why                                                      |
-| --------------------------------------------------------- | ------ | -------------------------------------------------------- |
-| Opt-in crash telemetry (Sentry or self-hosted equivalent) | M      | Without crash reports, open-source support will be blind |
+| Proposal                                                  | Effort | Why                                                                                                             |
+| --------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------- |
+| Opt-in crash telemetry (Sentry or self-hosted equivalent) | M      | The log file covers the local case; without aggregated crash reports, patterns across installs remain invisible |
 
 ## 4. Product — smaller items
 
@@ -74,15 +81,15 @@ user-visible string gets an i18next key in fr **and** en; graph mutations go
 through the graph service (`withGraphHistory`); colors through the
 `styles.css` tokens.
 
-| Proposal                                                                           | Effort  | Why                                                                                                                          |
-| ---------------------------------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Grow the model catalogue (Veo, Kling variants, Flux…)                              | S/model | The registry makes adding nearly declarative: one file + one entry in `MODELS`, invariant tests come for free                |
-| Move the remaining hardcoded strings of `NodeParamsPanel` + `ModelNode` to i18next | S       | Node action tooltips, "No output yet", the promote-asset form are hardcoded English — the canvas is only partially localized |
-| More i18n locales (es, de, ja) through community contributions                     | S       | The i18n infra + parity test makes contributing a locale trivial and safe                                                    |
-| Verify the per-model credit rates against the kie.ai dashboard                     | S       | `estimateCredits` ships with indicative rates flagged in each model file — align them with real billing                      |
-| Per-project soft budget (`creditWarnThreshold`) in the cost modal                  | S       | Warn when `projectCreditsUsage + planned` exceeds a per-project threshold                                                    |
-| Move `autoLayout.ts` (pure) to `src/shared/` and expose a `tidy_workflow` tool     | S       | Optional leftover from the tool-registry unification — the assistant/MCP can't tidy the canvas yet                           |
-| Click-to-focus affordance on node ids in assistant replies                         | S       | Optional transcript polish left out of the sidebar work — `focus_node`/`event:focusNode` already exist                       |
+| Proposal                                                                           | Effort  | Why                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Grow the model catalogue (Veo, Kling variants, Flux…)                              | S/model | The registry makes adding nearly declarative: one file + one entry in `MODELS`, invariant tests come for free                                                                                                            |
+| Move the remaining hardcoded strings of `NodeParamsPanel` + `ModelNode` to i18next | S       | Node action tooltips, "No output yet", the promote-asset form are hardcoded English — the canvas is only partially localized                                                                                             |
+| More i18n locales (es, de, ja) through community contributions                     | S       | The i18n infra + parity test makes contributing a locale trivial and safe                                                                                                                                                |
+| Verify the per-model credit rates against the kie.ai dashboard                     | S       | Video models are done (Seedance 2 family, then Kling 3.0 + Grok Imagine from the dashboard, with `draftEquivalent` on Grok — draft mode now covers the whole video catalogue); the image/Suno rates are still indicative |
+| Per-project soft budget (`creditWarnThreshold`) in the cost modal                  | S       | Warn when `projectCreditsUsage + planned` exceeds a per-project threshold                                                                                                                                                |
+| Move `autoLayout.ts` (pure) to `src/shared/` and expose a `tidy_workflow` tool     | S       | Optional leftover from the tool-registry unification — the assistant/MCP can't tidy the canvas yet                                                                                                                       |
+| Click-to-focus affordance on node ids in assistant replies                         | S       | Optional transcript polish left out of the sidebar work — `focus_node`/`event:focusNode` already exist                                                                                                                   |
 
 Cleanup (fold into whichever item touches the file first): undo/redo stacks
 (`graphHistory.ts`, in-memory, cap 100) and retry budgets reset silently on

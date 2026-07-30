@@ -3,6 +3,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -10,6 +11,7 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@renderer/components/ui/Button'
+import { createDeduper, setErrorToastListener } from '@renderer/lib/errorReporter'
 
 /**
  * App-wide replacement for native alert()/confirm() (§4.4): a toast stack for
@@ -32,6 +34,13 @@ const TOAST_TTL_MS: Record<ToastKind, number> = {
   warning: 8000,
   error: 0
 }
+
+/**
+ * The same failure often surfaces through several paths at once (a local
+ * try/catch AND the global mutation onError) — identical error messages
+ * within the window collapse to one toast.
+ */
+const errorToastAllowed = createDeduper(5000)
 
 export interface ConfirmOptions {
   title?: string
@@ -93,6 +102,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback(
     (kind: ToastKind, message: string) => {
+      if (kind === 'error' && !errorToastAllowed(message, Date.now())) return
       const id = nextId.current++
       setToasts((prev) => [...prev, { id, kind, message }])
       const ttl = TOAST_TTL_MS[kind]
@@ -100,6 +110,12 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     },
     [dismissToast]
   )
+
+  // The global error funnel (errorReporter.ts) toasts through this provider.
+  useEffect(() => {
+    setErrorToastListener((message) => toast('error', message))
+    return () => setErrorToastListener(null)
+  }, [toast])
 
   const confirm = useCallback(
     (options: ConfirmOptions) =>

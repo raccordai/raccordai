@@ -21,6 +21,7 @@ import * as graph from '../services/graph'
 import * as library from '../services/library'
 import * as projects from '../services/projects'
 import { kieGetCredits, kieTestApiKey } from '../services/kie'
+import { getLogger, logWarn } from '../services/logger'
 import * as notificationsService from '../services/notifications'
 import * as qcService from '../services/qc'
 import * as recipesService from '../services/recipes'
@@ -123,8 +124,9 @@ export function registerIpcHandlers(): void {
     for (const p of paths) {
       try {
         imported.push(withAssetUrl(assetsService.importAssetFromFile(projectId, p)))
-      } catch {
+      } catch (err) {
         // Unsupported file type — the renderer reports the skipped count.
+        logWarn('assets', `import skipped for ${p}: ${err instanceof Error ? err.message : err}`)
       }
     }
     return imported
@@ -311,6 +313,9 @@ export function registerIpcHandlers(): void {
     updaterService.applyUpdateChannel()
   })
 
+  handle('log:renderer', ({ level, scope, message }) =>
+    getLogger()[level](`renderer:${scope}`, message)
+  )
   handle('update:getState', () => updaterService.getUpdateState())
   handle('update:check', () => updaterService.checkForUpdates())
   handle('update:install', () => updaterService.installUpdate())

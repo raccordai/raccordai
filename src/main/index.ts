@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { BrowserWindow, app, dialog, safeStorage, shell } from 'electron'
 import { openDatabase } from './db/client'
+import { logError } from './services/logger'
 import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocolHandler, registerMediaProtocolPrivileges } from './media/protocol'
 import { startLocalApi } from './server'
@@ -17,6 +18,18 @@ import { initUpdater } from './services/updater'
 
 // Must run before app ready.
 registerMediaProtocolPrivileges()
+
+// Last-resort crash log (userData/logs/main.log): in a packaged build the
+// console does not exist, so without this an open-source bug report is
+// "the app stopped working" with nothing to attach. Log and keep running —
+// the poller, queue and windows are still consistent, and taking the app
+// down would also take the user's in-flight generations with it.
+process.on('uncaughtException', (err) => {
+  logError('process', 'uncaughtException', err)
+})
+process.on('unhandledRejection', (reason) => {
+  logError('process', 'unhandledRejection', reason)
+})
 
 // A headless Linux box (the E2E CI job) has no keyring, so safeStorage finds no
 // OS password manager, refuses to encrypt, and the app cannot store an API key
@@ -111,7 +124,7 @@ if (!app.requestSingleInstanceLock()) {
         await startLocalApi()
       } catch (error) {
         // The app is fully usable without the local API; log and move on.
-        console.error('[local-api] failed to start', error)
+        logError('local-api', 'failed to start', error)
       }
 
       createWindow()
@@ -121,7 +134,7 @@ if (!app.requestSingleInstanceLock()) {
       })
     })
     .catch((error: unknown) => {
-      console.error('Fatal error during startup', error)
+      logError('startup', 'fatal error during startup', error)
       app.exit(1)
     })
 

@@ -4,6 +4,7 @@ import { app } from 'electron'
 import electronUpdater from 'electron-updater'
 import type { UpdateState } from '@shared/ipc/contracts'
 import { getUpdateChannel } from './settings'
+import { logWarn } from './logger'
 
 const { autoUpdater } = electronUpdater
 
@@ -53,7 +54,7 @@ export function initUpdater(): void {
   )
   autoUpdater.on('error', (err) => {
     // Offline or feed unreachable is a normal desktop situation — log, don't crash.
-    console.warn('[updater]', err.message)
+    logWarn('updater', err.message)
     set({ status: 'error', error: err.message })
   })
 

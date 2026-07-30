@@ -4,6 +4,7 @@ import { onGenerationSettled } from '../bus'
 import * as generations from './generations'
 import * as graph from './graph'
 import { lintNodeById } from './lint'
+import { logError } from './logger'
 import { notifyBatchSummary } from './notifications'
 import { planRun, type PlanEntry } from './runPlanner'
 import { runNode } from './runEngine'
@@ -185,7 +186,7 @@ export function startBatch(args: {
       args.targetNodeIds.map((id) =>
         runWithDeps(id).catch((err) => {
           failed++
-          console.error('[runBatch]', err instanceof Error ? err.message : String(err))
+          logError('runBatch', `run failed for node ${id}`, err)
         })
       )
     )

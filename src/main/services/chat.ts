@@ -23,6 +23,7 @@ import {
   stripImageBlocks
 } from './chatCompaction'
 import { formatAppContext } from './chatContext'
+import { logError } from './logger'
 import { cacheableMessages, cacheableSystem, cacheableTools } from './chatCache'
 import {
   SseParser,
@@ -1285,7 +1286,7 @@ async function maybeCompactHistory(
     persistSession(sessionKey, session)
   } catch (err) {
     // Uncompacted is degraded, not broken — keep the turn going.
-    console.error('[chat] history compaction failed:', err)
+    logError('chat', 'history compaction failed', err)
   }
 }
 

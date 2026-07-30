@@ -106,6 +106,11 @@
     "menuProjects": "Projets",
     "menuReferences": "Références & médias"
   },
+  "errors": {
+    "title": "Quelque chose s'est cassé",
+    "description": "Une erreur inattendue a interrompu l'affichage. Elle a été enregistrée dans le journal de l'application ; recharger remet l'interface dans un état cohérent sans toucher à tes données.",
+    "reload": "Recharger l'application"
+  },
   "timeline": {
     "title": "Timeline",
     "show": "Afficher la timeline",
