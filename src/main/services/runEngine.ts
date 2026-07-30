@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
@@ -13,9 +14,11 @@ import {
   broadcastGenerationsChanged,
   broadcastQueueChanged
 } from '../events'
+import { ffmpegPath } from '../media/ffbin'
 import { mediaDirFor, mimeTypeFor } from '../media/files'
 import { GenerationQueue, isRetryableGenerationError, withRetry } from './genQueue'
 import { logError, logInfo, logWarn } from './logger'
+import { buildLastFrameArgs } from './renderPlan'
 import { clampVariants } from './runPlanner'
 import {
   kieCreateSunoTask,
@@ -178,15 +181,16 @@ async function publicUrlForAsset(assetId: string): Promise<string | null> {
   return url
 }
 
-/** How long a run waits for the renderer's last-frame extraction to land. */
+/** How long a run waits for the last-frame extraction to land. */
 const LAST_FRAME_WAIT_MS = 45_000
 const LAST_FRAME_POLL_MS = 500
 
 /**
- * The last frame is extracted by the renderer (browser-side video decode)
- * shortly AFTER the upstream generation succeeds — a downstream run launched
- * right away (chained runs, eager user) races it. Poll the row instead of
- * failing the run outright.
+ * The last frame is extracted in main (ffmpeg, right after the result
+ * downloads) — a downstream run launched right away (chained runs, eager
+ * user) races the download+extraction. Poll the row instead of failing the
+ * run outright. The renderer's canvas extractor still backfills rows that
+ * predate main-side extraction.
  */
 async function waitForLastFramePath(generationId: string): Promise<string | null> {
   const deadline = Date.now() + LAST_FRAME_WAIT_MS
@@ -332,7 +336,7 @@ async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Prom
     if (!url) {
       const hint =
         edge.sourceHandle === 'lastFrame'
-          ? ` (the last frame could not be extracted — keep this video's editor open so extraction can run, then retry)`
+          ? ` (the last frame could not be extracted from the upstream clip — wait for its media to finish downloading, then retry)`
           : ` — run or select an output on the upstream node first.`
       throw new Error(
         `Input "${edge.targetHandle}" has no resolvable source from "${source.label ?? source.key}.${edge.sourceHandle}"${hint}`
@@ -485,6 +489,60 @@ async function downloadResult(generationId: string): Promise<void> {
   const mediaMime = /^(video|audio|image)\//.test(headerMime) ? headerMime : mimeTypeFor(target)
   db.update(generations)
     .set({ resultPath: target, resultMimeType: mediaMime })
+    .where(eq(generations.id, generationId))
+    .run()
+  broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
+  // The last frame feeds downstream `lastFrame` edges — extracted here in
+  // main (bundled ffmpeg) so a headless MCP run never depends on an open
+  // editor window. Fire-and-forget: a failure only degrades chained runs.
+  if (kind === 'video') {
+    extractLastFrameFromResult(generationId).catch((err) =>
+      logWarn(
+        'run-engine',
+        `last-frame extraction failed for ${generationId}: ${err instanceof Error ? err.message : err}`
+      )
+    )
+  }
+}
+
+const LAST_FRAME_EXTRACT_TIMEOUT_MS = 30_000
+
+/**
+ * ffmpeg last-frame extraction into the managed store. Idempotent against the
+ * renderer's canvas extractor (kept as a backfill for pre-existing rows): the
+ * first writer wins, the row is re-checked before the update.
+ */
+async function extractLastFrameFromResult(generationId: string): Promise<void> {
+  const db = getDb()
+  const gen = db.select().from(generations).where(eq(generations.id, generationId)).get()
+  if (!gen?.resultPath || gen.lastFramePath) return
+  const video = db.select().from(videos).where(eq(videos.id, gen.videoId)).get()
+  if (!video) return
+  const target = join(mediaDirFor(video.projectId), `frame-${gen.id}.jpg`)
+  const resultPath = gen.resultPath
+
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(ffmpegPath(), buildLastFrameArgs(resultPath, target), {
+      stdio: ['ignore', 'ignore', 'pipe']
+    })
+    let stderr = ''
+    proc.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
+    const timer = setTimeout(() => proc.kill('SIGKILL'), LAST_FRAME_EXTRACT_TIMEOUT_MS)
+    proc.on('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
+    proc.on('close', (code) => {
+      clearTimeout(timer)
+      if (code === 0) resolve()
+      else reject(new Error(stderr.trim().split('\n').at(-1) ?? `ffmpeg exited with ${code}`))
+    })
+  })
+
+  const fresh = db.select().from(generations).where(eq(generations.id, generationId)).get()
+  if (!fresh || fresh.lastFramePath) return
+  db.update(generations)
+    .set({ lastFramePath: target })
     .where(eq(generations.id, generationId))
     .run()
   broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
@@ -882,7 +940,11 @@ export function cancelGeneration(nodeId: string): { cancelled: boolean } {
   return { cancelled: inFlight.length > 0 }
 }
 
-/** Attach the client-extracted last frame (JPEG) to a generation. */
+/**
+ * Attach the client-extracted last frame (JPEG) to a generation. Since the
+ * ffmpeg extraction moved into main this is a BACKFILL path only (rows that
+ * predate it); the lastFramePath guard makes the two writers race-safe.
+ */
 export function setLastFrame(generationId: string, jpegBase64: string): void {
   const db = getDb()
   const gen = db.select().from(generations).where(eq(generations.id, generationId)).get()

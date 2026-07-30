@@ -98,17 +98,32 @@ or persist if it ever bites.
 
 ## 5. Ecosystem & differentiation
 
-| Proposal                                                                                                                             | Effort | Why                                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------- |
-| **Position the MCP server as the product's public API**: dedicated docs, client examples (Claude Code, scripts), registry versioning | M      | This is the differentiator: Raccord drivable by any agent. The registry exists, the showcase is missing                 |
-| Community "model packs" (dynamically loaded model definitions, with a validation sandbox)                                            | L      | Turns the registry into a community extension point — kie.ai's model release pace exceeds what one maintainer can track |
-| "Headless" mode: the Hono server + generation engine without a window, drivable via MCP/HTTP                                         | L      | Opens batch/server use cases (personal render farm) reusing `src/main/services/` as-is                                  |
-| Docs site (VitePress) generated from `docs/` + model docs generated from the registry                                                | M      | The model docs already exist in-band for LLMs (`mcp/docs.ts`) — publish them for humans too                             |
+Shipped: the MCP surface no longer has write-only gaps — an agent can now
+undo any wiring it does (`disconnect_edge`, `reorder_edges` — the order IS
+the @Image1/@Image2 semantics), move nodes (`update_node_position`), swap a
+model in place (`replace_node_model`, destructive: generations don't survive
+a model change), toggle vision QC (`set_qc_enabled`), manage checkpoints and
+notes end-to-end (`delete_checkpoint`, `add_annotation`, `delete_annotation`),
+check what a deletion breaks (`asset_references`), see the queue
+(`queue_state`) and per-project spend (`project_credits_usage`), and drive the
+render fully (`render_video` with fps/resolution, `cancel_render`). The
+last-frame extraction also moved into main (bundled ffmpeg, right after the
+result downloads), so `lastFrame` edges resolve without any window — the one
+hard blocker headless had; the renderer's canvas extractor remains as a
+backfill for pre-existing rows.
+
+| Proposal                                                                                                                             | Effort | Why                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Position the MCP server as the product's public API**: dedicated docs, client examples (Claude Code, scripts), registry versioning | M      | This is the differentiator: Raccord drivable by any agent. The registry exists, the showcase is missing                                         |
+| Community "model packs" (dynamically loaded model definitions, with a validation sandbox)                                            | L      | Turns the registry into a community extension point — kie.ai's model release pace exceeds what one maintainer can track                         |
+| "Headless" mode: the Hono server + generation engine without a window, drivable via MCP/HTTP                                         | L      | Opens batch/server use cases (personal render farm) reusing `src/main/services/` as-is — the window-bound last-frame dependency is already gone |
+| Docs site (VitePress) generated from `docs/` + model docs generated from the registry                                                | M      | The model docs already exist in-band for LLMs (`mcp/docs.ts`) — publish them for humans too                                                     |
 
 Note: the "agent-drivable render pipeline" pitch is complete end-to-end — the
 MCP `render_video` tool closes the loop (brief → graph → generations → MP4
-file) for any MCP client; headless mode would remove the last constraint (a
-running window).
+file) for any MCP client, including chained shots (`lastFrame` extraction no
+longer needs an open editor window); headless mode would remove the last
+constraint (a running window for the app shell itself).
 
 ## 6. The iteration loop — "Cursor of AI video" track
 

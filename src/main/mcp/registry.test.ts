@@ -55,10 +55,16 @@ describe('AGENT_TOOLS registry', () => {
   it('declares the expected destructive set', () => {
     const destructive = AGENT_TOOLS.filter((t) => t.risk === 'destructive').map((t) => t.name)
     expect(destructive.sort()).toEqual([
+      // A user note is unrecoverable once deleted.
+      'delete_annotation',
       'delete_asset',
+      // The captured state can never be restored again.
+      'delete_checkpoint',
       'delete_project',
       'delete_video',
       'remove_node',
+      // A model swap deletes the node's generations (a new model can't reuse them).
+      'replace_node_model',
       // §6.4 — a restore deletes every node created since the capture.
       'restore_checkpoint'
     ])

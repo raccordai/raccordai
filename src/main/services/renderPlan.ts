@@ -223,6 +223,31 @@ export function buildConcatArgs(listPath: string, outPath: string): string[] {
 }
 
 /**
+ * Last visible frame of a clip as a JPEG — the main-side replacement for the
+ * renderer's canvas extraction (which needed an open editor window, the one
+ * thing a headless MCP run doesn't have). `-sseof -0.1` seeks from the end;
+ * `-update 1` writes a single image.
+ */
+export function buildLastFrameArgs(inputPath: string, outputPath: string): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-sseof',
+    '-0.1',
+    '-i',
+    inputPath,
+    '-frames:v',
+    '1',
+    '-update',
+    '1',
+    '-q:v',
+    '2',
+    outputPath
+  ]
+}
+
+/**
  * Mux the audio lane over the concatenated video: music tracks are chained in
  * timeline order, padded with silence to cover the whole sequence, then mixed
  * with the video's own audio (or used as the only track when the video is

@@ -102,7 +102,7 @@ Conventions:
     always set an AI-facing "description" so future agents know what the media depicts.
   - The user sees the graph update live in the app while you work.
 
-Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "scenario", "casting", "continuity", "styles", "designs", "shots", "templates", "template:<id>".`
+Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "doctrine", "scenario", "casting", "continuity", "styles", "designs", "shots", "templates", "template:<id>".`
 
 const WORKFLOW_JSON = `Workflow JSON (version 1) — the bulk import/export format (import_workflow / export_workflow):
 {

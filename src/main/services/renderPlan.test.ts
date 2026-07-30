@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildConcatArgs,
   buildConcatListContent,
+  buildLastFrameArgs,
   buildMuxArgs,
   buildNormalizeArgs,
   canConcatLosslessly,
@@ -220,6 +221,17 @@ describe('concat helpers', () => {
     const joined = args.join(' ')
     expect(joined).toContain('-f concat -safe 0 -i /tmp/list.txt -c copy')
     expect(args.at(-1)).toBe('/tmp/out.mp4')
+  })
+})
+
+describe('buildLastFrameArgs', () => {
+  it('seeks from the end and writes exactly one image', () => {
+    const args = buildLastFrameArgs('/tmp/gen-1.mp4', '/tmp/frame-1.jpg')
+    const joined = args.join(' ')
+    expect(joined).toContain('-sseof -0.1 -i /tmp/gen-1.mp4')
+    expect(joined).toContain('-frames:v 1')
+    expect(joined).toContain('-update 1')
+    expect(args.at(-1)).toBe('/tmp/frame-1.jpg')
   })
 })
 

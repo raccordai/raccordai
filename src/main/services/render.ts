@@ -3,10 +3,7 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { app } from 'electron'
-import ffmpegStatic from 'ffmpeg-static'
-// NOT ffprobe-static: its darwin/arm64 binary is actually x86_64, which kills
-// the probe step (and the whole MP4 render) on Apple Silicon without Rosetta.
-import ffprobeInstaller from '@ffprobe-installer/ffprobe'
+import { ffmpegPath, ffprobePath } from '../media/ffbin'
 import type { GraphNode } from '@shared/ipc/contracts'
 import {
   bestGeneration,
@@ -86,18 +83,6 @@ export function defaultOutputPath(videoId: string): string {
   let candidate = join(dir, `${base}.mp4`)
   for (let i = 2; existsSync(candidate); i++) candidate = join(dir, `${base}-${i}.mp4`)
   return candidate
-}
-
-// In the packaged app the binaries live outside the asar (asarUnpack).
-const unpacked = (p: string) => p.replace('app.asar', 'app.asar.unpacked')
-
-function ffmpegPath(): string {
-  if (!ffmpegStatic) throw new Error('ffmpeg binary not bundled for this platform')
-  return unpacked(ffmpegStatic)
-}
-
-function ffprobePath(): string {
-  return unpacked(ffprobeInstaller.path)
 }
 
 function run(

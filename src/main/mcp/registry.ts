@@ -8,7 +8,12 @@ import * as assets from '../services/assets'
 import * as generations from '../services/generations'
 import * as graph from '../services/graph'
 import * as graphHistory from '../services/graphHistory'
-import { createEditNodeFromAnnotations, listAnnotations } from '../services/annotations'
+import {
+  addAnnotation,
+  createEditNodeFromAnnotations,
+  deleteAnnotation,
+  listAnnotations
+} from '../services/annotations'
 import { linkShots } from '../services/continuity'
 import {
   castRole,
@@ -20,6 +25,7 @@ import {
 } from '../services/casting'
 import {
   createCheckpoint,
+  deleteCheckpoint,
   diffAgainstCurrent,
   listCheckpoints,
   restoreCheckpoint
@@ -31,7 +37,7 @@ import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
 import * as renderService from '../services/render'
 import { finalizeVideo, planFinalize, startBatch, videoNodeTargets } from '../services/runBatch'
-import { cancelGeneration, refreshStatus, runNode } from '../services/runEngine'
+import { cancelGeneration, queueState, refreshStatus, runNode } from '../services/runEngine'
 import { clampVariants } from '../services/runPlanner'
 import { reviewGeneration } from '../services/qc'
 import * as videos from '../services/videos'
@@ -174,6 +180,14 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'read',
     execute: async () => ({ credits: await kieGetCredits() })
+  },
+  {
+    name: 'project_credits_usage',
+    description: 'Estimated kie.ai credits already spent by a project’s generations.',
+    inputSchema: obj({ projectId: str() }, ['projectId']),
+    scope: 'project',
+    risk: 'read',
+    execute: ({ projectId }) => generations.projectCreditsUsage(String(projectId))
   },
 
   // ── Projects & videos ──────────────────────────────────────────────────────
@@ -351,6 +365,18 @@ export const AGENT_TOOLS: AgentTool[] = [
     risk: 'write',
     execute: ({ videoId, enabled }) => {
       videos.setDraftMode(String(videoId), Boolean(enabled))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_qc_enabled',
+    description:
+      'Toggle a video’s vision QC: while on, every successful image generation gets one cheap automated review (verdict in get_generations and in the settle wake-up).',
+    inputSchema: obj({ videoId: str(), enabled: { type: 'boolean' } }, ['videoId', 'enabled']),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, enabled }) => {
+      videos.setQcEnabled(String(videoId), Boolean(enabled))
       return { ok: true }
     }
   },
@@ -663,6 +689,40 @@ export const AGENT_TOOLS: AgentTool[] = [
     }
   },
   {
+    name: 'update_node_position',
+    description:
+      'Move a node on the canvas (left-to-right flow, x: 0, 420, 840…, y spaced ~350). get_workflow returns the current positions.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        position: obj({ x: { type: 'number' }, y: { type: 'number' } }, ['x', 'y'])
+      },
+      ['nodeId', 'position']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, position }) => {
+      const p = position as { x?: unknown; y?: unknown }
+      graph.updateNodePosition(String(nodeId), { x: Number(p?.x ?? 0), y: Number(p?.y ?? 0) })
+      return { ok: true }
+    }
+  },
+  {
+    name: 'replace_node_model',
+    description:
+      'Swap a node’s model in place (e.g. Grok → Seedance): compatible params are kept, edges re-land on matching handles — but the node’s GENERATIONS are deleted (a new model can’t reuse them). Destructive.',
+    inputSchema: obj({ nodeId: str(), modelId: str('The new model id (list_models)') }, [
+      'nodeId',
+      'modelId'
+    ]),
+    scope: 'global',
+    risk: 'destructive',
+    execute: ({ nodeId, modelId }) => {
+      graph.replaceNodeModel(String(nodeId), String(modelId))
+      return { ok: true }
+    }
+  },
+  {
     name: 'connect_nodes',
     description:
       'Wire a source node output into a target node input. "input" must be a valid input field of the target model (docs "model:<id>").',
@@ -686,6 +746,47 @@ export const AGENT_TOOLS: AgentTool[] = [
         targetNodeId: String(targetNodeId),
         targetHandle: String(input)
       })
+  },
+  {
+    name: 'disconnect_edge',
+    description:
+      'Remove ONE connection by its edge id (get_workflow lists them) — the nodes on both sides stay. Undoable.',
+    inputSchema: obj({ edgeId: str('Edge id from get_workflow') }, ['edgeId']),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ edgeId }) => {
+      graph.disconnectEdge(String(edgeId))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'reorder_edges',
+    description:
+      'Reorder the connections of ONE input handle — the order is semantic (@Image1/@Image2 numbering, Seedance 1.5 first/last frame). Pass every edge of that handle in the desired order.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        targetNodeId: str(),
+        input: str('The input handle whose connections to reorder'),
+        edgeIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'ALL edge ids currently on that handle, in the desired order.'
+        }
+      },
+      ['videoId', 'targetNodeId', 'input', 'edgeIds']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, targetNodeId, input, edgeIds }) => {
+      graph.reorderEdges({
+        videoId: String(videoId),
+        targetNodeId: String(targetNodeId),
+        targetHandle: String(input),
+        edgeIds: (Array.isArray(edgeIds) ? edgeIds : []).map(String)
+      })
+      return { ok: true }
+    }
   },
   {
     name: 'link_shots',
@@ -885,6 +986,18 @@ export const AGENT_TOOLS: AgentTool[] = [
     risk: 'destructive',
     execute: ({ checkpointId }) => restoreCheckpoint(String(checkpointId))
   },
+  {
+    name: 'delete_checkpoint',
+    description:
+      'Delete a checkpoint. The graph is untouched, but the captured state can never be restored again. Destructive.',
+    inputSchema: obj({ checkpointId: str() }, ['checkpointId']),
+    scope: 'global',
+    risk: 'destructive',
+    execute: ({ checkpointId }) => {
+      deleteCheckpoint(String(checkpointId))
+      return { ok: true }
+    }
+  },
 
   // ── §6.3 regional feedback ────────────────────────────────────────────────
   {
@@ -904,6 +1017,49 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'write',
     execute: ({ generationId }) => createEditNodeFromAnnotations(String(generationId))
+  },
+  {
+    name: 'add_annotation',
+    description:
+      'Leave a note on a generation: a normalized region of the frame (image) or a timecode in seconds (clip), plus the comment. Shows up in the app’s feedback layer like a user note.',
+    inputSchema: obj(
+      {
+        generationId: str(),
+        comment: str('What is wrong (or right) there'),
+        region: obj(
+          {
+            x: { type: 'number', description: '0–1, left edge' },
+            y: { type: 'number', description: '0–1, top edge' },
+            w: { type: 'number', description: '0–1' },
+            h: { type: 'number', description: '0–1' }
+          },
+          ['x', 'y', 'w', 'h']
+        ),
+        timecodeSec: { type: 'number', description: 'Clip outputs: the moment the note is about' }
+      },
+      ['generationId', 'comment']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ generationId, comment, region, timecodeSec }) =>
+      addAnnotation({
+        generationId: String(generationId),
+        comment: String(comment),
+        region: region ? (region as { x: number; y: number; w: number; h: number }) : null,
+        timecodeSec: timecodeSec === undefined ? null : Number(timecodeSec)
+      })
+  },
+  {
+    name: 'delete_annotation',
+    description:
+      'Delete one note from a generation (get_annotations lists their ids). Destructive.',
+    inputSchema: obj({ annotationId: str() }, ['annotationId']),
+    scope: 'global',
+    risk: 'destructive',
+    execute: ({ annotationId }) => {
+      deleteAnnotation(String(annotationId))
+      return { ok: true }
+    }
   },
   {
     name: 'lint_node',
@@ -1075,25 +1231,56 @@ export const AGENT_TOOLS: AgentTool[] = [
     execute: ({ nodeId }) => refreshStatus(String(nodeId))
   },
   {
+    name: 'queue_state',
+    description:
+      'The generation queue right now: running and queued generation ids, the concurrency limit, and per-generation smart-retry counts. Not a completion signal — the settle wake-up is.',
+    inputSchema: obj({}),
+    scope: 'global',
+    risk: 'read',
+    execute: () => queueState()
+  },
+  {
     name: 'render_video',
     description:
-      'Render a video’s timeline into a single MP4 file (local ffmpeg, no credits): clips concatenated in shot order, music lane muxed over. Synchronous — returns the output path.',
+      'Render a video’s timeline into a single MP4 file (local ffmpeg, no credits): clips concatenated in shot order, music lane muxed over. Synchronous — returns the output path. Optional fps/resolution override the first clip’s probed spec.',
     inputSchema: obj(
-      { videoId: str(), outputPath: str('Absolute .mp4 destination (default: Downloads folder)') },
+      {
+        videoId: str(),
+        outputPath: str('Absolute .mp4 destination (default: Downloads folder)'),
+        fps: { type: 'number', description: 'Output frame rate (default: probed)' },
+        resolution: obj(
+          {
+            width: { type: 'number' },
+            height: { type: 'number' }
+          },
+          ['width', 'height']
+        )
+      },
       ['videoId']
     ),
     scope: 'video',
     risk: 'write',
-    execute: async ({ videoId, outputPath }) => {
+    execute: async ({ videoId, outputPath, fps, resolution }) => {
       const target = outputPath
         ? String(outputPath)
         : renderService.defaultOutputPath(String(videoId))
+      const res = resolution as { width?: unknown; height?: unknown } | undefined
       const { durationSeconds, skipped } = await renderService.renderVideo({
         videoId: String(videoId),
-        outputPath: target
+        outputPath: target,
+        ...(fps !== undefined ? { fps: Number(fps) } : {}),
+        ...(res ? { resolution: { width: Number(res.width), height: Number(res.height) } } : {})
       })
       return { path: target, durationSeconds, skipped }
     }
+  },
+  {
+    name: 'cancel_render',
+    description: 'Cancel a video’s in-flight MP4 render. Returns whether one was running.',
+    inputSchema: obj({ videoId: str() }, ['videoId']),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId }) => ({ cancelled: renderService.cancelRender(String(videoId)) })
   },
 
   // ── Assets (project-wide media library) ────────────────────────────────────
@@ -1208,9 +1395,18 @@ export const AGENT_TOOLS: AgentTool[] = [
     }
   },
   {
+    name: 'asset_references',
+    description:
+      'Which videos use an asset (via studio/asset nodes). Check this BEFORE delete_asset — deleting a referenced asset breaks those workflows.',
+    inputSchema: obj({ assetId: str() }, ['assetId']),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ assetId }) => assets.assetReferences(String(assetId))
+  },
+  {
     name: 'delete_asset',
     description:
-      'Delete an asset from the project library (studio/asset nodes referencing it lose their media). Destructive.',
+      'Delete an asset from the project library (studio/asset nodes referencing it lose their media). Destructive — run asset_references first.',
     inputSchema: obj({ assetId: str() }, ['assetId']),
     scope: 'global',
     risk: 'destructive',
