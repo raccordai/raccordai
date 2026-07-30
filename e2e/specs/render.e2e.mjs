@@ -158,6 +158,62 @@ await spec('render', async () => {
   const duringSilentClip = meanVolume(outputPath, FIXTURES.clipA.seconds + 2, 4)
   check(duringSilentClip > -60, `the music plays over the silent clip (${duringSilentClip} dB)`)
 
+  step('timeline editing: explicit order + trim + crossfade change the render')
+  // Put B first, trim half a second off both of its ends, crossfade into A.
+  await invoke('nodes:setTimelineOrder', { videoId: video.id, nodeIds: [shotB.id, shotA.id] })
+  await invoke('nodes:setTrim', {
+    nodeId: shotB.id,
+    trimStartSec: 0.5,
+    trimEndSec: FIXTURES.clipB.seconds - 0.5
+  })
+  await invoke('nodes:setTransition', { nodeId: shotB.id, transition: 'crossfade' })
+
+  // A title-track layer + a watermark exercise the libass burn pass.
+  await invoke('textLayers:create', {
+    videoId: video.id,
+    content: 'E2E TITLE',
+    startSec: 0,
+    endSec: 3,
+    x: 0.5,
+    y: 0.2,
+    fontFamily: 'Arial',
+    sizePct: 8,
+    bold: true,
+    colorHex: '#ffcc00'
+  })
+
+  const readEditedProgress = await app.collectEvent('event:renderProgress')
+  const editedPath = join(outDir, 'edited.mp4')
+  const edited = await app.mcp('render_video', {
+    videoId: video.id,
+    outputPath: editedPath,
+    watermarkText: 'raccord.ai'
+  })
+  const editedSteps = new Set((await readEditedProgress()).map((e) => e.step))
+  check(editedSteps.has('transition'), 'the crossfade went through the transition pass')
+  check(editedSteps.has('subtitles'), 'the text layer + watermark went through the burn pass')
+  // B loses 1 s to the trim, and the crossfade overlaps the cut by 0.5 s.
+  const editedSeconds = FIXTURES.clipB.seconds - 1 + FIXTURES.clipA.seconds - 0.5
+  checkClose(
+    edited.durationSeconds,
+    editedSeconds,
+    1,
+    'trim and crossfade overlap shorten the reported duration'
+  )
+  const editedInfo = probe(editedPath)
+  checkClose(
+    Number(editedInfo.format.duration),
+    editedSeconds,
+    1,
+    'ffprobe agrees on the edited duration'
+  )
+  const editedVideo = editedInfo.streams.find((s) => s.codec_type === 'video')
+  checkEqual(
+    editedVideo.width,
+    FIXTURES.clipB.width,
+    'the sequence spec follows the explicit timeline order (B first)'
+  )
+
   step('cancellation')
   const cancelledPath = join(outDir, 'cancelled.mp4')
   const pending = app.mcp('render_video', { videoId: video.id, outputPath: cancelledPath }).then(

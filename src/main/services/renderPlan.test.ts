@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CROSSFADE_DURATION,
   buildConcatArgs,
   buildConcatListContent,
+  buildCrossfadeArgs,
   buildLastFrameArgs,
   buildMuxArgs,
+  assColor,
+  buildAssContent,
+  buildSubtitleBurnArgs,
+  clipEffectiveDuration,
+  clipIsTrimmed,
+  crossfadeGroups,
+  escapeSubtitlesFilterPath,
+  extractDialogue,
+  formatAssTimestamp,
+  escapeAssText,
+  hasCrossfades,
+  renderedDurationSeconds,
   buildNormalizeArgs,
   canConcatLosslessly,
   computeStageSpans,
@@ -282,5 +296,202 @@ describe('progress mapping', () => {
     expect(overallPercent(spans, 'mux', 2)).toBe(100)
     expect(overallPercent(spans, 'concat', -1)).toBe(overallPercent(spans, 'concat', 0))
     expect(overallPercent(computeStageSpans(false, false), 'mux', 0.5)).toBe(0)
+  })
+})
+
+describe('trim on planned clips', () => {
+  it('detects a trimmed clip and computes its effective duration', () => {
+    expect(clipIsTrimmed(clip())).toBe(false)
+    expect(clipIsTrimmed(clip({ trimStartSec: 1 }))).toBe(true)
+    expect(clipIsTrimmed(clip({ trimEndSec: 4 }))).toBe(true)
+    // An out-point equal to the media end is not a trim.
+    expect(clipIsTrimmed(clip({ trimEndSec: 5 }))).toBe(false)
+
+    expect(clipEffectiveDuration(clip())).toBe(5)
+    expect(clipEffectiveDuration(clip({ trimStartSec: 1, trimEndSec: 4 }))).toBe(3)
+    expect(clipEffectiveDuration(clip({ isStill: true, stillDurationSeconds: 7 }))).toBe(7)
+  })
+
+  it('a trim forces the normalize path even on homogeneous clips', () => {
+    const clips = [clip(), clip({ trimStartSec: 1 })]
+    const spec = decideSequenceSpec(clips)
+    expect(canConcatLosslessly(clips, spec)).toBe(false)
+    expect(canConcatLosslessly([clip(), clip()], spec)).toBe(true)
+  })
+
+  it('buildNormalizeArgs seeks and bounds a trimmed clip', () => {
+    const args = buildNormalizeArgs(
+      clip({ trimStartSec: 1.5, trimEndSec: 4 }),
+      { width: 1920, height: 1080, fps: 24 },
+      '/tmp/seg.mp4'
+    )
+    const joined = args.join(' ')
+    expect(joined).toContain('-ss 1.500')
+    expect(joined).toContain('-t 2.500 -i /media/a.mp4')
+  })
+})
+
+describe('crossfades', () => {
+  it('groups consecutive crossfaded clips, cuts split the groups', () => {
+    const a = clip({ transitionAfter: 'crossfade' })
+    const b = clip({ transitionAfter: 'crossfade' })
+    const c = clip({})
+    const d = clip({})
+    expect(crossfadeGroups([a, b, c, d])).toEqual([[0, 1, 2], [3]])
+    expect(hasCrossfades([a, b, c, d])).toBe(true)
+    expect(hasCrossfades([c, d])).toBe(false)
+    // The LAST clip's transition points at nothing.
+    expect(hasCrossfades([c, a])).toBe(false)
+  })
+
+  it('a crossfade forces the normalize path', () => {
+    const clips = [clip({ transitionAfter: 'crossfade' }), clip()]
+    expect(canConcatLosslessly(clips, decideSequenceSpec(clips))).toBe(false)
+  })
+
+  it('renderedDurationSeconds subtracts one overlap per crossfade', () => {
+    const clips = [clip({ transitionAfter: 'crossfade' }), clip(), clip()]
+    expect(sequenceDurationSeconds(clips)).toBe(15)
+    expect(renderedDurationSeconds(clips)).toBeCloseTo(15 - CROSSFADE_DURATION)
+  })
+
+  it('buildCrossfadeArgs chains per-pair transitions with measured offsets', () => {
+    const args = buildCrossfadeArgs(
+      [
+        { path: '/tmp/s1.mp4', durationSeconds: 5 },
+        { path: '/tmp/s2.mp4', durationSeconds: 4 },
+        { path: '/tmp/s3.mp4', durationSeconds: 6 }
+      ],
+      [
+        { xfade: 'fade', durationSec: 0.5 },
+        { xfade: 'wipeleft', durationSec: 1 }
+      ],
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    // First fade starts 0.5s before segment 1 ends; the second cut is a 1s wipe
+    // whose offset accounts for the first overlap (5+4-0.5-1 = 7.5).
+    expect(filter).toContain('xfade=transition=fade:duration=0.5:offset=4.500')
+    expect(filter).toContain('xfade=transition=wipeleft:duration=1:offset=7.500')
+    expect(filter).toContain('acrossfade=d=0.5')
+    expect(filter).toContain('acrossfade=d=1')
+    expect(args.at(-1)).toBe('/tmp/out.mp4')
+    expect(() =>
+      buildCrossfadeArgs([{ path: '/tmp/s1.mp4', durationSeconds: 5 }], [], '/x')
+    ).toThrow()
+    expect(() =>
+      buildCrossfadeArgs(
+        [
+          { path: '/tmp/s1.mp4', durationSeconds: 5 },
+          { path: '/tmp/s2.mp4', durationSeconds: 4 }
+        ],
+        [],
+        '/x'
+      )
+    ).toThrow(/one fade per cut/)
+  })
+
+  it('each transition subtracts its own duration from the rendered length', () => {
+    const clips = [
+      clip({ transitionAfter: 'wipeleft', transitionDurationSec: 1 }),
+      clip({ transitionAfter: 'crossfade' }),
+      clip()
+    ]
+    expect(renderedDurationSeconds(clips)).toBeCloseTo(15 - 1 - CROSSFADE_DURATION)
+  })
+})
+
+describe('subtitles', () => {
+  it('extracts straight and curly quoted dialogue, ignores unquoted prose', () => {
+    expect(extractDialogue('She smiles and says: "Back to work." Then leaves.')).toEqual([
+      'Back to work.'
+    ])
+    expect(extractDialogue('Il murmure : “On y va” puis “vite”')).toEqual(['On y va', 'vite'])
+    expect(extractDialogue('No dialogue here.')).toEqual([])
+  })
+
+  it('formats ASS timestamps and escapes override braces', () => {
+    expect(formatAssTimestamp(71.5)).toBe('0:01:11.50')
+    expect(formatAssTimestamp(0)).toBe('0:00:00.00')
+    expect(escapeAssText('a {\\b1} line\nnext')).toBe('a \\b1 line\\Nnext')
+  })
+
+  it('renders a free layer with position, font, size, weight and colour overrides', () => {
+    const ass = buildAssContent({ width: 1920, height: 1080 }, [
+      {
+        kind: 'layer',
+        startSec: 2,
+        endSec: 6.5,
+        text: 'Générique',
+        align: 1,
+        x: 0.25,
+        y: 0.8,
+        fontFamily: 'Georgia',
+        sizePct: 10,
+        bold: true,
+        italic: true,
+        colorHex: '#ffcc00'
+      }
+    ])
+    expect(ass).toContain('Style: FreeLayer,')
+    const line = ass.split('\n').find((l) => l.includes('Générique'))!
+    expect(line).toContain('Dialogue: 0,0:00:02.00,0:00:06.50,FreeLayer')
+    expect(line).toContain('\\an1')
+    expect(line).toContain('\\pos(480,864)')
+    expect(line).toContain('\\fnGeorgia')
+    expect(line).toContain('\\fs108')
+    expect(line).toContain('\\b1')
+    expect(line).toContain('\\i1')
+    // #ffcc00 → BGR 00ccff.
+    expect(line).toContain('\\1c&H0000CCFF')
+  })
+
+  it('converts hex colours to ASS BGR', () => {
+    expect(assColor('#ffcc00')).toBe('&H0000CCFF')
+    expect(assColor('#ffffff')).toBe('&H00FFFFFF')
+    expect(assColor('nope')).toBe('&H00FFFFFF')
+  })
+
+  it('builds one ASS document with subtitle, title and watermark styles', () => {
+    const ass = buildAssContent({ width: 1920, height: 1080 }, [
+      { kind: 'subtitle', startSec: 0, endSec: 4, text: 'Hello' },
+      { kind: 'title', startSec: 0, endSec: 3, text: 'Chapter 1', align: 8, size: 'lg' },
+      { kind: 'watermark', startSec: 0, endSec: 8, text: 'raccord.ai', align: 3 }
+    ])
+    expect(ass).toContain('PlayResX: 1920')
+    expect(ass).toContain('Style: Subtitle,')
+    expect(ass).toContain('Style: Title,')
+    expect(ass).toContain('Style: Watermark,')
+    expect(ass).toContain('Dialogue: 0,0:00:00.00,0:00:04.00,Subtitle,,0,0,0,,Hello')
+    // Title carries its alignment AND its size override per event.
+    expect(ass).toContain('{\\an8\\fs103}Chapter 1')
+    expect(ass).toContain('{\\an3}raccord.ai')
+    // The watermark style is translucent (alpha in PrimaryColour).
+    expect(ass).toMatch(/Style: Watermark,[^,]+,\d+,&H90FFFFFF/)
+  })
+
+  it('escapes the ass path for the subtitles filter and copies audio', () => {
+    expect(escapeSubtitlesFilterPath("C:\\tmp\\l'ete.ass")).toBe("C\\:\\\\tmp\\\\l\\'ete.ass")
+    const args = buildSubtitleBurnArgs('/tmp/in.mp4', '/tmp/layers.ass', '/tmp/out.mp4')
+    const joined = args.join(' ')
+    expect(joined).toContain("-vf subtitles=filename='/tmp/layers.ass'")
+    expect(joined).toContain('-c:a copy')
+  })
+})
+
+describe('stage spans with transitions and subtitles', () => {
+  it('adds spans only when the passes exist, still summing to 100', () => {
+    const spans = computeStageSpans(true, true, { hasTransitions: true, hasSubtitles: true })
+    expect(spans.map((s) => s.step)).toEqual([
+      'probe',
+      'normalize',
+      'transition',
+      'concat',
+      'subtitles',
+      'mux'
+    ])
+    expect(spans.at(-1)!.to).toBeCloseTo(100)
+    const plain = computeStageSpans(true, false)
+    expect(plain.map((s) => s.step)).toEqual(['probe', 'normalize', 'concat'])
   })
 })

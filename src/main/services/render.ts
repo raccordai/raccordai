@@ -8,30 +8,45 @@ import type { GraphNode } from '@shared/ipc/contracts'
 import {
   bestGeneration,
   clipDuration,
+  clipTransitionAfter,
+  clipTransitionSeconds,
+  clipTrim,
   collectAudioNodes,
   collectTimelineClips
 } from '@shared/timeline'
+import { xfadeNameFor } from '@shared/transitions'
 import { broadcastRenderProgress } from '../events'
 import { resolveMediaUrlToFile } from '../media/protocol'
 import { listGenerationsForNode, timelineFallbackImages } from './generations'
+import { listTextLayers } from './textLayers'
 import * as graphService from './graph'
 import * as videosService from './videos'
 import {
+  buildAssContent,
   buildConcatArgs,
   buildConcatListContent,
+  buildCrossfadeArgs,
   buildMuxArgs,
   buildNormalizeArgs,
+  buildSubtitleBurnArgs,
   canConcatLosslessly,
+  clipEffectiveDuration,
   computeStageSpans,
+  crossfadeGroups,
+  CROSSFADE_DURATION,
   decideSequenceSpec,
   DEFAULT_STILL_SECONDS,
+  extractDialogue,
+  hasCrossfades,
   overallPercent,
   parseFfprobeJson,
   parseProgressLine,
+  renderedDurationSeconds,
   sequenceDurationSeconds,
   type PlannedClip,
   type RenderStep,
-  type StageSpan
+  type StageSpan,
+  type AssEvent
 } from './renderPlan'
 
 /**
@@ -173,6 +188,13 @@ export interface RenderOptions {
   outputPath: string
   fps?: number
   resolution?: { width: number; height: number }
+  /** Burn the scenario's quoted dialogue as subtitles (nothing without quotes). */
+  burnSubtitles?: boolean
+  /** Translucent corner text over the whole film (per-render, never persisted). */
+  watermark?: {
+    text: string
+    position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  }
 }
 
 const label = (node: GraphNode) => node.label ?? node.key
@@ -250,6 +272,26 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       progress(probeSpansGuess, 'probe', (i + 1) / clips.length)
     }
 
+    // Timeline editing state: trim windows (clamped against the probed
+    // duration) and transitions travel from the nodes onto the planned clips.
+    for (const [i, clip] of clips.entries()) {
+      const node = clipNodes[i]!
+      if (!clip.isStill) {
+        const { start, end } = clipTrim(node, clip.probe?.durationSeconds ?? undefined)
+        if (start > 0) clip.trimStartSec = start
+        if (end !== undefined) clip.trimEndSec = end
+      }
+      clip.transitionAfter = clipTransitionAfter(node)
+      clip.transitionDurationSec = clipTransitionSeconds(node)
+    }
+
+    // The scenario's dialogue, resolved per clip BEFORE rendering: subtitles
+    // only exist where a shot wrote quoted lines.
+    const scenarioShots = new Map(
+      (video.scenario?.shots ?? []).map((s) => [s.key, `${s.action} ${s.sound ?? ''}`])
+    )
+    const wantSubtitles = options.burnSubtitles === true
+
     const spec = decideSequenceSpec(clips, {
       fps: options.fps,
       resolution: options.resolution
@@ -257,7 +299,81 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     // spec already reflects the overrides, so this stays correct with them.
     const lossless = canConcatLosslessly(clips, spec)
     const totalDuration = sequenceDurationSeconds(clips)
-    const spans = computeStageSpans(!lossless, musicPaths.length > 0)
+    const finalDuration = renderedDurationSeconds(clips)
+
+    // Burned text layers, timed on the FINAL timeline (overlaps subtracted):
+    // scenario dialogue (opt-in), per-clip title layers, watermark.
+    const assEvents: AssEvent[] = []
+    {
+      let at = 0
+      for (const [i, clip] of clips.entries()) {
+        const node = clipNodes[i]!
+        const dur = clipEffectiveDuration(clip)
+        if (dur > 0) {
+          if (wantSubtitles) {
+            const lines = extractDialogue(scenarioShots.get(node.key) ?? '')
+            if (lines.length > 0) {
+              assEvents.push({
+                kind: 'subtitle',
+                startSec: at,
+                endSec: Math.min(at + dur, finalDuration),
+                text: lines.join('\n')
+              })
+            }
+          }
+          if (node.overlay?.text) {
+            assEvents.push({
+              kind: 'title',
+              startSec: at,
+              endSec: Math.min(at + dur, finalDuration),
+              text: node.overlay.text,
+              align: node.overlay.align,
+              size: node.overlay.size
+            })
+          }
+        }
+        at += dur - (clip.transitionAfter ? (clip.transitionDurationSec ?? CROSSFADE_DURATION) : 0)
+      }
+      if (options.watermark?.text) {
+        const WATERMARK_ALIGN = {
+          'top-left': 7,
+          'top-right': 9,
+          'bottom-left': 1,
+          'bottom-right': 3
+        }
+        assEvents.push({
+          kind: 'watermark',
+          startSec: 0,
+          endSec: finalDuration,
+          text: options.watermark.text,
+          align: WATERMARK_ALIGN[options.watermark.position ?? 'bottom-right']
+        })
+      }
+      // The title track (§6.12b): free layers live in final-timeline seconds
+      // already — clamp to the film and drop the ones entirely outside it.
+      for (const layer of listTextLayers(videoId)) {
+        if (layer.startSec >= finalDuration) continue
+        assEvents.push({
+          kind: 'layer',
+          startSec: layer.startSec,
+          endSec: Math.min(layer.endSec, finalDuration),
+          text: layer.content,
+          align: layer.anchor,
+          x: layer.x,
+          y: layer.y,
+          fontFamily: layer.fontFamily,
+          sizePct: layer.sizePct,
+          bold: layer.bold,
+          italic: layer.italic,
+          colorHex: layer.colorHex
+        })
+      }
+    }
+    const hasBurnPass = assEvents.length > 0
+    const spans = computeStageSpans(!lossless, musicPaths.length > 0, {
+      hasTransitions: hasCrossfades(clips),
+      hasSubtitles: hasBurnPass
+    })
 
     // ── Normalize (heterogeneous clips only) ─────────────────────────────
     let segmentPaths: string[]
@@ -267,9 +383,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       segmentPaths = []
       let doneDuration = 0
       for (const [i, clip] of clips.entries()) {
-        const clipDur = clip.isStill
-          ? clip.stillDurationSeconds
-          : (clip.probe?.durationSeconds ?? 0)
+        const clipDur = clipEffectiveDuration(clip)
         const segment = join(workDir, `seg-${String(i + 1).padStart(2, '0')}.mp4`)
         const base = doneDuration
         await run(
@@ -289,6 +403,53 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       }
     }
 
+    // ── Transitions (crossfade groups → one merged segment each) ─────────
+    if (hasCrossfades(clips)) {
+      const groups = crossfadeGroups(clips)
+      const merged: string[] = []
+      for (const [g, group] of groups.entries()) {
+        if (group.length === 1) {
+          merged.push(segmentPaths[group[0]!]!)
+          continue
+        }
+        // Measured durations: xfade offsets must match the encoded segments,
+        // not the plan (encoder rounding drifts a declared value).
+        const segments = [] as Array<{ path: string; durationSeconds: number }>
+        for (const idx of group) {
+          const path = segmentPaths[idx]!
+          const probe = await probeFile(active, path)
+          segments.push({
+            path,
+            durationSeconds: probe.durationSeconds ?? clipEffectiveDuration(clips[idx]!)
+          })
+        }
+        const groupOut = join(workDir, `fade-${String(g + 1).padStart(2, '0')}.mp4`)
+        const groupDuration = segments.reduce((acc, s) => acc + s.durationSeconds, 0)
+        const fades = group.slice(0, -1).map((idx) => ({
+          xfade: xfadeNameFor(clips[idx]!.transitionAfter ?? 'crossfade'),
+          durationSec: clips[idx]!.transitionDurationSec ?? CROSSFADE_DURATION
+        }))
+        await run(
+          active,
+          ffmpegPath(),
+          [...buildCrossfadeArgs(segments, fades, groupOut), '-progress', 'pipe:1'],
+          (line) => {
+            const seconds = parseProgressLine(line)
+            if (seconds !== null && groupDuration > 0) {
+              progress(
+                spans,
+                'transition',
+                (g + Math.min(1, seconds / groupDuration)) / groups.length
+              )
+            }
+          }
+        )
+        merged.push(groupOut)
+      }
+      segmentPaths = merged
+      progress(spans, 'transition', 1)
+    }
+
     // ── Concat ───────────────────────────────────────────────────────────
     const listPath = join(workDir, 'concat.txt')
     writeFileSync(listPath, buildConcatListContent(segmentPaths), 'utf8')
@@ -306,17 +467,38 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     )
     progress(spans, 'concat', 1)
 
+    // ── Burned text layers (dialogue + titles + watermark, one libass pass) ─
+    let stagePath = concatOut
+    if (hasBurnPass) {
+      const assPath = join(workDir, 'layers.ass')
+      writeFileSync(assPath, buildAssContent(spec, assEvents), 'utf8')
+      const subbedOut = join(workDir, 'subtitled.mp4')
+      await run(
+        active,
+        ffmpegPath(),
+        [...buildSubtitleBurnArgs(stagePath, assPath, subbedOut), '-progress', 'pipe:1'],
+        (line) => {
+          const seconds = parseProgressLine(line)
+          if (seconds !== null && finalDuration > 0) {
+            progress(spans, 'subtitles', seconds / finalDuration)
+          }
+        }
+      )
+      stagePath = subbedOut
+      progress(spans, 'subtitles', 1)
+    }
+
     // ── Mux the music lane ───────────────────────────────────────────────
-    let finalPath = concatOut
+    let finalPath = stagePath
     if (musicPaths.length > 0) {
-      const concatProbe = await probeFile(active, concatOut)
+      const concatProbe = await probeFile(active, stagePath)
       const muxOut = join(workDir, 'final.mp4')
-      const muxDuration = concatProbe.durationSeconds ?? totalDuration
+      const muxDuration = concatProbe.durationSeconds ?? finalDuration
       await run(
         active,
         ffmpegPath(),
         [
-          ...buildMuxArgs(concatOut, musicPaths, concatProbe.hasAudio, muxDuration, muxOut),
+          ...buildMuxArgs(stagePath, musicPaths, concatProbe.hasAudio, muxDuration, muxOut),
           '-progress',
           'pipe:1'
         ],
@@ -331,7 +513,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     if (active.cancelled) throw new RenderCancelledError()
     copyFileSync(finalPath, outputPath)
     broadcastRenderProgress({ videoId, percent: 100, step: 'mux', done: true })
-    return { durationSeconds: totalDuration, skipped }
+    return { durationSeconds: finalDuration, skipped }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     broadcastRenderProgress({ videoId, percent: 0, step: 'probe', done: true, error: message })

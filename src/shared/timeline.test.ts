@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import type { GraphNode } from './ipc/contracts'
 import {
+  CROSSFADE_SECONDS,
   bestGeneration,
   clipDuration,
   clipResolution,
+  clipTransitionAfter,
+  clipTrim,
   collectAudioNodes,
   collectTimelineClips,
   shotNumber,
-  timelineOrder
+  timelineOrder,
+  transitionOverlapSeconds,
+  trimmedClipDuration
 } from './timeline'
 
 let seq = 0
@@ -54,6 +59,59 @@ describe('timelineOrder', () => {
     const right = node({ label: 'x', key: 'x', position: { x: 10, y: 0 } })
     const left = node({ label: 'y', key: 'y', position: { x: 0, y: 0 } })
     expect(timelineOrder([right, left]).map((n) => n.id)).toEqual([left.id, right.id])
+  })
+
+  it('an explicit timelineOrder beats the label number and comes first', () => {
+    const dragged = node({ label: 'Shot 9', timelineOrder: 0 })
+    const alsoDragged = node({ label: 'Shot 1', timelineOrder: 1 })
+    const legacy = node({ label: 'Shot 2' })
+    expect(timelineOrder([legacy, alsoDragged, dragged]).map((n) => n.id)).toEqual([
+      dragged.id,
+      alsoDragged.id,
+      legacy.id
+    ])
+  })
+})
+
+describe('clip trim', () => {
+  it('defaults to the whole clip and clamps bad data', () => {
+    expect(clipTrim(node({ params: { duration: 8 } }))).toEqual({ start: 0, end: 8 })
+    // Negative in-point → 0; out-point beyond the media → raw end.
+    expect(clipTrim(node({ params: { duration: 8 }, trimStartSec: -2, trimEndSec: 30 }))).toEqual({
+      start: 0,
+      end: 8
+    })
+    // Inverted window → ignored entirely.
+    expect(clipTrim(node({ params: { duration: 8 }, trimStartSec: 5, trimEndSec: 3 }))).toEqual({
+      start: 0,
+      end: 8
+    })
+  })
+
+  it('prefers the probed duration over the declared one', () => {
+    expect(clipTrim(node({ params: { duration: 8 }, trimEndSec: 7 }), 7.6)).toEqual({
+      start: 0,
+      end: 7
+    })
+    expect(
+      trimmedClipDuration(node({ params: { duration: 8 }, trimStartSec: 1 }), 7.6)
+    ).toBeCloseTo(6.6)
+  })
+
+  it('trimmedClipDuration is undefined when nothing bounds the clip', () => {
+    expect(trimmedClipDuration(node({ params: {} }))).toBeUndefined()
+  })
+})
+
+describe('transitions', () => {
+  it('reads the transition and sums the overlaps (last clip ignored)', () => {
+    const a = node({ transitionAfter: 'crossfade' })
+    const b = node({})
+    const c = node({ transitionAfter: 'crossfade' })
+    expect(clipTransitionAfter(a)).toBe('crossfade')
+    expect(clipTransitionAfter(b)).toBeNull()
+    // a→b crossfades; b→c cuts; c's transition has nothing after it.
+    expect(transitionOverlapSeconds([a, b, c])).toBeCloseTo(CROSSFADE_SECONDS)
   })
 })
 

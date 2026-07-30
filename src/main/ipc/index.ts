@@ -29,6 +29,7 @@ import * as runBatchService from '../services/runBatch'
 import * as renderService from '../services/render'
 import * as runEngine from '../services/runEngine'
 import * as settingsService from '../services/settings'
+import * as textLayersService from '../services/textLayers'
 import * as videosService from '../services/videos'
 
 /**
@@ -169,6 +170,20 @@ export function registerIpcHandlers(): void {
     graph.updateNodePosition(nodeId, position)
   )
   handle('nodes:updatePositions', ({ updates }) => graph.updateNodePositions(updates))
+  handle('nodes:setTimelineOrder', ({ videoId, nodeIds }) =>
+    graph.setTimelineOrder(videoId, nodeIds)
+  )
+  handle('nodes:setTrim', ({ nodeId, trimStartSec, trimEndSec }) =>
+    graph.setClipTrim(nodeId, { trimStartSec, trimEndSec })
+  )
+  handle('nodes:setTransition', ({ nodeId, transition, durationSec }) =>
+    graph.setClipTransition(nodeId, transition, durationSec)
+  )
+  handle('nodes:setOverlay', ({ nodeId, overlay }) => graph.setClipOverlay(nodeId, overlay))
+  handle('textLayers:list', ({ videoId }) => textLayersService.listTextLayers(videoId))
+  handle('textLayers:create', (input) => textLayersService.createTextLayer(input))
+  handle('textLayers:update', ({ id, patch }) => textLayersService.updateTextLayer(id, patch))
+  handle('textLayers:delete', ({ id }) => textLayersService.deleteTextLayer(id))
   handle('nodes:replaceModel', ({ nodeId, modelId }) => graph.replaceNodeModel(nodeId, modelId))
   handle('nodes:applyVideoDefaults', ({ videoId }) => graph.applyVideoDefaultsToNodes(videoId))
   handle('nodes:remove', ({ nodeId }) => graph.removeNode(nodeId))
@@ -349,7 +364,7 @@ export function registerIpcHandlers(): void {
     return restored
   })
 
-  handle('render:export', async ({ videoId, fps, resolution }) => {
+  handle('render:export', async ({ videoId, fps, resolution, burnSubtitles, watermark }) => {
     const video = videosService.getVideo(videoId)
     const base = (video?.name ?? 'video').replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'video'
     const result = await dialog.showSaveDialog({
@@ -362,7 +377,9 @@ export function registerIpcHandlers(): void {
       videoId,
       outputPath: result.filePath,
       fps,
-      resolution
+      resolution,
+      burnSubtitles,
+      watermark
     })
     return { path: result.filePath, durationSeconds, skipped }
   })

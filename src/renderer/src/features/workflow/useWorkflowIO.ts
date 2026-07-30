@@ -65,8 +65,18 @@ export interface WorkflowIO {
   exportFcpxmlZip: () => Promise<void>
   exportMediaZip: () => Promise<void>
   /** Rendered MP4 export (ffmpeg in main; save dialog lives in the handler).
-   *  Optional preset forces the output dims (default: probed from the clips). */
-  exportMp4: (preset?: RenderPreset) => Promise<void>
+   *  Optional preset forces the output dims (default: probed from the clips);
+   *  burnSubtitles burns the scenario's quoted dialogue into the picture. */
+  exportMp4: (
+    preset?: RenderPreset,
+    options?: {
+      burnSubtitles?: boolean
+      watermark?: {
+        text: string
+        position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+      }
+    }
+  ) => Promise<void>
   cancelRenderMp4: () => void
   importing: boolean
   exporting: boolean
@@ -293,12 +303,14 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
    * the invoke resolves when the file is written (null = dialog cancelled).
    */
   const exportMp4 = useCallback(
-    async (preset?: RenderPreset) => {
+    async (preset?: RenderPreset, options?: Parameters<WorkflowIO['exportMp4']>[1]) => {
       setRenderingMp4(true)
       try {
         const result = await invoke('render:export', {
           videoId,
-          ...(preset ? { resolution: RENDER_PRESETS[preset] } : {})
+          ...(preset ? { resolution: RENDER_PRESETS[preset] } : {}),
+          ...(options?.burnSubtitles ? { burnSubtitles: true } : {}),
+          ...(options?.watermark?.text.trim() ? { watermark: options.watermark } : {})
         })
         if (result) {
           toast.success(t('editor.renderDone', { path: result.path }))

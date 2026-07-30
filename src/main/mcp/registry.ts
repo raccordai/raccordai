@@ -2,6 +2,7 @@ import { MODELS } from '@shared/models'
 import { MAX_VARIANTS } from '@shared/config'
 import { getStyle } from '@shared/styles/registry'
 import { videoAspectRatioSchema, videoResolutionSchema } from '@shared/ipc/contracts'
+import { CLIP_TRANSITION_IDS } from '@shared/transitions'
 import { SCREEN_DIRECTIONS, planScenario, type ScenarioBeat } from '@shared/scenario'
 import { broadcastFocusNode, broadcastNavigate, broadcastWorkflowChanged } from '../events'
 import * as assets from '../services/assets'
@@ -31,6 +32,12 @@ import {
   restoreCheckpoint
 } from '../services/checkpoints'
 import { lintNodeById } from '../services/lint'
+import {
+  createTextLayer,
+  deleteTextLayer,
+  listTextLayers,
+  updateTextLayer
+} from '../services/textLayers'
 import { createRecipeNode } from '../services/recipes'
 import * as scenarioGraph from '../services/scenarioGraph'
 import * as projects from '../services/projects'
@@ -435,6 +442,14 @@ export const AGENT_TOOLS: AgentTool[] = [
           intent: n.intent,
           position: n.position,
           params: n.params,
+          // Timeline editing state (set_timeline_order / set_clip_trim /
+          // set_clip_transition / set_clip_overlay).
+          timelineOrder: n.timelineOrder ?? null,
+          trimStartSec: n.trimStartSec ?? null,
+          trimEndSec: n.trimEndSec ?? null,
+          transitionAfter: n.transitionAfter ?? null,
+          transitionDurationSec: n.transitionDurationSec ?? null,
+          overlay: n.overlay ?? null,
           hasSuccessfulOutput: gens.some((g) => g.nodeId === n.id && g.status === 'success')
         })),
         edges: edges.map((e) => ({
@@ -704,6 +719,187 @@ export const AGENT_TOOLS: AgentTool[] = [
     execute: ({ nodeId, position }) => {
       const p = position as { x?: unknown; y?: unknown }
       graph.updateNodePosition(String(nodeId), { x: Number(p?.x ?? 0), y: Number(p?.y ?? 0) })
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_timeline_order',
+    description:
+      'Set the timeline order of a video’s clips explicitly (one undo step). Pass ALL clip node ids in the desired sequence — the timeline, the FCPXML export and the MP4 render all follow it (it overrides the label-number ordering).',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        nodeIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Every video clip node id, in timeline order.'
+        }
+      },
+      ['videoId', 'nodeIds']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, nodeIds }) => {
+      graph.setTimelineOrder(String(videoId), (Array.isArray(nodeIds) ? nodeIds : []).map(String))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_clip_trim',
+    description:
+      'Trim a clip on the timeline: in/out points in seconds within its media (null clears a bound). Applies to playback, FCPXML and the MP4 render — the generation itself is untouched, so a trim is always reversible.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        trimStartSec: { type: ['number', 'null'], description: 'In-point (≥ 0), null = start' },
+        trimEndSec: { type: ['number', 'null'], description: 'Out-point (> in), null = end' }
+      },
+      ['nodeId']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, trimStartSec, trimEndSec }) => {
+      graph.setClipTrim(String(nodeId), {
+        trimStartSec: trimStartSec == null ? null : Number(trimStartSec),
+        trimEndSec: trimEndSec == null ? null : Number(trimEndSec)
+      })
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_clip_transition',
+    description: `Set the transition from a clip INTO the next one at render time, or null for a plain cut (the default and the doctrine’s preference). Each transition overlaps the two clips by durationSec (default 0.5 s) and shortens the film accordingly. Library: ${CLIP_TRANSITION_IDS.join(', ')}.`,
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        transition: { type: ['string', 'null'], enum: [...CLIP_TRANSITION_IDS, null] },
+        durationSec: { type: 'number', description: 'Overlap length, 0.1–2 s (default 0.5)' }
+      },
+      ['nodeId']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, transition, durationSec }) => {
+      graph.setClipTransition(
+        String(nodeId),
+        transition == null ? null : String(transition),
+        durationSec == null ? null : Number(durationSec)
+      )
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_clip_overlay',
+    description:
+      'Burn a text layer over a clip at render time (title card, caption, credit): text + numpad alignment (1–9, e.g. 8 = top center, 2 = bottom center) + size (sm/md/lg). Null clears it. Preview shows it in the timeline player.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        overlay: {
+          type: ['object', 'null'],
+          properties: {
+            text: { type: 'string' },
+            align: { type: 'number', description: 'ASS numpad alignment 1–9' },
+            size: { type: 'string', enum: ['sm', 'md', 'lg'] }
+          },
+          required: ['text', 'align', 'size']
+        }
+      },
+      ['nodeId', 'overlay']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, overlay }) => {
+      const o = overlay as { text?: unknown; align?: unknown; size?: unknown } | null
+      graph.setClipOverlay(
+        String(nodeId),
+        o == null
+          ? null
+          : {
+              text: String(o.text ?? ''),
+              align: Math.min(9, Math.max(1, Number(o.align ?? 2))),
+              size: o.size === 'sm' || o.size === 'lg' ? o.size : 'md'
+            }
+      )
+      return { ok: true }
+    }
+  },
+  {
+    name: 'list_text_layers',
+    description:
+      'The video’s title track: free text layers (titles, captions, credits) with their timing (absolute seconds on the FINAL timeline), frame position (normalized x/y + numpad anchor) and typography. Burned at render.',
+    inputSchema: obj({ videoId: str() }, ['videoId']),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId }) => listTextLayers(String(videoId))
+  },
+  {
+    name: 'add_text_layer',
+    description:
+      'Add a text layer to the video’s title track. Position is normalized (x/y in 0–1, anchor = ASS numpad 1–9 saying which point of the text sits on x/y); sizePct is % of the output height; colorHex is #RRGGBB; fontFamily is a system font name (null = default sans).',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        content: str('The text (max 500 chars)'),
+        startSec: { type: 'number', description: 'Start, in FINAL-timeline seconds' },
+        endSec: { type: 'number', description: 'End, in FINAL-timeline seconds (> start)' },
+        x: { type: 'number', description: '0–1, default 0.5' },
+        y: { type: 'number', description: '0–1, default 0.5' },
+        anchor: { type: 'number', description: 'Numpad 1–9, default 5 (centered on x/y)' },
+        fontFamily: { type: 'string', description: 'e.g. "Georgia", "Futura", "Impact"' },
+        sizePct: { type: 'number', description: '% of output height, 1–30 (default 6)' },
+        bold: { type: 'boolean' },
+        italic: { type: 'boolean' },
+        colorHex: { type: 'string', description: '#RRGGBB (default #ffffff)' }
+      },
+      ['videoId', 'content', 'startSec', 'endSec']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: (args) =>
+      createTextLayer({
+        videoId: String(args['videoId']),
+        content: String(args['content']),
+        startSec: Number(args['startSec']),
+        endSec: Number(args['endSec']),
+        ...(args['x'] !== undefined ? { x: Number(args['x']) } : {}),
+        ...(args['y'] !== undefined ? { y: Number(args['y']) } : {}),
+        ...(args['anchor'] !== undefined ? { anchor: Number(args['anchor']) } : {}),
+        ...(args['fontFamily'] !== undefined ? { fontFamily: String(args['fontFamily']) } : {}),
+        ...(args['sizePct'] !== undefined ? { sizePct: Number(args['sizePct']) } : {}),
+        ...(args['bold'] !== undefined ? { bold: Boolean(args['bold']) } : {}),
+        ...(args['italic'] !== undefined ? { italic: Boolean(args['italic']) } : {}),
+        ...(args['colorHex'] !== undefined ? { colorHex: String(args['colorHex']) } : {})
+      })
+  },
+  {
+    name: 'update_text_layer',
+    description:
+      'Update any fields of a text layer (list_text_layers gives the ids): content, timing, position, anchor, font, size, bold/italic, colour.',
+    inputSchema: obj(
+      {
+        layerId: str(),
+        patch: {
+          type: 'object',
+          description:
+            'Fields to change: content, startSec, endSec, x, y, anchor, fontFamily, sizePct, bold, italic, colorHex'
+        }
+      },
+      ['layerId', 'patch']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ layerId, patch }) =>
+      updateTextLayer(String(layerId), (patch ?? {}) as Record<string, never>)
+  },
+  {
+    name: 'delete_text_layer',
+    description: 'Remove a text layer from the title track (easily recreated with add_text_layer).',
+    inputSchema: obj({ layerId: str() }, ['layerId']),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ layerId }) => {
+      deleteTextLayer(String(layerId))
       return { ok: true }
     }
   },
@@ -1254,22 +1450,49 @@ export const AGENT_TOOLS: AgentTool[] = [
             height: { type: 'number' }
           },
           ['width', 'height']
-        )
+        ),
+        burnSubtitles: {
+          type: 'boolean',
+          description: 'Burn the scenario’s quoted dialogue as subtitles'
+        },
+        watermarkText: {
+          type: 'string',
+          description: 'Translucent corner text over the whole film (max 80 chars)'
+        },
+        watermarkPosition: {
+          type: 'string',
+          enum: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+          description: 'Watermark corner (default bottom-right)'
+        }
       },
       ['videoId']
     ),
     scope: 'video',
     risk: 'write',
-    execute: async ({ videoId, outputPath, fps, resolution }) => {
+    execute: async ({
+      videoId,
+      outputPath,
+      fps,
+      resolution,
+      burnSubtitles,
+      watermarkText,
+      watermarkPosition
+    }) => {
       const target = outputPath
         ? String(outputPath)
         : renderService.defaultOutputPath(String(videoId))
       const res = resolution as { width?: unknown; height?: unknown } | undefined
+      const corners = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const
+      const corner = corners.find((c) => c === watermarkPosition)
       const { durationSeconds, skipped } = await renderService.renderVideo({
         videoId: String(videoId),
         outputPath: target,
         ...(fps !== undefined ? { fps: Number(fps) } : {}),
-        ...(res ? { resolution: { width: Number(res.width), height: Number(res.height) } } : {})
+        ...(res ? { resolution: { width: Number(res.width), height: Number(res.height) } } : {}),
+        ...(burnSubtitles !== undefined ? { burnSubtitles: Boolean(burnSubtitles) } : {}),
+        ...(watermarkText
+          ? { watermark: { text: String(watermarkText), ...(corner ? { position: corner } : {}) } }
+          : {})
       })
       return { path: target, durationSeconds, skipped }
     }

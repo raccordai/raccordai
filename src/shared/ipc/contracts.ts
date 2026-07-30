@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { MAX_VARIANTS } from '../config'
 import { SCENARIO_VERSION, SCREEN_DIRECTIONS, type Scenario } from '../scenario'
+import { CLIP_TRANSITION_IDS, TRANSITION_MAX_SECONDS, TRANSITION_MIN_SECONDS } from '../transitions'
 
 /**
  * Single source of truth for the renderer <-> main boundary.
@@ -276,6 +277,52 @@ export const scenarioGraphResultSchema = z.object({
 
 export const positionSchema = z.object({ x: z.number(), y: z.number() })
 
+export const clipTransitionSchema = z.enum(CLIP_TRANSITION_IDS)
+export type ClipTransition = z.infer<typeof clipTransitionSchema>
+
+/** Text layer burned over a clip: ASS numpad alignment (1–9) + size preset. */
+export const clipOverlaySchema = z.object({
+  text: z.string().trim().min(1).max(200),
+  align: z.number().int().min(1).max(9),
+  size: z.enum(['sm', 'md', 'lg'])
+})
+export type ClipOverlay = z.infer<typeof clipOverlaySchema>
+
+/**
+ * A free text layer on the timeline (§6.12b): absolute final-timeline seconds,
+ * normalized frame position + ASS numpad anchor, own typography. Burned at
+ * render through the libass pass; previewed (and dragged) on the player.
+ */
+export const textLayerSchema = z.object({
+  id: z.string(),
+  videoId: z.string(),
+  content: z.string().trim().min(1).max(500),
+  startSec: z.number().min(0),
+  endSec: z.number().positive(),
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  anchor: z.number().int().min(1).max(9),
+  fontFamily: z.string().trim().min(1).max(80).nullable(),
+  sizePct: z.number().min(1).max(30),
+  bold: z.boolean(),
+  italic: z.boolean(),
+  colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  createdAt: z.number()
+})
+export type TextLayer = z.infer<typeof textLayerSchema>
+
+/** Creation payload: everything but the generated id/createdAt; styling optional. */
+export const textLayerInputSchema = textLayerSchema.omit({ id: true, createdAt: true }).partial({
+  x: true,
+  y: true,
+  anchor: true,
+  fontFamily: true,
+  sizePct: true,
+  bold: true,
+  italic: true,
+  colorHex: true
+})
+
 export const graphNodeSchema = z.object({
   id: z.string(),
   videoId: z.string(),
@@ -286,6 +333,15 @@ export const graphNodeSchema = z.object({
   position: positionSchema,
   params: z.unknown(),
   selectedGenerationId: z.string().nullable(),
+  // Timeline editing (additive columns): explicit slot, trim window, and the
+  // transition into the NEXT clip. Optional so pre-existing GraphNode literals
+  // (tests, snapshots) stay valid; shared helpers treat undefined as null.
+  timelineOrder: z.number().nullable().optional(),
+  trimStartSec: z.number().nullable().optional(),
+  trimEndSec: z.number().nullable().optional(),
+  transitionAfter: z.string().nullable().optional(),
+  transitionDurationSec: z.number().nullable().optional(),
+  overlay: clipOverlaySchema.nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -775,6 +831,54 @@ export const ipcContracts = {
     }),
     output: z.void()
   },
+  /** Timeline editing: stamps the explicit slot of every listed clip (one undo step). */
+  'nodes:setTimelineOrder': {
+    input: z.object({ videoId: z.string(), nodeIds: z.array(z.string()).min(1) }),
+    output: z.void()
+  },
+  /** Trim window inside the clip's media; null clears a bound. */
+  'nodes:setTrim': {
+    input: z.object({
+      nodeId: z.string(),
+      trimStartSec: z.number().min(0).nullable(),
+      trimEndSec: z.number().positive().nullable()
+    }),
+    output: z.void()
+  },
+  /** Transition into the NEXT clip at render time (a library id | null = cut). */
+  'nodes:setTransition': {
+    input: z.object({
+      nodeId: z.string(),
+      transition: clipTransitionSchema.nullable(),
+      durationSec: z
+        .number()
+        .min(TRANSITION_MIN_SECONDS)
+        .max(TRANSITION_MAX_SECONDS)
+        .nullable()
+        .optional()
+    }),
+    output: z.void()
+  },
+  /** Text layer burned over a clip at render time (null clears it). */
+  'nodes:setOverlay': {
+    input: z.object({ nodeId: z.string(), overlay: clipOverlaySchema.nullable() }),
+    output: z.void()
+  },
+
+  // Free text layers of the timeline (§6.12b) — the title track.
+  'textLayers:list': {
+    input: z.object({ videoId: z.string() }),
+    output: z.array(textLayerSchema)
+  },
+  'textLayers:create': { input: textLayerInputSchema, output: textLayerSchema },
+  'textLayers:update': {
+    input: z.object({
+      id: z.string(),
+      patch: textLayerSchema.omit({ id: true, videoId: true, createdAt: true }).partial()
+    }),
+    output: textLayerSchema
+  },
+  'textLayers:delete': { input: z.object({ id: z.string() }), output: z.void() },
   'nodes:replaceModel': {
     input: z.object({ nodeId: z.string(), modelId: z.string() }),
     output: z.void()
@@ -1117,6 +1221,15 @@ export const ipcContracts = {
       fps: z.number().int().min(1).max(120).optional(),
       resolution: z
         .object({ width: z.number().int().min(2), height: z.number().int().min(2) })
+        .optional(),
+      /** Burn the scenario's quoted dialogue as subtitles. */
+      burnSubtitles: z.boolean().optional(),
+      /** Translucent corner text over the whole film (per-render, not persisted). */
+      watermark: z
+        .object({
+          text: z.string().trim().min(1).max(80),
+          position: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).optional()
+        })
         .optional()
     }),
     output: z
@@ -1211,9 +1324,9 @@ export interface NavigatePayload {
 /** Progress of an MP4 render. One terminal event is always sent: done or error. */
 export interface RenderProgressPayload {
   videoId: string
-  /** 0–100 across the whole pipeline (probe → normalize → concat → mux). */
+  /** 0–100 across the whole pipeline (probe → normalize → transition → concat → subtitles → mux). */
   percent: number
-  step: 'probe' | 'normalize' | 'concat' | 'mux'
+  step: 'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'mux'
   done?: boolean
   /** Set on the terminal event when the render failed (or was cancelled). */
   error?: string

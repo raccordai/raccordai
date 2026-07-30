@@ -28,6 +28,61 @@ export interface PlannedClip {
   stillDurationSeconds: number
   /** ffprobe result — null for stills (they are re-encoded unconditionally). */
   probe: ClipProbe | null
+  /** Trim window inside the media (already clamped by the shared clipTrim). */
+  trimStartSec?: number
+  trimEndSec?: number
+  /** Transition INTO the next clip (CLIP_TRANSITIONS id) — ignored on the last clip. */
+  transitionAfter?: string | null
+  /** That transition's length (clamped upstream; default CROSSFADE_DURATION). */
+  transitionDurationSec?: number
+}
+
+/** Default transition length — mirrors TRANSITION_DEFAULT_SECONDS in @shared/transitions. */
+export const CROSSFADE_DURATION = 0.5
+
+/** The overlap a clip's transition takes out of the film (0 for a cut). */
+function transitionOverlap(clip: PlannedClip): number {
+  return clip.transitionAfter ? (clip.transitionDurationSec ?? CROSSFADE_DURATION) : 0
+}
+
+/** True when the clip plays a sub-range of its media. */
+export function clipIsTrimmed(clip: PlannedClip): boolean {
+  if (clip.isStill) return false
+  const raw = clip.probe?.durationSeconds ?? null
+  if ((clip.trimStartSec ?? 0) > 0) return true
+  return clip.trimEndSec !== undefined && (raw === null || clip.trimEndSec < raw - 0.01)
+}
+
+/** The clip's rendered duration: still hold, or trimmed media length. */
+export function clipEffectiveDuration(clip: PlannedClip): number {
+  if (clip.isStill) return clip.stillDurationSeconds
+  const start = clip.trimStartSec ?? 0
+  const end = clip.trimEndSec ?? clip.probe?.durationSeconds ?? 0
+  return Math.max(0, end - start)
+}
+
+/** True when at least one cut of the sequence is a transition (last clip ignored). */
+export function hasCrossfades(clips: PlannedClip[]): boolean {
+  return clips.slice(0, -1).some((c) => !!c.transitionAfter)
+}
+
+/**
+ * Consecutive clips joined by transitions, as index groups: [0,1,2] is a chain
+ * of two transitions, a singleton is a plain segment between cuts. Groups are
+ * what the transition pass merges; the groups' outputs then concat as cuts.
+ */
+export function crossfadeGroups(clips: PlannedClip[]): number[][] {
+  const groups: number[][] = []
+  let current: number[] = []
+  clips.forEach((clip, i) => {
+    current.push(i)
+    const chains = i < clips.length - 1 && !!clip.transitionAfter
+    if (!chains) {
+      groups.push(current)
+      current = []
+    }
+  })
+  return groups
 }
 
 export interface SequenceSpec {
@@ -125,6 +180,8 @@ const MP4_SAFE_CODECS = new Set(['h264', 'hevc'])
  */
 export function canConcatLosslessly(clips: PlannedClip[], spec: SequenceSpec): boolean {
   if (clips.length === 0) return false
+  // Trims and crossfades both require re-encoding, whatever the codecs are.
+  if (clips.some(clipIsTrimmed) || hasCrossfades(clips)) return false
   const first = clips[0]!.probe
   if (!first) return false
   for (const clip of clips) {
@@ -144,12 +201,15 @@ export function canConcatLosslessly(clips: PlannedClip[], spec: SequenceSpec): b
   return true
 }
 
-/** Total duration of the rendered sequence (probed video durations + still holds). */
+/** Total duration of the sequence's clips (trimmed lengths + still holds). */
 export function sequenceDurationSeconds(clips: PlannedClip[]): number {
-  return clips.reduce(
-    (acc, c) => acc + (c.isStill ? c.stillDurationSeconds : (c.probe?.durationSeconds ?? 0)),
-    0
-  )
+  return clips.reduce((acc, c) => acc + clipEffectiveDuration(c), 0)
+}
+
+/** Final file duration: clip durations minus each transition's own overlap. */
+export function renderedDurationSeconds(clips: PlannedClip[]): number {
+  const overlaps = clips.slice(0, -1).reduce((sum, c) => sum + transitionOverlap(c), 0)
+  return Math.max(0, sequenceDurationSeconds(clips) - overlaps)
 }
 
 const fpsArg = (fps: number) => (Number.isInteger(fps) ? String(fps) : fps.toFixed(3))
@@ -183,6 +243,13 @@ export function buildNormalizeArgs(
     const t = String(clip.stillDurationSeconds)
     args.push('-loop', '1', '-t', t, '-i', clip.path, '-f', 'lavfi', '-t', t, '-i', SILENCE_INPUT)
   } else {
+    // Trim as input options: -ss before -i is frame-accurate when re-encoding
+    // (ffmpeg decodes from the previous keyframe and discards), -t bounds the
+    // read so the out-point never depends on stream metadata.
+    const start = clip.trimStartSec ?? 0
+    if (start > 0) args.push('-ss', start.toFixed(3))
+    const effective = clipEffectiveDuration(clip)
+    if (clipIsTrimmed(clip) && effective > 0) args.push('-t', effective.toFixed(3))
     args.push('-i', clip.path)
     if (!clip.probe?.hasAudio) args.push('-f', 'lavfi', '-i', SILENCE_INPUT)
   }
@@ -215,6 +282,224 @@ export function buildConcatArgs(listPath: string, outPath: string): string[] {
     '-i',
     listPath,
     '-c',
+    'copy',
+    '-movflags',
+    '+faststart',
+    outPath
+  ]
+}
+
+/**
+ * Merge one transition group into a single segment: chained video xfades and
+ * audio acrossfades over the group's (already normalized, uniform) segments.
+ * `fades[i]` describes the transition between segment i and i+1 (its xfade
+ * name and its own length). Offsets are computed from MEASURED durations
+ * (render.ts re-probes the segments) — the fade must start exactly its length
+ * before each segment ends, and encoder rounding would drift a declared value.
+ */
+export function buildCrossfadeArgs(
+  segments: Array<{ path: string; durationSeconds: number }>,
+  fades: Array<{ xfade: string; durationSec: number }>,
+  outPath: string
+): string[] {
+  if (segments.length < 2) throw new Error('A transition group needs at least two segments')
+  if (fades.length !== segments.length - 1) {
+    throw new Error('A transition group needs exactly one fade per cut')
+  }
+  const args = ['-y', '-hide_banner', '-nostdin']
+  for (const s of segments) args.push('-i', s.path)
+
+  const chains: string[] = []
+  let video = '[0:v]'
+  let audio = '[0:a]'
+  let elapsed = segments[0]!.durationSeconds
+  for (let i = 1; i < segments.length; i++) {
+    const fade = fades[i - 1]!
+    const offset = Math.max(0, elapsed - fade.durationSec)
+    const vOut = i === segments.length - 1 ? '[vout]' : `[vx${i}]`
+    const aOut = i === segments.length - 1 ? '[aout]' : `[ax${i}]`
+    chains.push(
+      `${video}[${i}:v]xfade=transition=${fade.xfade}:duration=${fade.durationSec}:offset=${offset.toFixed(3)}${vOut}`
+    )
+    // Whatever the visual is, the audio crossfades — a hard audio cut under a
+    // visual wipe reads as a glitch.
+    chains.push(`${audio}[${i}:a]acrossfade=d=${fade.durationSec}${aOut}`)
+    video = vOut
+    audio = aOut
+    elapsed = elapsed + segments[i]!.durationSeconds - fade.durationSec
+  }
+
+  args.push('-filter_complex', chains.join(';'))
+  args.push('-map', '[vout]', '-map', '[aout]')
+  args.push(...ENCODE_ARGS, ...AUDIO_ENCODE_ARGS)
+  args.push('-movflags', '+faststart', outPath)
+  return args
+}
+
+// ── Burned text layers (one ASS file: subtitles + titles + watermark) ────────
+
+/**
+ * Everything burned over the picture goes through ONE libass pass: the
+ * scenario's dialogue (style Subtitle, bottom center), per-clip text layers
+ * (style Title, alignment per event) and the watermark (style Watermark,
+ * translucent corner text). ASS gives positioning, sizing and transparency
+ * that SRT cannot express, and libass ships in the bundled ffmpeg — no
+ * fontconfig/drawtext portability gamble.
+ */
+export interface AssEvent {
+  startSec: number
+  endSec: number
+  text: string
+  kind: 'subtitle' | 'title' | 'watermark' | 'layer'
+  /** ASS numpad alignment 1–9 (titles/watermark/layers; subtitles are always 2). */
+  align?: number
+  /** Title size preset (defaults to 'md'). */
+  size?: 'sm' | 'md' | 'lg'
+  /** Free layers (§6.12b): normalized frame position + own typography. */
+  x?: number
+  y?: number
+  fontFamily?: string | null
+  sizePct?: number
+  bold?: boolean
+  italic?: boolean
+  colorHex?: string
+}
+
+/** #RRGGBB → ASS &H00BBGGRR (ASS colours are little-endian BGR). */
+export function assColor(hex: string): string {
+  const m = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex)
+  if (!m) return '&H00FFFFFF'
+  return `&H00${m[3]}${m[2]}${m[1]}`.toUpperCase()
+}
+
+/** Kept as the subtitle entry shape used by render.ts (alias of old name). */
+export interface SubtitleEntry {
+  startSec: number
+  endSec: number
+  text: string
+}
+
+/**
+ * Dialogue lines of a scenario shot: the double-quoted spans of its action and
+ * sound (the doctrine writes spoken lines in quotes — she says: "…"). Nothing
+ * is invented: a shot without quotes gets no subtitle.
+ */
+export function extractDialogue(text: string): string[] {
+  const lines: string[] = []
+  for (const m of text.matchAll(/"([^"\n]+)"|“([^”\n]+)”/g)) {
+    const line = (m[1] ?? m[2] ?? '').trim()
+    if (line) lines.push(line)
+  }
+  return lines
+}
+
+/** 71.5 → "0:01:11.50" (ASS uses centiseconds). */
+export function formatAssTimestamp(seconds: number): string {
+  const clamped = Math.max(0, seconds)
+  const cs = Math.round((clamped % 1) * 100)
+  const total = Math.floor(clamped)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${h}:${pad(m)}:${pad(s)}.${pad(cs)}`
+}
+
+/** Braces open ASS override blocks; newlines are \N. Nothing else is special. */
+export function escapeAssText(text: string): string {
+  return text.replace(/[{}]/g, '').replace(/\r?\n/g, '\\N')
+}
+
+const TITLE_SIZE_FACTOR = { sm: 0.045, md: 0.065, lg: 0.095 } as const
+
+/**
+ * The complete ASS document for a render: styles scaled to the sequence spec
+ * (PlayResX/Y = output size, so nothing depends on the viewer), one Dialogue
+ * event per entry. Titles carry their alignment as an event override, so one
+ * style serves all nine positions.
+ */
+export function buildAssContent(
+  spec: { width: number; height: number },
+  events: AssEvent[]
+): string {
+  const subtitleSize = Math.round(spec.height * 0.05)
+  const watermarkSize = Math.round(spec.height * 0.033)
+  const margin = Math.round(spec.height * 0.04)
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${spec.width}`,
+    `PlayResY: ${spec.height}`,
+    'WrapStyle: 2',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Subtitle,Arial,${subtitleSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,${margin},${margin},${margin},1`,
+    `Style: Title,Arial,${Math.round(spec.height * TITLE_SIZE_FACTOR.md)},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,5,${margin},${margin},${margin},1`,
+    // &H90 alpha in PrimaryColour ≈ 56% transparent — visible, not shouting.
+    `Style: Watermark,Arial,${watermarkSize},&H90FFFFFF,&H90FFFFFF,&H90101010,&H00000000,0,0,0,0,100,100,0,0,1,1,0,3,${margin},${margin},${margin},1`,
+    // Free layers: the style is a neutral base — every event overrides
+    // position, font, size, weight and colour for itself.
+    `Style: FreeLayer,Arial,${subtitleSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,2,1,5,0,0,0,1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
+  ]
+  const lines = events.map((e) => {
+    const style =
+      e.kind === 'subtitle'
+        ? 'Subtitle'
+        : e.kind === 'title'
+          ? 'Title'
+          : e.kind === 'watermark'
+            ? 'Watermark'
+            : 'FreeLayer'
+    const overrides: string[] = []
+    if (e.kind !== 'subtitle' && e.align !== undefined) overrides.push(`\\an${e.align}`)
+    if (e.kind === 'title' && e.size && e.size !== 'md') {
+      overrides.push(`\\fs${Math.round(spec.height * TITLE_SIZE_FACTOR[e.size])}`)
+    }
+    if (e.kind === 'layer') {
+      const x = Math.round((e.x ?? 0.5) * spec.width)
+      const y = Math.round((e.y ?? 0.5) * spec.height)
+      overrides.push(`\\pos(${x},${y})`)
+      if (e.fontFamily) overrides.push(`\\fn${e.fontFamily.replace(/[{}\\]/g, '')}`)
+      overrides.push(`\\fs${Math.max(1, Math.round(spec.height * ((e.sizePct ?? 6) / 100)))}`)
+      if (e.bold) overrides.push('\\b1')
+      if (e.italic) overrides.push('\\i1')
+      if (e.colorHex) overrides.push(`\\1c${assColor(e.colorHex)}`)
+    }
+    const prefix = overrides.length > 0 ? `{${overrides.join('')}}` : ''
+    return `Dialogue: 0,${formatAssTimestamp(e.startSec)},${formatAssTimestamp(e.endSec)},${style},,0,0,0,,${prefix}${escapeAssText(e.text)}`
+  })
+  return [...header, ...lines, ''].join('\n')
+}
+
+/**
+ * The subtitles filter parses its argument like a mini-language: backslashes,
+ * quotes and colons (Windows drive letters!) must be escaped or the filter
+ * splits the path.
+ */
+export function escapeSubtitlesFilterPath(path: string): string {
+  return path.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '\\:')
+}
+
+/** Burn an ASS document into the video track (audio copied untouched). */
+export function buildSubtitleBurnArgs(
+  inputPath: string,
+  assPath: string,
+  outPath: string
+): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    inputPath,
+    '-vf',
+    `subtitles=filename='${escapeSubtitlesFilterPath(assPath)}'`,
+    ...ENCODE_ARGS,
+    '-c:a',
     'copy',
     '-movflags',
     '+faststart',
@@ -300,7 +585,7 @@ export function parseProgressLine(line: string): number | null {
   return null
 }
 
-export type RenderStep = 'probe' | 'normalize' | 'concat' | 'mux'
+export type RenderStep = 'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'mux'
 
 export interface StageSpan {
   step: RenderStep
@@ -312,17 +597,24 @@ export interface StageSpan {
  * Percent budget of each pipeline stage, proportional to where the time
  * actually goes: encoding dominates when normalizing; stream copy is fast.
  */
-export function computeStageSpans(needsNormalize: boolean, hasMusic: boolean): StageSpan[] {
+export function computeStageSpans(
+  needsNormalize: boolean,
+  hasMusic: boolean,
+  extras: { hasTransitions?: boolean; hasSubtitles?: boolean } = {}
+): StageSpan[] {
   const weights: Array<[RenderStep, number]> = needsNormalize
     ? [
         ['probe', 4],
         ['normalize', 66],
+        ['transition', extras.hasTransitions ? 12 : 0],
         ['concat', 15],
+        ['subtitles', extras.hasSubtitles ? 12 : 0],
         ['mux', hasMusic ? 15 : 0]
       ]
     : [
         ['probe', 10],
         ['concat', 60],
+        ['subtitles', extras.hasSubtitles ? 15 : 0],
         ['mux', hasMusic ? 30 : 0]
       ]
   const total = weights.reduce((acc, [, w]) => acc + w, 0)

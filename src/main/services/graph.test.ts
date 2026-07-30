@@ -19,6 +19,9 @@ import {
   listGraph,
   removeNode,
   replaceNodeModel,
+  setClipTransition,
+  setClipTrim,
+  setTimelineOrder,
   updateNodeIntent,
   updateNodeParams
 } from './graph'
@@ -571,5 +574,60 @@ describe('video defaults & style-at-payload markers (§4.5)', () => {
     replaceNodeModel(node.id, 'bytedance/seedance-2')
     const swapped = listGraph(videoId).nodes.find((n) => n.id === node.id)!
     expect((swapped.params as Record<string, unknown>).applyVideoStyle).toBe(true)
+  })
+})
+
+describe('timeline editing (order / trim / transition)', () => {
+  it('setTimelineOrder stamps every listed clip as ONE undo step', () => {
+    const a = createNode({ videoId, modelId: SEEDANCE })
+    const b = createNode({ videoId, modelId: SEEDANCE })
+    const c = createNode({ videoId, modelId: SEEDANCE })
+    setTimelineOrder(videoId, [c.id, a.id, b.id])
+
+    const byId = new Map(listGraph(videoId).nodes.map((n) => [n.id, n]))
+    expect(byId.get(c.id)?.timelineOrder).toBe(0)
+    expect(byId.get(a.id)?.timelineOrder).toBe(1)
+    expect(byId.get(b.id)?.timelineOrder).toBe(2)
+
+    // One gesture, one undo step: all three stamps disappear together.
+    undoGraph(videoId)
+    const after = new Map(listGraph(videoId).nodes.map((n) => [n.id, n]))
+    expect(after.get(c.id)?.timelineOrder).toBeNull()
+    expect(after.get(a.id)?.timelineOrder).toBeNull()
+    expect(after.get(b.id)?.timelineOrder).toBeNull()
+  })
+
+  it('setTimelineOrder refuses ids from another video', () => {
+    const mine = createNode({ videoId, modelId: SEEDANCE })
+    const otherVideo = createVideo(projectId, 'Other').id
+    const foreign = createNode({ videoId: otherVideo, modelId: SEEDANCE })
+    expect(() => setTimelineOrder(videoId, [mine.id, foreign.id])).toThrow(/does not belong/)
+  })
+
+  it('setClipTrim persists a valid window and rejects an inverted one', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE })
+    setClipTrim(node.id, { trimStartSec: 1, trimEndSec: 5 })
+    const row = listGraph(videoId).nodes.find((n) => n.id === node.id)!
+    expect(row.trimStartSec).toBe(1)
+    expect(row.trimEndSec).toBe(5)
+
+    expect(() => setClipTrim(node.id, { trimStartSec: -1, trimEndSec: null })).toThrow(/≥ 0/)
+    expect(() => setClipTrim(node.id, { trimStartSec: 5, trimEndSec: 3 })).toThrow(/after the/)
+
+    // Nulls clear the window.
+    setClipTrim(node.id, { trimStartSec: null, trimEndSec: null })
+    const cleared = listGraph(videoId).nodes.find((n) => n.id === node.id)!
+    expect(cleared.trimStartSec).toBeNull()
+    expect(cleared.trimEndSec).toBeNull()
+  })
+
+  it('setClipTransition toggles the crossfade and undo restores the cut', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE })
+    setClipTransition(node.id, 'crossfade')
+    expect(listGraph(videoId).nodes.find((n) => n.id === node.id)?.transitionAfter).toBe(
+      'crossfade'
+    )
+    undoGraph(videoId)
+    expect(listGraph(videoId).nodes.find((n) => n.id === node.id)?.transitionAfter).toBeNull()
   })
 })

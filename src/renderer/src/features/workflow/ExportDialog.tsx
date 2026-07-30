@@ -12,6 +12,11 @@ import { RENDER_PRESETS, type RenderPreset, type WorkflowIO } from './useWorkflo
 export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => void }) {
   const { t } = useTranslation()
   const [preset, setPreset] = useState<RenderPreset | 'auto'>('auto')
+  const [burnSubtitles, setBurnSubtitles] = useState(false)
+  const [watermarkText, setWatermarkText] = useState('')
+  const [watermarkPosition, setWatermarkPosition] = useState<
+    'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  >('bottom-right')
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -66,7 +71,17 @@ export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => v
                   // Close first: the native save dialog takes over, then the
                   // editor's floating progress island reports the render.
                   onClose()
-                  void io.exportMp4(preset === 'auto' ? undefined : preset)
+                  void io.exportMp4(preset === 'auto' ? undefined : preset, {
+                    burnSubtitles,
+                    ...(watermarkText.trim()
+                      ? {
+                          watermark: {
+                            text: watermarkText.trim(),
+                            position: watermarkPosition
+                          }
+                        }
+                      : {})
+                  })
                 }}
               >
                 {io.renderingMp4 ? t('editor.rendering') : t('exportDialog.exportBtn')}
@@ -92,6 +107,35 @@ export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => v
                   onClick={() => setPreset(p)}
                 />
               ))}
+            </div>
+            <label className="mt-2 flex items-center gap-1.5 text-[11px] text-neutral-300">
+              <input
+                type="checkbox"
+                checked={burnSubtitles}
+                onChange={(e) => setBurnSubtitles(e.target.checked)}
+              />
+              {t('exportDialog.mp4Subtitles')}
+            </label>
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <input
+                className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 placeholder:text-neutral-600 focus:border-accent focus:outline-none"
+                placeholder={t('exportDialog.watermarkPlaceholder')}
+                maxLength={80}
+                value={watermarkText}
+                onChange={(e) => setWatermarkText(e.target.value)}
+              />
+              <select
+                className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
+                value={watermarkPosition}
+                disabled={watermarkText.trim() === ''}
+                onChange={(e) => setWatermarkPosition(e.target.value as typeof watermarkPosition)}
+              >
+                {(['bottom-right', 'bottom-left', 'top-right', 'top-left'] as const).map((p) => (
+                  <option key={p} value={p}>
+                    {t(`exportDialog.watermarkCorner.${p}` as never)}
+                  </option>
+                ))}
+              </select>
             </div>
           </ExportCard>
 

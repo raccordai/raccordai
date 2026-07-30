@@ -157,6 +157,21 @@ export const nodes = sqliteTable(
     params: text('params', { mode: 'json' }).notNull(),
     /** Active output for downstream nodes. No FK: generations reference nodes already. */
     selectedGenerationId: text('selected_generation_id'),
+    /** Explicit timeline slot (0-based). Null = legacy label-number ordering. */
+    timelineOrder: integer('timeline_order'),
+    /** Timeline trim: in/out points in seconds within the clip's media. */
+    trimStartSec: real('trim_start_sec'),
+    trimEndSec: real('trim_end_sec'),
+    /** Transition INTO the next clip at render time: a CLIP_TRANSITIONS id | null (cut). */
+    transitionAfter: text('transition_after'),
+    /** Transition length in seconds (null = TRANSITION_DEFAULT_SECONDS). */
+    transitionDurationSec: real('transition_duration_sec'),
+    /** Text layer burned over this clip at render time: { text, align, size }. */
+    overlay: text('overlay', { mode: 'json' }).$type<{
+      text: string
+      align: number
+      size: 'sm' | 'md' | 'lg'
+    } | null>(),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },
@@ -184,6 +199,41 @@ export const edges = sqliteTable(
     createdAt: integer('created_at').notNull()
   },
   (table) => [index('edges_by_video').on(table.videoId)]
+)
+
+/**
+ * Free text layers of a video's timeline (§6.12b): titles, captions, credits.
+ * Independent of the clips — they live in absolute FINAL-timeline seconds,
+ * like an NLE title track — positioned anywhere on the frame (normalized
+ * x/y + ASS numpad anchor) with their own typography. Burned at render time
+ * through the same libass pass as subtitles and the watermark.
+ */
+export const textLayers = sqliteTable(
+  'text_layers',
+  {
+    id: text('id').primaryKey(),
+    videoId: text('video_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    content: text('content').notNull(),
+    startSec: real('start_sec').notNull(),
+    endSec: real('end_sec').notNull(),
+    /** Normalized anchor position on the frame (0–1). */
+    x: real('x').notNull(),
+    y: real('y').notNull(),
+    /** ASS numpad alignment: which corner of the text sits on (x, y). */
+    anchor: integer('anchor').notNull(),
+    /** Font family name (null = the renderer's default sans). */
+    fontFamily: text('font_family'),
+    /** Font size as a percentage of the output height (resolution-independent). */
+    sizePct: real('size_pct').notNull(),
+    bold: integer('bold', { mode: 'boolean' }).notNull(),
+    italic: integer('italic', { mode: 'boolean' }).notNull(),
+    /** #RRGGBB fill color (outline stays automatic for readability). */
+    colorHex: text('color_hex').notNull(),
+    createdAt: integer('created_at').notNull()
+  },
+  (table) => [index('text_layers_by_video').on(table.videoId)]
 )
 
 export const generations = sqliteTable(

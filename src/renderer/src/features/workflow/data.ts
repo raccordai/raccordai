@@ -7,7 +7,8 @@ import type {
   IpcChannel,
   IpcInput,
   IpcOutput,
-  QueueState
+  QueueState,
+  TextLayer
 } from '@shared/ipc/contracts'
 import { invoke } from '@renderer/lib/ipc'
 
@@ -44,6 +45,14 @@ export function useTimelineFallbackImages(videoId: string): UseQueryResult<Recor
   return useQuery({
     queryKey: graphKeys.fallbackImages(videoId),
     queryFn: () => invoke('graph:timelineFallbackImages', { videoId })
+  })
+}
+
+/** The title track (§6.12b) — refreshed by event:workflowChanged like the graph. */
+export function useTextLayers(videoId: string): UseQueryResult<TextLayer[]> {
+  return useQuery({
+    queryKey: ['textLayers', videoId],
+    queryFn: () => invoke('textLayers:list', { videoId })
   })
 }
 

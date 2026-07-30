@@ -58,6 +58,8 @@ async function bootstrap(): Promise<void> {
     void queryClient.invalidateQueries({ queryKey: ['generations'] })
     void queryClient.invalidateQueries({ queryKey: ['assets'] })
     void queryClient.invalidateQueries({ queryKey: ['history'] })
+    // The title track (§6.12b) — its mutations broadcast workflowChanged too.
+    void queryClient.invalidateQueries({ queryKey: ['textLayers'] })
     // The assistant can also change the video's style template (set_video_style).
     void queryClient.invalidateQueries({ queryKey: ['videos'] })
     // The home assistant can create projects and videos.

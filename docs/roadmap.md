@@ -162,6 +162,46 @@ preset, the shot's own legal duration lands in both the param and the prompt's
 beat timeline, and the roles the scenario named are cast on exactly the shots
 that name them — one undo step, no model call at the last mile.
 
+**6.12 — the timeline became an editor** (shipped). It used to be a player: no
+trim (a 5 s clip with 1.2 s of unusable tail meant re-generating), order read
+from the first number in the node's LABEL (reordering = renaming), cuts only,
+no titling. Now the shared contract (`src/shared/timeline.ts` + additive node
+columns) carries an explicit per-clip order, a clamped trim window and a
+per-cut transition, mutated only through the journaled graph service (drag a
+clip or use the scissors popover in TimelineV2; agents use
+`set_timeline_order` / `set_clip_trim` / `set_clip_transition`) and honoured
+by all three consumers — playback, FCPXML (spine in-points) and the MP4
+render. The render gained transitions and burned subtitles — the E2E render
+spec asserts the trimmed/crossfaded duration with ffprobe.
+
+A second pass (**6.12b**) turned that foundation into a real editing surface:
+a curated transition LIBRARY (`src/shared/transitions.ts`, ~10 xfade types —
+crossfade, fade to black/white, wipes, slides, circle open, dissolve,
+pixelize) with a per-cut length (0.1–2 s), per-clip TEXT LAYERS (node
+`overlay` column: text + 9-position grid + size preset, previewed live in the
+timeline player, burned at render), a per-render text WATERMARK (corner +
+translucency, export dialog and `render_video`), all composited through ONE
+libass pass alongside the scenario-dialogue subtitles. UX went with it: the
+scissors popover became a full clip inspector (trim / transition + length /
+text layer), clips open it on double-click, and the track gained horizontal
+zoom (×1.5 steps, scrollable past fit) so a 3-minute edit stays readable.
+Defaults stay invisible — nothing configured is a clean cut with no text.
+Agents drive every bit of it (`set_clip_transition` with duration,
+`set_clip_overlay`, watermark args on `render_video`).
+
+**6.12c — the title track** (shipped): free text layers as a real track
+(`text_layers` table), independent of the clips — absolute timeline seconds,
+positioned ANYWHERE on the frame (normalized x/y + anchor) with full
+typography (any system font, size as % of height, bold/italic, colour). The
+UX is direct manipulation: the Type button drops a layer at the playhead, the
+text is dragged INTO position on the player itself (the preview position is
+the render position), the lane block is dragged to move it in time, and the
+inspector owns the typography. Everything is MCP-drivable
+(`list/add/update/delete_text_layer`) and burns through the same single
+libass pass as the dialogue and the watermark — the E2E render spec asserts
+the burn pass runs. Still open, deliberately: per-clip audio gain/ducking
+(the §6.7 ambient layer stays last).
+
 Two deviations from the original proposals, both deliberate: a checkpoint
 restore replays the raw rows through undo's diff-restore instead of
 `importWorkflow(replace)` (which would delete every generation of the video),

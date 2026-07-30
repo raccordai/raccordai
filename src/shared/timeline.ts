@@ -1,5 +1,6 @@
 import type { GraphNode } from './ipc/contracts'
 import { getModel } from './models'
+import { clampTransitionSeconds, isClipTransitionId } from './transitions'
 
 /**
  * Timeline sequence resolution — the single source of truth for "what clips
@@ -24,12 +25,13 @@ export function shotNumber(node: GraphNode): number | undefined {
 }
 
 /**
- * Timeline display order = the shot number in the node's title (01, 02, 03…).
- * The title is the source of truth: when a shot fails and the user renames
- * another node to take its place, the timeline follows the rename — no need to
- * move anything on the canvas. Numbered nodes come first (sorted numerically,
- * so 2 < 12); unnumbered ones fall back to canvas position (Y, then X), which
- * is also the tiebreaker for equal/missing numbers.
+ * Timeline display order. An explicit `timelineOrder` (the user dragged a clip,
+ * or an agent called set_timeline_order) wins outright — reordered clips come
+ * first, by their slot. Everything else keeps the historical rule: the shot
+ * number in the node's title (01, 02, 03…), because when a shot fails and the
+ * user renames another node to take its place, the timeline follows the
+ * rename. Numbered nodes come before unnumbered ones (sorted numerically, so
+ * 2 < 12); the final fallback is canvas position (Y, then X).
  *
  * We deliberately don't use topological order here: parallel chains (e.g. four
  * independent shots with no cross-edges) all sit at the same dependency depth
@@ -40,6 +42,10 @@ export function shotNumber(node: GraphNode): number | undefined {
  */
 export function timelineOrder(nodes: GraphNode[]): GraphNode[] {
   return [...nodes].sort((a, b) => {
+    const oa = a.timelineOrder ?? null
+    const ob = b.timelineOrder ?? null
+    if (oa !== null && ob !== null && oa !== ob) return oa - ob
+    if ((oa !== null) !== (ob !== null)) return oa !== null ? -1 : 1
     const na = shotNumber(a)
     const nb = shotNumber(b)
     if (na !== undefined && nb !== undefined && na !== nb) return na - nb
@@ -66,11 +72,13 @@ export function collectTimelineClips(nodes: GraphNode[]): GraphNode[] {
 
   const score = (n: GraphNode) => (n.selectedGenerationId ? 1 : 0)
   const byNumber = new Map<number, GraphNode>()
-  const unnumbered: GraphNode[] = []
+  const keptAsIs: GraphNode[] = []
   for (const n of videos) {
     const num = shotNumber(n)
-    if (num === undefined) {
-      unnumbered.push(n)
+    // Explicitly ordered clips are all kept: the user placed them, so the
+    // same-number replacement rule (which drops a node) must not apply.
+    if (num === undefined || typeof n.timelineOrder === 'number') {
+      keptAsIs.push(n)
       continue
     }
     const current = byNumber.get(num)
@@ -82,7 +90,7 @@ export function collectTimelineClips(nodes: GraphNode[]): GraphNode[] {
       byNumber.set(num, n)
     }
   }
-  return timelineOrder([...byNumber.values(), ...unnumbered])
+  return timelineOrder([...byNumber.values(), ...keptAsIs])
 }
 
 /**
@@ -117,6 +125,54 @@ export function bestGeneration<T extends { id: string; status: string; url?: str
 export function clipDuration(node: GraphNode): number | undefined {
   const d = (node.params as { duration?: unknown } | undefined)?.duration
   return typeof d === 'number' ? d : undefined
+}
+
+/**
+ * The clip's trim window inside its media, clamped so bad data can never
+ * produce a negative or inverted range: in-point ≥ 0, out-point > in-point and
+ * (when the raw duration is known) ≤ raw. All three consumers derive playback
+ * and export bounds from this — never read trimStartSec/trimEndSec directly.
+ */
+export function clipTrim(
+  node: GraphNode,
+  rawDurationSec?: number
+): { start: number; end: number | undefined } {
+  const raw = rawDurationSec ?? clipDuration(node)
+  const start = Math.max(0, node.trimStartSec ?? 0)
+  let end = node.trimEndSec ?? raw
+  if (end !== undefined && raw !== undefined) end = Math.min(end, raw)
+  if (end !== undefined && end <= start) return { start: 0, end: raw }
+  return { start, end }
+}
+
+/** The clip's effective duration once trimmed (undefined when unknowable). */
+export function trimmedClipDuration(node: GraphNode, rawDurationSec?: number): number | undefined {
+  const { start, end } = clipTrim(node, rawDurationSec)
+  return end === undefined ? undefined : end - start
+}
+
+/** Transition into the NEXT clip (a CLIP_TRANSITIONS id) or null (plain cut). */
+export function clipTransitionAfter(node: GraphNode): string | null {
+  return isClipTransitionId(node.transitionAfter) ? node.transitionAfter : null
+}
+
+/** The transition's length in seconds (clamped; default when unset). */
+export function clipTransitionSeconds(node: GraphNode): number {
+  return clampTransitionSeconds(node.transitionDurationSec ?? undefined)
+}
+
+/** Default crossfade length — kept for callers that predate per-cut durations. */
+export const CROSSFADE_SECONDS = 0.5
+
+/**
+ * Sequence duration with transition overlaps subtracted: each transition
+ * between clip N and N+1 overlaps them by its own length. The last clip's
+ * transition (nothing follows) is ignored.
+ */
+export function transitionOverlapSeconds(clips: GraphNode[]): number {
+  return clips
+    .slice(0, -1)
+    .reduce((sum, c) => sum + (clipTransitionAfter(c) !== null ? clipTransitionSeconds(c) : 0), 0)
 }
 
 export function clipResolution(node: GraphNode): string | undefined {

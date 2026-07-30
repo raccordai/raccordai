@@ -1,6 +1,6 @@
 import type { GraphNode } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
-import { clipDuration } from '@shared/timeline'
+import { clipDuration, clipTrim } from '@shared/timeline'
 
 /**
  * FCPXML 1.8 timeline export, bundled with its media into a ZIP.
@@ -220,10 +220,15 @@ export function buildFcpxml(
 
   clips.forEach(({ node, mediaPath, isStill, media }, i) => {
     // Prefer the real probed media duration; fall back to the node's configured length.
-    const dur = media?.duration ?? clipDuration(node) ?? DEFAULT_CLIP_SECONDS
+    const raw = media?.duration ?? clipDuration(node) ?? DEFAULT_CLIP_SECONDS
+    // Timeline trim: the clip plays [start, end] of its media. Stills ignore it
+    // (their hold time is the declared clip duration, there is no in-point).
+    const trim = isStill ? { start: 0, end: raw } : clipTrim(node, raw)
+    const dur = (trim.end ?? raw) - trim.start
     const frames = Math.max(1, toFrames(dur))
     const duration = fromFrames(frames)
     const off = fromFrames(offsetFrames)
+    const mediaStart = fromFrames(toFrames(trim.start))
     const clipName = escapeXml(`${String(i + 1).padStart(2, '0')} - ${clipLabel(node)}`)
     const note = escapeXml(buildNote(node, i, dur, !!(mediaPath && isStill)))
     const assetId = `a${i + 1}`
@@ -242,11 +247,13 @@ export function buildFcpxml(
     } else if (mediaPath) {
       // No `hasAudio`: these AI clips are silent, and claiming audio makes FCP
       // conform a track that doesn't exist. `format` matches the real media.
+      // The asset covers the WHOLE media; the spine clip's `start` is the
+      // trim in-point, so FCP keeps the discarded head available for slipping.
       assets.push(
-        `<asset id="${assetId}" name="${clipName}" src="${escapeXml(mediaPath)}" start="0s" duration="${duration}" hasVideo="1" format="${formatId}"/>`
+        `<asset id="${assetId}" name="${clipName}" src="${escapeXml(mediaPath)}" start="0s" duration="${fromFrames(Math.max(1, toFrames(raw)))}" hasVideo="1" format="${formatId}"/>`
       )
       spine.push(
-        `<asset-clip ref="${assetId}" offset="${off}" name="${clipName}" duration="${duration}" start="0s"><note>${note}</note></asset-clip>`
+        `<asset-clip ref="${assetId}" offset="${off}" name="${clipName}" duration="${duration}" start="${mediaStart}"><note>${note}</note></asset-clip>`
       )
     } else {
       spine.push(

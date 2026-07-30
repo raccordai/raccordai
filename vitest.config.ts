@@ -43,6 +43,7 @@ export default defineConfig({
         'src/main/services/continuity.ts',
         'src/main/services/assets.ts',
         'src/main/services/backup.ts',
+        'src/main/services/textLayers.ts',
         'src/main/mcp/registry.ts',
         'src/main/mcp/docs.ts',
         'src/main/media/files.ts',

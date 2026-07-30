@@ -9,6 +9,7 @@ import {
   type LayoutNode
 } from '@shared/graphLayout'
 import { APPLY_VIDEO_STYLE_PARAM } from '@shared/styles/registry'
+import { clampTransitionSeconds, isClipTransitionId } from '@shared/transitions'
 import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes } from '../db/schema'
@@ -129,6 +130,12 @@ export function createNode(args: {
     positionY: position.y,
     params,
     selectedGenerationId: null,
+    timelineOrder: null,
+    trimStartSec: null,
+    trimEndSec: null,
+    transitionAfter: null,
+    transitionDurationSec: null,
+    overlay: null,
     createdAt: now,
     updatedAt: now
   }
@@ -213,6 +220,83 @@ export function updateNodeIntent(nodeId: string, intent: string): void {
 
 export function setSelectedGeneration(nodeId: string, generationId: string | null): void {
   patchNode(nodeId, { selectedGenerationId: generationId })
+}
+
+/**
+ * Timeline editing (§ timeline contract): the explicit slot of EVERY clip, in
+ * one journaled step — a drag stamps the whole sequence so the label-number
+ * fallback can never fight the user's order afterwards. Ids must all belong
+ * to the video; ids of other videos are refused rather than silently skipped.
+ */
+export function setTimelineOrder(videoId: string, nodeIds: string[]): void {
+  const db = getDb()
+  const owned = new Set(
+    db
+      .select({ id: nodes.id })
+      .from(nodes)
+      .where(eq(nodes.videoId, videoId))
+      .all()
+      .map((n) => n.id)
+  )
+  for (const id of nodeIds) {
+    if (!owned.has(id)) throw new Error(`Node ${id} does not belong to this video.`)
+  }
+  withGraphHistory(videoId, () => {
+    db.transaction((tx) => {
+      const now = Date.now()
+      nodeIds.forEach((id, index) => {
+        tx.update(nodes).set({ timelineOrder: index, updatedAt: now }).where(eq(nodes.id, id)).run()
+      })
+    })
+  })
+  touchVideo(videoId)
+}
+
+/**
+ * Trim window of a clip (null clears a bound). Validated here so every surface
+ * (IPC, MCP, chat) gets the same refusal: in-point ≥ 0, out-point > in-point.
+ * The out-point may exceed the media's real length — clipTrim clamps at read
+ * time, since the probed duration is only known to the players.
+ */
+export function setClipTrim(
+  nodeId: string,
+  trim: { trimStartSec: number | null; trimEndSec: number | null }
+): void {
+  const start = trim.trimStartSec
+  const end = trim.trimEndSec
+  if (start !== null && start < 0) throw new Error('Trim in-point must be ≥ 0.')
+  if (end !== null && end <= (start ?? 0)) {
+    throw new Error('Trim out-point must be after the in-point.')
+  }
+  patchNodeWithHistory(nodeId, { trimStartSec: start, trimEndSec: end })
+}
+
+/**
+ * Transition into the NEXT clip: a CLIP_TRANSITIONS id or null (plain cut).
+ * The optional duration travels with it; clearing the transition clears the
+ * duration too (a dangling duration would silently apply to the next choice).
+ */
+export function setClipTransition(
+  nodeId: string,
+  transition: string | null,
+  durationSec?: number | null
+): void {
+  if (transition !== null && !isClipTransitionId(transition)) {
+    throw new Error(`Unknown transition "${transition}".`)
+  }
+  patchNodeWithHistory(nodeId, {
+    transitionAfter: transition,
+    transitionDurationSec:
+      transition === null ? null : durationSec == null ? null : clampTransitionSeconds(durationSec)
+  })
+}
+
+/** Text layer burned over the clip at render time (null clears it). */
+export function setClipOverlay(
+  nodeId: string,
+  overlay: { text: string; align: number; size: 'sm' | 'md' | 'lg' } | null
+): void {
+  patchNodeWithHistory(nodeId, { overlay })
 }
 
 function deleteGenerationsForNode(nodeId: string): void {
