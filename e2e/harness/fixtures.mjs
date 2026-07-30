@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(import.meta.url)
 
 export const FFMPEG = require('ffmpeg-static')
-export const FFPROBE = require('ffprobe-static').path
+export const FFPROBE = require('@ffprobe-installer/ffprobe').path
 
 export const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.fixtures')
 

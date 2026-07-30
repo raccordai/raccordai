@@ -15,7 +15,7 @@ asarUnpack:
   # ffmpeg/ffprobe must be real executables on disk — they are spawned as
   # child processes (MP4 render) and can't run from inside the asar.
   - 'node_modules/ffmpeg-static/**'
-  - 'node_modules/ffprobe-static/**'
+  - 'node_modules/@ffprobe-installer/**'
 extraResources:
   - from: drizzle
     to: drizzle

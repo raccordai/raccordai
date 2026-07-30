@@ -1133,6 +1133,8 @@ export const ipcContracts = {
   },
   /** Empties a thread's transcript, keeping the thread. */
   'chat:clear': { input: z.object({ threadId: z.string() }), output: z.void() },
+  /** Stops the in-flight assistant turn (no-op when the thread is idle). */
+  'chat:stop': { input: z.object({ threadId: z.string() }), output: z.void() },
   /** Conversation threads for the sidebar switcher, most recent first. */
   'chat:listThreads': {
     input: z.void(),

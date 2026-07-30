@@ -39,12 +39,17 @@
       "electron-winstaller",
       "esbuild",
       "better-sqlite3",
-      "ffmpeg-static"
+      "ffmpeg-static",
+      "@ffprobe-installer/darwin-arm64",
+      "@ffprobe-installer/darwin-x64",
+      "@ffprobe-installer/linux-x64",
+      "@ffprobe-installer/linux-arm64"
     ]
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@dagrejs/dagre": "^3.0.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "@hono/node-server": "^2.0.11",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@tanstack/react-query": "^5.101.4",
@@ -55,7 +60,6 @@
     "electron-updater": "^6.8.9",
     "fflate": "^0.8.3",
     "ffmpeg-static": "^5.3.0",
-    "ffprobe-static": "^3.1.0",
     "hono": "^4.12.32",
     "i18next": "^26.3.6",
     "lucide-react": "^1.26.0",
@@ -73,7 +77,6 @@
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/router-plugin": "^1.168.23",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/ffprobe-static": "^2.0.3",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

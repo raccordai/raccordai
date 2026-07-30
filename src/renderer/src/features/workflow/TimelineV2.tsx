@@ -11,6 +11,7 @@ import {
   Play
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { GraphNode } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
 import { useTimelineFallbackImages, useVideoGenerations } from './data'
@@ -356,6 +357,7 @@ export function TimelineV2({
   collapsed: boolean
   setCollapsed: (v: boolean) => void
 }) {
+  const { t } = useTranslation()
   const clipNodes = useMemo(() => collectTimelineClips(graph.nodes), [graph.nodes])
   const audioNodes = useMemo(
     () => graph.nodes.filter((n) => getModel(n.modelId)?.kind === 'audio'),
@@ -440,14 +442,14 @@ export function TimelineV2({
         <button
           onClick={() => setCollapsed(false)}
           className="flex items-center gap-1.5 rounded px-1.5 py-0.5 font-semibold text-neutral-200 hover:bg-neutral-800"
-          title="Show timeline"
+          title={t('timeline.show')}
         >
-          <Film className="h-3.5 w-3.5 text-accent" /> Timeline
+          <Film className="h-3.5 w-3.5 text-accent" /> {t('timeline.title')}
           <ChevronUp className="h-3.5 w-3.5 text-neutral-400" />
         </button>
         {clips.length > 0 && (
           <span className="text-neutral-500">
-            {clips.length} clip{clips.length > 1 ? 's' : ''} · {fmt(engine.total)}
+            {t('timeline.clipCount', { count: clips.length })} · {fmt(engine.total)}
           </span>
         )}
       </div>
@@ -457,11 +459,11 @@ export function TimelineV2({
   if (clips.length === 0) {
     return (
       <div className="island relative flex h-32 items-center justify-center overflow-hidden text-xs text-neutral-600">
-        <Film className="mr-2 h-4 w-4" /> Add video nodes to populate the timeline.
+        <Film className="mr-2 h-4 w-4" /> {t('timeline.empty')}
         <button
           onClick={() => setCollapsed(true)}
           className="absolute top-2 right-2 rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-          title="Hide timeline"
+          title={t('timeline.hide')}
         >
           <ChevronDown className="h-4 w-4" />
         </button>
@@ -479,7 +481,7 @@ export function TimelineV2({
       <div
         onPointerDown={startDrag}
         className="group absolute inset-x-0 -top-1.5 z-30 h-3 cursor-row-resize"
-        title="Drag to resize the timeline"
+        title={t('timeline.resize')}
       >
         <div
           className={`mx-auto mt-1 h-1 w-16 rounded-full transition ${
@@ -491,14 +493,14 @@ export function TimelineV2({
         {/* ── Header: transport controls + global clock ───────────────────── */}
         <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-1.5 text-[11px]">
           <span className="flex items-center gap-1.5 font-semibold text-neutral-200">
-            <Film className="h-3.5 w-3.5 text-accent" /> Timeline
+            <Film className="h-3.5 w-3.5 text-accent" /> {t('timeline.title')}
           </span>
           <span className="text-neutral-500">
-            {clips.length} clip{clips.length > 1 ? 's' : ''}
+            {t('timeline.clipCount', { count: clips.length })}
           </span>
           {anyRunning && (
             <span className="flex items-center gap-1 text-warning">
-              <Loader2 className="h-3 w-3 animate-spin" /> generating
+              <Loader2 className="h-3 w-3 animate-spin" /> {t('timeline.generating')}
             </span>
           )}
 
@@ -509,14 +511,14 @@ export function TimelineV2({
                 engine.seek(engine.starts[prev] ?? 0)
               }}
               className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-              title="Previous clip"
+              title={t('timeline.prevClip')}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               onClick={() => (engine.playing ? engine.pause() : engine.play())}
               className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-neutral-900 hover:bg-accent-hover"
-              aria-label={engine.playing ? 'Pause' : 'Play'}
+              aria-label={engine.playing ? t('timeline.pause') : t('timeline.play')}
             >
               {engine.playing ? (
                 <Pause className="h-3.5 w-3.5" />
@@ -530,7 +532,7 @@ export function TimelineV2({
                 engine.seek(engine.starts[next] ?? 0)
               }}
               className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-              title="Next clip"
+              title={t('timeline.nextClip')}
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -545,7 +547,7 @@ export function TimelineV2({
           <button
             onClick={() => setCollapsed(true)}
             className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-            title="Hide timeline"
+            title={t('timeline.hide')}
           >
             <ChevronDown className="h-4 w-4" />
           </button>
@@ -558,7 +560,7 @@ export function TimelineV2({
           <div
             className="video-stack relative aspect-video flex-shrink-0 cursor-pointer border-r border-neutral-800 bg-black"
             onClick={() => (engine.playing ? engine.pause() : engine.play())}
-            title="Play / pause (click)"
+            title={t('timeline.playPause')}
           >
             <video
               ref={engine.videoARef}
@@ -585,7 +587,7 @@ export function TimelineV2({
                 ) : (
                   <>
                     <AlertCircle className="h-4 w-4" />
-                    <span>No output for this clip yet</span>
+                    <span>{t('timeline.noOutput')}</span>
                   </>
                 )}
               </div>
@@ -672,7 +674,7 @@ export function TimelineV2({
                       </div>
                       {!clip.url && (
                         <div className="absolute inset-0 flex items-center justify-center text-[9px] text-neutral-600">
-                          {anyRunning ? 'generating…' : 'empty'}
+                          {anyRunning ? t('timeline.clipGenerating') : t('timeline.clipEmpty')}
                         </div>
                       )}
                     </div>

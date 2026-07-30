@@ -1,5 +1,11 @@
+import { randomUUID } from 'node:crypto'
+import { existsSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
+import type { Db } from '../db/client'
+import { generations } from '../db/schema'
+import { mediaDirFor } from '../media/files'
 import { createProject } from './projects'
 import { createVideo } from './videos'
 import { clearGraphHistory, historyState, redoGraph, undoGraph } from './graphHistory'
@@ -16,12 +22,15 @@ import {
 
 const SEEDANCE = 'bytedance/seedance-2-fast'
 
+let db: Db
 let videoId: string
+let projectId: string
 
 beforeEach(() => {
-  useTestDatabase()
+  db = useTestDatabase()
   clearGraphHistory()
   const project = createProject('P')
+  projectId = project.id
   videoId = createVideo(project.id, 'V').id
 })
 
@@ -30,6 +39,33 @@ afterEach(() => resetTestDatabase())
 describe('graph history', () => {
   it('starts empty', () => {
     expect(historyState(videoId)).toEqual({ canUndo: false, canRedo: false })
+  })
+
+  it('undoing a node creation deletes the media of its generations', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    const dir = mediaDirFor(projectId)
+    const id = randomUUID()
+    const resultPath = join(dir, `${id}.mp4`)
+    const lastFramePath = join(dir, `${id}-frame.jpg`)
+    writeFileSync(resultPath, 'video-bytes')
+    writeFileSync(lastFramePath, 'frame-bytes')
+    db.insert(generations)
+      .values({
+        id,
+        nodeId: node.id,
+        videoId,
+        status: 'success',
+        resultPath,
+        lastFramePath,
+        createdAt: 1
+      })
+      .run()
+
+    undoGraph(videoId)
+    expect(listGraph(videoId).nodes).toHaveLength(0)
+    // The cascade removed the generation rows; the files must not be orphaned.
+    expect(existsSync(resultPath)).toBe(false)
+    expect(existsSync(lastFramePath)).toBe(false)
   })
 
   it('undoes and redoes a node creation', () => {

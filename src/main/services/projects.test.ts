@@ -1,5 +1,12 @@
+import { randomUUID } from 'node:crypto'
+import { existsSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
+import type { Db } from '../db/client'
+import { generations } from '../db/schema'
+import { mediaDirFor } from '../media/files'
+import { createNode } from './graph'
 import { createProject, deleteProject, getProject, listProjects, renameProject } from './projects'
 import {
   createVideo,
@@ -13,10 +20,30 @@ import {
   setVideoStyle
 } from './videos'
 
+let db: Db
+
 beforeEach(() => {
-  useTestDatabase()
+  db = useTestDatabase()
 })
 afterEach(() => resetTestDatabase())
+
+/** A success generation whose media really exists in the managed store. */
+function insertGenerationWithMedia(
+  projectId: string,
+  videoId: string,
+  nodeId: string
+): { resultPath: string; lastFramePath: string } {
+  const dir = mediaDirFor(projectId)
+  const id = randomUUID()
+  const resultPath = join(dir, `${id}.mp4`)
+  const lastFramePath = join(dir, `${id}-frame.jpg`)
+  writeFileSync(resultPath, 'video-bytes')
+  writeFileSync(lastFramePath, 'frame-bytes')
+  db.insert(generations)
+    .values({ id, nodeId, videoId, status: 'success', resultPath, lastFramePath, createdAt: 1 })
+    .run()
+  return { resultPath, lastFramePath }
+}
 
 describe('projects', () => {
   it('creates and reads back a project', () => {
@@ -38,6 +65,18 @@ describe('projects', () => {
     expect(getProject(p.id)).toBeNull()
     expect(getVideo(v.id)).toBeNull()
   })
+
+  it('deleting a project removes its media directory from disk', () => {
+    const p = createProject('P')
+    const v = createVideo(p.id, 'V')
+    const node = createNode({ videoId: v.id, modelId: 'bytedance/seedance-2-fast' })
+    const media = insertGenerationWithMedia(p.id, v.id, node.id)
+    expect(existsSync(media.resultPath)).toBe(true)
+
+    deleteProject(p.id)
+    expect(existsSync(media.resultPath)).toBe(false)
+    expect(existsSync(media.lastFramePath)).toBe(false)
+  })
 })
 
 describe('videos', () => {
@@ -57,6 +96,23 @@ describe('videos', () => {
     deleteVideo(v.id)
     expect(getVideo(v.id)).toBeNull()
     expect(listVideos(p.id)).toHaveLength(0)
+  })
+
+  it('deleting a video removes its generation media, not the project media dir', () => {
+    const p = createProject('P')
+    const v = createVideo(p.id, 'V')
+    const other = createVideo(p.id, 'Other')
+    const node = createNode({ videoId: v.id, modelId: 'bytedance/seedance-2-fast' })
+    const otherNode = createNode({ videoId: other.id, modelId: 'bytedance/seedance-2-fast' })
+    const media = insertGenerationWithMedia(p.id, v.id, node.id)
+    const kept = insertGenerationWithMedia(p.id, other.id, otherNode.id)
+
+    deleteVideo(v.id)
+    expect(existsSync(media.resultPath)).toBe(false)
+    expect(existsSync(media.lastFramePath)).toBe(false)
+    // A sibling video's media is untouched.
+    expect(existsSync(kept.resultPath)).toBe(true)
+    expect(existsSync(kept.lastFramePath)).toBe(true)
   })
 
   it('attaches, clears and validates the style template', () => {

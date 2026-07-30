@@ -4,7 +4,8 @@ import type { Video } from '@shared/ipc/contracts'
 import type { Scenario } from '@shared/scenario'
 import { isStyleId } from '@shared/styles/registry'
 import { getDb } from '../db/client'
-import { videos } from '../db/schema'
+import { generations, nodes, videos } from '../db/schema'
+import { deleteMediaFile } from '../media/files'
 import { unbindThreadsOfVideo } from './chatStore'
 
 export type VideoRow = typeof videos.$inferSelect
@@ -116,11 +117,25 @@ export function renameVideo(id: string, name: string): void {
 }
 
 export function deleteVideo(id: string): void {
+  const db = getDb()
+  // The cascade only removes the generation ROWS — their media files are
+  // collected first and deleted once the rows are gone (assets are
+  // project-scoped and survive the video).
+  const media = db
+    .select({ resultPath: generations.resultPath, lastFramePath: generations.lastFramePath })
+    .from(generations)
+    .innerJoin(nodes, eq(generations.nodeId, nodes.id))
+    .where(eq(nodes.videoId, id))
+    .all()
   // chat_threads.video_id has no FK (a conversation outlives its video), so the
   // demotion to "unbound" is explicit — otherwise a bound thread would keep
   // injecting a dead videoId into every tool call.
   unbindThreadsOfVideo(id)
-  getDb().delete(videos).where(eq(videos.id, id)).run()
+  db.delete(videos).where(eq(videos.id, id)).run()
+  for (const m of media) {
+    deleteMediaFile(m.resultPath)
+    deleteMediaFile(m.lastFramePath)
+  }
 }
 
 export function touchVideo(id: string): void {

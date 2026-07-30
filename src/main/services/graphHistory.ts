@@ -1,7 +1,8 @@
 import { eq, inArray } from 'drizzle-orm'
 import { getDb } from '../db/client'
-import { edges, nodes } from '../db/schema'
+import { edges, generations, nodes } from '../db/schema'
 import { broadcastWorkflowChanged } from '../events'
+import { deleteMediaFile } from '../media/files'
 
 /**
  * Per-video undo/redo journal for graph mutations.
@@ -76,6 +77,9 @@ function snapshotsEqual(a: GraphSnapshot, b: GraphSnapshot): boolean {
 /** Diff-restore: only touch rows that differ, so unrelated generations survive. */
 function restoreSnapshot(videoId: string, snapshot: GraphSnapshot): void {
   const db = getDb()
+  // Media of the generations the cascade is about to delete — removed from
+  // disk only after the transaction commits (a rollback must not lose files).
+  const orphanedMedia: (string | null)[] = []
   db.transaction((tx) => {
     const currentNodes = tx.select().from(nodes).where(eq(nodes.videoId, videoId)).all()
     const currentEdges = tx.select().from(edges).where(eq(edges.videoId, videoId)).all()
@@ -84,7 +88,15 @@ function restoreSnapshot(videoId: string, snapshot: GraphSnapshot): void {
 
     // Nodes the snapshot doesn't have → delete (cascades their edges + generations).
     const extraNodeIds = currentNodes.filter((n) => !wantNodes.has(n.id)).map((n) => n.id)
-    if (extraNodeIds.length > 0) tx.delete(nodes).where(inArray(nodes.id, extraNodeIds)).run()
+    if (extraNodeIds.length > 0) {
+      const gens = tx
+        .select({ resultPath: generations.resultPath, lastFramePath: generations.lastFramePath })
+        .from(generations)
+        .where(inArray(generations.nodeId, extraNodeIds))
+        .all()
+      for (const g of gens) orphanedMedia.push(g.resultPath, g.lastFramePath)
+      tx.delete(nodes).where(inArray(nodes.id, extraNodeIds)).run()
+    }
 
     // Upsert snapshot nodes.
     const currentById = new Map(currentNodes.map((n) => [n.id, n]))
@@ -111,6 +123,7 @@ function restoreSnapshot(videoId: string, snapshot: GraphSnapshot): void {
       }
     }
   })
+  for (const path of orphanedMedia) deleteMediaFile(path)
 }
 
 /**

@@ -368,6 +368,7 @@ export function registerIpcHandlers(): void {
     chatService.sendChatMessage(threadId, projectId ?? '', text, images, context)
   )
   handle('chat:clear', ({ threadId }) => chatService.clearChat(threadId))
+  handle('chat:stop', ({ threadId }) => chatService.stopChat(threadId))
   handle('chat:listThreads', () => chatService.listThreads())
   handle('chat:newThread', ({ projectId }) => ({
     threadId: chatService.newThread(projectId ? { projectId } : {})

@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { app } from 'electron'
 import ffmpegStatic from 'ffmpeg-static'
-import ffprobeStatic from 'ffprobe-static'
+// NOT ffprobe-static: its darwin/arm64 binary is actually x86_64, which kills
+// the probe step (and the whole MP4 render) on Apple Silicon without Rosetta.
+import ffprobeInstaller from '@ffprobe-installer/ffprobe'
 import type { GraphNode } from '@shared/ipc/contracts'
 import {
   bestGeneration,
@@ -95,7 +97,7 @@ function ffmpegPath(): string {
 }
 
 function ffprobePath(): string {
-  return unpacked(ffprobeStatic.path)
+  return unpacked(ffprobeInstaller.path)
 }
 
 function run(

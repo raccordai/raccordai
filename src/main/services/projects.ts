@@ -3,6 +3,7 @@ import { desc, eq } from 'drizzle-orm'
 import type { Project } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { projects } from '../db/schema'
+import { deleteProjectMedia } from '../media/files'
 
 export function listProjects(): Project[] {
   return getDb().select().from(projects).orderBy(desc(projects.updatedAt)).all()
@@ -25,4 +26,7 @@ export function renameProject(id: string, name: string): void {
 
 export function deleteProject(id: string): void {
   getDb().delete(projects).where(eq(projects.id, id)).run()
+  // The whole managed store for the project (generation results, extracted
+  // frames, imported assets) — nothing under it can outlive the project rows.
+  deleteProjectMedia(id)
 }

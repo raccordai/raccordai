@@ -54,10 +54,16 @@ Rules and how to add a spec: `e2e/README.md`.
 
 ## 3. Technical robustness
 
-| Proposal                                                  | Effort | Why                                                                                                                                                                                                                                                                     |
-| --------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ship an arm64-native ffprobe                              | S      | `ffprobe-static@3.1.0` puts an **x86_64** binary in `bin/darwin/arm64/` (verified on a packaged build) — on an Apple Silicon Mac without Rosetta 2 the probe step fails and takes the whole MP4 render with it. `ffmpeg-static` is genuinely arm64; only ffprobe is not |
-| Opt-in crash telemetry (Sentry or self-hosted equivalent) | M      | Without crash reports, open-source support will be blind                                                                                                                                                                                                                |
+Shipped: the arm64-native ffprobe (`@ffprobe-installer/ffprobe` replaced
+`ffprobe-static`, whose darwin/arm64 binary was actually x86_64 and broke the
+MP4 render on Apple Silicon without Rosetta 2) and disk cleanup on delete
+(`deleteProject` removes the project's media directory; `deleteVideo` and the
+undo/checkpoint diff-restore delete the media files of the generations their
+cascade removes).
+
+| Proposal                                                  | Effort | Why                                                      |
+| --------------------------------------------------------- | ------ | -------------------------------------------------------- |
+| Opt-in crash telemetry (Sentry or self-hosted equivalent) | M      | Without crash reports, open-source support will be blind |
 
 ## 4. Product — smaller items
 

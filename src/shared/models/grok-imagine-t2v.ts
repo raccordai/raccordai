@@ -23,6 +23,8 @@ export const grokImagineT2V: ModelDefinition<Params> = {
     'Generate a video from a text prompt alone (Grok Imagine). Native audio, 6-30s clips.',
   kind: 'video',
   recommendedFor: ['text-to-video', 'native-audio'],
+  // No cheaper sibling — draft = same model forced to 480p.
+  draftEquivalent: { modelId: 'grok-imagine/text-to-video', params: { resolution: '480p' } },
   paramsSchema,
   paramFields: [
     {
@@ -108,8 +110,9 @@ FULL EXAMPLE:
   "A weathered fisherman in a yellow raincoat stands at the bow of a small boat in heavy rain,
   gripping the rail as waves rock the hull, handheld camera, cold blue light, rain SFX and low
   ominous strings."`,
-  // No estimateCredits: kie.ai publishes no rate for this model yet — fill in
-  // from the dashboard (https://kie.ai/pricing) once known; never guess.
+  // kie.ai pricing (2026-07): grok-imagine text-to-video — 1.6 cr/s at 480p,
+  // 3 cr/s at 720p.
+  estimateCredits: (params) => ({ '480p': 1.6, '720p': 3 })[params.resolution] * params.duration,
   buildPayload: ({ params }) => ({
     prompt: params.prompt,
     aspect_ratio: params.aspect_ratio,

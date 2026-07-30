@@ -82,7 +82,7 @@ jobs:
           unpacked="$app/Contents/Resources/app.asar.unpacked/node_modules"
           for bin in \
             "$unpacked/ffmpeg-static/ffmpeg" \
-            "$unpacked/ffprobe-static/bin/darwin/arm64/ffprobe"; do
+            "$unpacked/@ffprobe-installer/darwin-arm64/ffprobe"; do
             echo "checking $bin"
             test -x "$bin"
             codesign -dvv "$bin" 2>&1 | tee /tmp/sig.txt

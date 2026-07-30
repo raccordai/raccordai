@@ -23,6 +23,7 @@ import {
   stripImageBlocks
 } from './chatCompaction'
 import { formatAppContext } from './chatContext'
+import { cacheableMessages, cacheableSystem, cacheableTools } from './chatCache'
 import {
   SseParser,
   createAnthropicAccumulator,
@@ -689,7 +690,9 @@ async function readSse(
  */
 async function withIdleTimeout<T>(
   label: string,
-  run: (watchdog: { signal: AbortSignal; ping: () => void }) => Promise<T>
+  run: (watchdog: { signal: AbortSignal; ping: () => void }) => Promise<T>,
+  /** External abort (the user's Stop button) — forwarded to the fetch/read. */
+  externalSignal?: AbortSignal
 ): Promise<T> {
   const controller = new AbortController()
   let expired = false
@@ -701,6 +704,9 @@ async function withIdleTimeout<T>(
       controller.abort()
     }, PROVIDER_IDLE_TIMEOUT_MS)
   }
+  const forwardAbort = (): void => controller.abort()
+  if (externalSignal?.aborted) controller.abort()
+  externalSignal?.addEventListener('abort', forwardAbort)
   ping()
   try {
     return await run({ signal: controller.signal, ping })
@@ -714,51 +720,61 @@ async function withIdleTimeout<T>(
     throw err
   } finally {
     clearTimeout(timer)
+    externalSignal?.removeEventListener('abort', forwardAbort)
   }
 }
 
 function kieClaudeCreate(
   apiKey: string,
   body: Record<string, unknown>,
-  onTextDelta?: (delta: string) => void
+  onTextDelta?: (delta: string) => void,
+  abortSignal?: AbortSignal
 ): Promise<KieClaudeMessage> {
-  return withIdleTimeout('kie.ai Claude', async ({ signal, ping }) => {
-    const res = await fetch(`${KIE_BASE}/claude/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify(body),
-      signal
-    })
-    ping()
-    // §4.10 phase 6: the proxy streams (stream: true); a JSON body remains
-    // accepted as fallback (mocks, proxies that ignore the flag).
-    if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
-      const accumulator = createAnthropicAccumulator(onTextDelta)
-      await readSse(res, (event) => accumulator.push(event), ping)
-      const message = accumulator.finish()
-      if (message.error) {
-        throw new Error(`kie.ai Claude stream failed: ${message.error.message ?? 'unknown error'}`)
+  return withIdleTimeout(
+    'kie.ai Claude',
+    async ({ signal, ping }) => {
+      const res = await fetch(`${KIE_BASE}/claude/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify(body),
+        signal
+      })
+      ping()
+      // §4.10 phase 6: the proxy streams (stream: true); a JSON body remains
+      // accepted as fallback (mocks, proxies that ignore the flag).
+      if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
+        const accumulator = createAnthropicAccumulator(onTextDelta)
+        await readSse(res, (event) => accumulator.push(event), ping)
+        const message = accumulator.finish()
+        if (message.error) {
+          throw new Error(
+            `kie.ai Claude stream failed: ${message.error.message ?? 'unknown error'}`
+          )
+        }
+        return message
       }
-      return message
-    }
-    const raw = await res.text()
-    let json: KieClaudeMessage
-    try {
-      json = JSON.parse(raw) as KieClaudeMessage
-    } catch {
-      throw new Error(`kie.ai Claude returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`)
-    }
-    if (!res.ok || json.error) {
-      throw new Error(
-        `kie.ai Claude failed (HTTP ${res.status}): ${json.error?.message ?? raw.slice(0, 300)}`
-      )
-    }
-    return json
-  })
+      const raw = await res.text()
+      let json: KieClaudeMessage
+      try {
+        json = JSON.parse(raw) as KieClaudeMessage
+      } catch {
+        throw new Error(
+          `kie.ai Claude returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`
+        )
+      }
+      if (!res.ok || json.error) {
+        throw new Error(
+          `kie.ai Claude failed (HTTP ${res.status}): ${json.error?.message ?? raw.slice(0, 300)}`
+        )
+      }
+      return json
+    },
+    abortSignal
+  )
 }
 
 /** Same contract as kieClaudeCreate, over kie.ai's OpenAI Responses proxies. */
@@ -771,54 +787,59 @@ function kieResponsesCreate(
     tools: Anthropic.Tool[]
     messages: Anthropic.MessageParam[]
   },
-  onTextDelta?: (delta: string) => void
+  onTextDelta?: (delta: string) => void,
+  abortSignal?: AbortSignal
 ): Promise<KieClaudeMessage> {
-  return withIdleTimeout(`kie.ai ${args.model}`, async ({ signal, ping }) => {
-    const res = await fetch(`${KIE_BASE}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: args.model,
-        instructions: args.system,
-        input: toResponsesInput(args.messages),
-        tools: toResponsesTools(args.tools),
-        tool_choice: 'auto',
-        stream: true
-      }),
-      signal
-    })
-    ping()
-    // Streaming variant of the translator path (§4.10 phase 6): deltas surface
-    // incrementally, the terminal response.completed event carries the full
-    // output array — same shape as the non-streaming body.
-    if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
-      const accumulator = createResponsesAccumulator(onTextDelta)
-      await readSse(res, (event) => accumulator.push(event), ping)
-      const final = accumulator.finish()
-      if (final.error) {
-        throw new Error(`kie.ai ${args.model} stream failed: ${final.error.message ?? 'unknown'}`)
+  return withIdleTimeout(
+    `kie.ai ${args.model}`,
+    async ({ signal, ping }) => {
+      const res = await fetch(`${KIE_BASE}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: args.model,
+          instructions: args.system,
+          input: toResponsesInput(args.messages),
+          tools: toResponsesTools(args.tools),
+          tool_choice: 'auto',
+          stream: true
+        }),
+        signal
+      })
+      ping()
+      // Streaming variant of the translator path (§4.10 phase 6): deltas surface
+      // incrementally, the terminal response.completed event carries the full
+      // output array — same shape as the non-streaming body.
+      if (res.ok && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
+        const accumulator = createResponsesAccumulator(onTextDelta)
+        await readSse(res, (event) => accumulator.push(event), ping)
+        const final = accumulator.finish()
+        if (final.error) {
+          throw new Error(`kie.ai ${args.model} stream failed: ${final.error.message ?? 'unknown'}`)
+        }
+        return fromResponsesOutput(final.output)
       }
-      return fromResponsesOutput(final.output)
-    }
-    const raw = await res.text()
-    let json: { output?: ResponsesOutputItem[]; error?: { message?: string } }
-    try {
-      json = JSON.parse(raw) as typeof json
-    } catch {
-      throw new Error(
-        `kie.ai ${args.model} returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`
-      )
-    }
-    if (!res.ok || json.error) {
-      throw new Error(
-        `kie.ai ${args.model} failed (HTTP ${res.status}): ${json.error?.message ?? raw.slice(0, 300)}`
-      )
-    }
-    return fromResponsesOutput(json.output)
-  })
+      const raw = await res.text()
+      let json: { output?: ResponsesOutputItem[]; error?: { message?: string } }
+      try {
+        json = JSON.parse(raw) as typeof json
+      } catch {
+        throw new Error(
+          `kie.ai ${args.model} returned non-JSON (HTTP ${res.status}): ${raw.slice(0, 300)}`
+        )
+      }
+      if (!res.ok || json.error) {
+        throw new Error(
+          `kie.ai ${args.model} failed (HTTP ${res.status}): ${json.error?.message ?? raw.slice(0, 300)}`
+        )
+      }
+      return fromResponsesOutput(json.output)
+    },
+    abortSignal
+  )
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
@@ -841,6 +862,10 @@ interface Session {
   pendingSends: { text: string; images: ChatImage[]; context?: AppContext }[]
   /** Streaming text of the in-flight assistant turn (§4.10 phase 6). */
   partial: string | null
+  /** The user pressed Stop: the turn winds down at the next safe point. */
+  stopRequested: boolean
+  /** Aborts the in-flight provider fetch when the user presses Stop. */
+  turnAbort: AbortController | null
 }
 
 const sessions = new Map<string, Session>()
@@ -870,7 +895,9 @@ function sessionFor(threadId: string): Session {
       watched: new Set(persisted?.watched ?? []),
       pending: [],
       pendingSends: [],
-      partial: null
+      partial: null,
+      stopRequested: false,
+      turnAbort: null
     }
     sessions.set(threadId, session)
   }
@@ -950,6 +977,19 @@ export function deleteThread(threadId: string): void {
   broadcastChatUpdate(threadId)
 }
 
+/**
+ * The Stop button: aborts the in-flight provider stream and lets the turn
+ * wind down at the next safe point (pending tool_use blocks get a synthetic
+ * "cancelled" result so the history stays replayable). No-op when idle.
+ */
+export function stopChat(threadId: string): void {
+  const session = sessions.get(threadId)
+  if (!session || !session.busy) return
+  session.stopRequested = true
+  session.turnAbort?.abort()
+  broadcastChatUpdate(threadId)
+}
+
 /** One full agentic turn over whatever is already in the session history. */
 async function runTurn(sessionKey: string, session: Session): Promise<void> {
   const kieKey = getKieApiKey()
@@ -965,6 +1005,8 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
   const isHome = session.videoId === null
   session.busy = true
   session.error = null
+  session.stopRequested = false
+  session.turnAbort = new AbortController()
   broadcastChatUpdate(sessionKey)
 
   try {
@@ -996,6 +1038,9 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
       }
     }
 
+    // False when the loop ran out of iterations with the model still asking
+    // for tools — surfaced below instead of ending the turn in silence.
+    let turnFinished = false
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       session.partial = null
       const response = await callProviderWithRetry(
@@ -1009,7 +1054,8 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
         // or the sidebar would show the answer twice.
         () => {
           session.partial = null
-        }
+        },
+        session.turnAbort?.signal
       )
       session.partial = null
 
@@ -1026,10 +1072,23 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
       const toolUses = response.content.filter(
         (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
       )
-      if (response.stop_reason !== 'tool_use' || toolUses.length === 0) break
+      if (response.stop_reason !== 'tool_use' || toolUses.length === 0) {
+        turnFinished = true
+        break
+      }
 
       const results: Anthropic.ToolResultBlockParam[] = []
       for (const toolUse of toolUses) {
+        // Stop pressed mid-turn: every remaining tool_use still gets a result
+        // (the history must stay replayable), but nothing else executes.
+        if (session.stopRequested) {
+          results.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: 'Cancelled — the user stopped the turn before this tool ran.'
+          })
+          continue
+        }
         try {
           const { result, mutatedVideoId, label, item } = await executeTool(
             toolUse.name,
@@ -1058,22 +1117,45 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
       }
       // All tool results go back in a single user message.
       session.history.push({ role: 'user', content: results })
+      if (session.stopRequested) break
+    }
+    if (!turnFinished && !session.stopRequested) {
+      // MAX_ITERATIONS exhausted with the model still mid-work: say so instead
+      // of ending the turn in silence — the next user message resumes it.
+      session.items.push({
+        type: 'tool',
+        name: 'chat-iteration-limit',
+        label: `Paused after ${MAX_ITERATIONS} steps — send a message to continue`,
+        ok: false
+      })
     }
     if (lastMutatedVideoId !== null) broadcastWorkflowChanged(lastMutatedVideoId)
   } catch (err) {
-    session.error = err instanceof Error ? err.message : String(err)
+    // A Stop abort surfaces as a provider error — it is the outcome the user
+    // asked for, not a failure to report.
+    if (!session.stopRequested) session.error = err instanceof Error ? err.message : String(err)
   } finally {
+    if (session.stopRequested) {
+      session.items.push({ type: 'tool', name: 'chat-stopped', label: 'Stopped', ok: true })
+    }
     session.busy = false
     session.partial = null
+    session.turnAbort = null
     persistSession(sessionKey, session)
     broadcastChatUpdate(sessionKey)
   }
 
   // Settle notes that arrived mid-turn: hand them to the model right away.
-  // (The recursive turn drains any queued sends at its own end.)
+  // (The recursive turn drains any queued sends at its own end.) After a Stop,
+  // the notes land in the history but nothing auto-runs — the user just asked
+  // for silence, and their next message resumes with the notes in context.
   if (session.pending.length > 0) {
     const notes = session.pending.splice(0)
     injectSettleNotes(sessionKey, session, notes)
+    if (session.stopRequested) {
+      persistSession(sessionKey, session)
+      return
+    }
     await runTurn(sessionKey, session)
     return
   }
@@ -1103,12 +1185,21 @@ async function callProviderWithRetry(
   tools: Anthropic.Tool[],
   messages: Anthropic.MessageParam[],
   onTextDelta: (delta: string) => void,
-  onAttemptStart: () => void
+  onAttemptStart: () => void,
+  abortSignal?: AbortSignal
 ): Promise<KieClaudeMessage> {
   for (let attempt = 0; ; attempt++) {
     onAttemptStart()
     try {
-      const response = await callProvider(kieKey, model, system, tools, messages, onTextDelta)
+      const response = await callProvider(
+        kieKey,
+        model,
+        system,
+        tools,
+        messages,
+        onTextDelta,
+        abortSignal
+      )
       if (response.content.length === 0) {
         throw new Error(`kie.ai ${model} returned an empty response (no content).`)
       }
@@ -1116,7 +1207,9 @@ async function callProviderWithRetry(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       const delay = PROVIDER_RETRY_DELAYS_MS[attempt]
-      if (delay === undefined || !isRetryableProviderError(message)) throw err
+      // A user Stop is never retried, whatever the abort error looks like.
+      if (abortSignal?.aborted || delay === undefined || !isRetryableProviderError(message))
+        throw err
       await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
@@ -1129,15 +1222,32 @@ function callProvider(
   system: string,
   tools: Anthropic.Tool[],
   messages: Anthropic.MessageParam[],
-  onTextDelta?: (delta: string) => void
+  onTextDelta?: (delta: string) => void,
+  abortSignal?: AbortSignal
 ): Promise<KieClaudeMessage> {
   const responsesPath = OPENAI_RESPONSES_PATHS[model]
   return responsesPath
-    ? kieResponsesCreate(kieKey, responsesPath, { model, system, tools, messages }, onTextDelta)
+    ? kieResponsesCreate(
+        kieKey,
+        responsesPath,
+        { model, system, tools, messages },
+        onTextDelta,
+        abortSignal
+      )
     : kieClaudeCreate(
         kieKey,
-        { model, max_tokens: 16000, stream: true, system, tools, messages },
-        onTextDelta
+        {
+          model,
+          max_tokens: 16000,
+          stream: true,
+          // Prompt-cache breakpoints (chatCache.ts): tools + system + the tail
+          // of the history, so each loop iteration only pays for its delta.
+          system: cacheableSystem(system),
+          tools: cacheableTools(tools),
+          messages: cacheableMessages(messages)
+        },
+        onTextDelta,
+        abortSignal
       )
 }
 

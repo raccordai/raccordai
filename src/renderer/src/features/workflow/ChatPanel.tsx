@@ -10,6 +10,7 @@ import {
   Paperclip,
   PenTool,
   Send,
+  Square,
   SquareSlash,
   Wrench,
   X
@@ -408,14 +409,24 @@ export function ChatPanel({
                   ? `${attachments.length}/${MAX_ATTACHMENTS}`
                   : t('chat.attach')}
               </button>
-              <button
-                onClick={submit}
-                disabled={busy || draft.trim() === ''}
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-accent text-neutral-900 hover:bg-accent-hover disabled:opacity-40"
-                title={t('chat.send')}
-              >
-                <Send className="h-3.5 w-3.5" />
-              </button>
+              {busy ? (
+                <button
+                  onClick={() => void invoke('chat:stop', { threadId })}
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-neutral-200 hover:bg-neutral-700"
+                  title={t('chat.stop')}
+                >
+                  <Square className="h-3 w-3 fill-current" />
+                </button>
+              ) : (
+                <button
+                  onClick={submit}
+                  disabled={draft.trim() === ''}
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-accent text-neutral-900 hover:bg-accent-hover disabled:opacity-40"
+                  title={t('chat.send')}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -493,16 +504,37 @@ function ChatItemView({
   if (item.type === 'assistant') {
     return <ChatMarkdown text={item.text} />
   }
-  // Compact tool chip.
+  return <ToolChip name={item.name} label={item.label} ok={item.ok} />
+}
+
+/** Main-emitted status chips whose labels the renderer localizes. */
+const TOOL_CHIP_LABEL_KEYS: Record<string, string> = {
+  'chat-stopped': 'chat.stopped',
+  'chat-iteration-limit': 'chat.iterationLimit',
+  'generation-settled': 'chat.generationSettled'
+}
+
+/** Compact tool chip. */
+function ToolChip({
+  name,
+  label,
+  ok
+}: {
+  name: string
+  label: string
+  ok: boolean
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const labelKey = TOOL_CHIP_LABEL_KEYS[name]
   return (
     <div
       className={`flex items-center gap-1.5 self-start rounded-md px-2 py-1 text-[11px] ${
-        item.ok ? 'bg-accent/10 text-accent-soft' : 'bg-danger/10 text-danger'
+        ok ? 'bg-accent/10 text-accent-soft' : 'bg-danger/10 text-danger'
       }`}
-      title={item.name}
+      title={name}
     >
-      {item.ok ? <Check className="h-3 w-3" /> : <Wrench className="h-3 w-3" />}
-      <span className="truncate">{item.label}</span>
+      {ok ? <Check className="h-3 w-3" /> : <Wrench className="h-3 w-3" />}
+      <span className="truncate">{labelKey ? t(labelKey as never) : label}</span>
     </div>
   )
 }

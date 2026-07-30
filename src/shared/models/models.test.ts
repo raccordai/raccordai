@@ -182,6 +182,48 @@ describe('estimateCreditsFor', () => {
       30
     )
   })
+
+  // kie.ai pricing (2026-07): per-second rates per tier, audio surcharge below 4K.
+  it('prices Kling 3.0 per mode, duration and audio', () => {
+    expect(estimateCreditsFor('kling-3.0/video', { prompt: 'x', mode: 'std', duration: 5 })).toBe(
+      70
+    )
+    expect(estimateCreditsFor('kling-3.0/video', { prompt: 'x', mode: 'pro', duration: 5 })).toBe(
+      90
+    )
+    expect(
+      estimateCreditsFor('kling-3.0/video', { prompt: 'x', mode: 'pro', duration: 5, sound: true })
+    ).toBe(135)
+    expect(
+      estimateCreditsFor('kling-3.0/video', { prompt: 'x', mode: '4K', duration: 5, sound: true })
+    ).toBe(335)
+  })
+
+  // kie.ai pricing (2026-07): grok-imagine — 1.6 cr/s at 480p, 3 cr/s at 720p.
+  it('prices Grok Imagine per resolution and duration, floor-snapped on i2v', () => {
+    expect(
+      estimateCreditsFor('grok-imagine/text-to-video', {
+        prompt: 'x',
+        resolution: '480p',
+        duration: 10
+      })
+    ).toBe(16)
+    expect(
+      estimateCreditsFor('grok-imagine/image-to-video', {
+        prompt: 'x',
+        resolution: '720p',
+        duration: 8
+      })
+    ).toBe(24)
+    // Legacy Grok 1.5 nodes may store sub-6s durations; the API bills 6s.
+    expect(
+      estimateCreditsFor('grok-imagine/image-to-video', {
+        prompt: 'x',
+        resolution: '480p',
+        duration: 4
+      })
+    ).toBeCloseTo(9.6)
+  })
 })
 
 describe('defaultParamsFor', () => {

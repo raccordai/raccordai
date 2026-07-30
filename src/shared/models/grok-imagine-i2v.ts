@@ -30,6 +30,8 @@ export const grokImagineI2V: ModelDefinition<Params> = {
     'Animate up to 7 source images with a motion prompt (Grok Imagine). Native audio, 6-30s clips.',
   kind: 'video',
   recommendedFor: ['first-frame-animation', 'native-audio'],
+  // No cheaper sibling — draft = same model forced to 480p.
+  draftEquivalent: { modelId: 'grok-imagine/image-to-video', params: { resolution: '480p' } },
   paramsSchema,
   paramFields: [
     {
@@ -139,8 +141,11 @@ FULL EXAMPLES (official patterns):
   "@image1 slowly turns her head to the right and smiles, soft breeze moving her hair, gentle camera push-in."
   "@image1 the sneaker rotates smoothly on the pedestal, camera orbiting at eye level, dramatic spotlight
   sweeping across the surface, upbeat electronic music."`,
-  // No estimateCredits: kie.ai publishes no rate for this generation of Grok
-  // yet — fill in from the dashboard (https://kie.ai/pricing); never guess.
+  // kie.ai pricing (2026-07): grok-imagine image-to-video — 1.6 cr/s at 480p,
+  // 3 cr/s at 720p. Same floor-snap as buildPayload: a legacy sub-6s node is
+  // billed at 6s, so the estimate quotes what the API will actually charge.
+  estimateCredits: (params) =>
+    ({ '480p': 1.6, '720p': 3 })[params.resolution] * Math.max(MIN_API_DURATION, params.duration),
   buildPayload: ({ params, inputs }) => ({
     image_urls: inputs.image_urls ?? [],
     prompt: params.prompt,
