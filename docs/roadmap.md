@@ -84,7 +84,7 @@ through the graph service (`withGraphHistory`); colors through the
 | Proposal                                                                           | Effort  | Why                                                                                                                                                                                                                      |
 | ---------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Grow the model catalogue (Veo, Kling variants, Flux…)                              | S/model | The registry makes adding nearly declarative: one file + one entry in `MODELS`, invariant tests come for free                                                                                                            |
-| Move the remaining hardcoded strings of `NodeParamsPanel` + `ModelNode` to i18next | S       | Node action tooltips, "No output yet", the promote-asset form are hardcoded English — the canvas is only partially localized                                                                                             |
+| Move the remaining hardcoded strings of `NodeParamsPanel` + `ModelNode` to i18next | S       | Node action tooltips, "No output yet", the promote-asset form are hardcoded English — the canvas is only partially localized (full inventory: §7.7)                                                                      |
 | More i18n locales (es, de, ja) through community contributions                     | S       | The i18n infra + parity test makes contributing a locale trivial and safe                                                                                                                                                |
 | Verify the per-model credit rates against the kie.ai dashboard                     | S       | Video models are done (Seedance 2 family, then Kling 3.0 + Grok Imagine from the dashboard, with `draftEquivalent` on Grok — draft mode now covers the whole video catalogue); the image/Suno rates are still indicative |
 | Per-project soft budget (`creditWarnThreshold`) in the cost modal                  | S       | Warn when `projectCreditsUsage + planned` exceeds a per-project threshold                                                                                                                                                |
@@ -222,14 +222,166 @@ These feed on the signals the loop above produces; do not start them first.
 - **Video-level audio**: TTS dialogue and SFX lanes as new registry model
   families — Suno alone is a music lane, a full film needs voices.
 
+## 7. Deep audit — August 2026
+
+A five-dimension audit (main services, renderer, shared modules + tests,
+security, DX/CI/build) produced ~90 verified findings, every one checked
+against the code with file:line references. The batches below are ordered by
+leverage — each is roughly one focused session. Items already tracked in §4
+(NodeParamsPanel/ModelNode i18n) are expanded here, not duplicated.
+
+### 7.1 Security hardening (S — the two critical ones are ~15 lines total)
+
+| Fix                                                                                                                                                                                                                                                                                                                  | Sev | Where                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ------------------------------------------------------------ |
+| No `will-navigate` guard: a file dropped outside the canvas navigates the window to `file:///…`, and the loaded page inherits the full `window.api` bridge — including `settings:localApiInfo`, which returns the Bearer token in the clear. Add the guard + global `dragover`/`drop` preventDefault in the renderer | 🔴  | `src/main/index.ts:43-77`                                    |
+| `shell.openExternal` without a scheme allowlist, fed by assistant-rendered links (influenceable content): restrict to `http(s)`                                                                                                                                                                                      | 🔴  | `src/main/index.ts:67-70`                                    |
+| `render_video`'s `outputPath` is an unvalidated absolute path with `risk: 'write'` — arbitrary file write that bypasses the approval card. Constrain (extension + directory) and/or reclassify `destructive`; same, weaker, for `add_asset_from_file`                                                                | 🟠  | `src/main/mcp/registry.ts:1439-1497`, `render.ts:554`        |
+| Backup restore does not confine imported `file_path` rows under `userData/media` — a hostile `.raccord` can make `media://` (and `imageBlockFor` → kie upload) serve arbitrary local files                                                                                                                           | 🟠  | `src/main/services/backup.ts:208-234`, `protocol.ts:66-82`   |
+| `RACCORD_KIE_BASE` honoured in packaged builds — an env var redirects every request carrying the kie key. Gate on `!app.isPackaged` like the safeStorage override                                                                                                                                                    | 🟠  | `src/main/services/kie.ts:13-20`                             |
+| Local-API token stored unencrypted and shipped inside `.raccord` backups; never rotated on import. Exclude from the snapshot + regenerate after restore                                                                                                                                                              | 🟠  | `src/main/services/settings.ts:189-194`                      |
+| `sandbox: false` contradicts SECURITY.md; the preload only uses sandbox-compatible APIs — try `sandbox: true` against the E2E suite                                                                                                                                                                                  | 🟠  | `src/main/index.ts:60`                                       |
+| Unbounded remote downloads buffered in RAM (`arrayBuffer()` on results, asset-from-url, render `downloadTo`) — stream to disk with a byte cap, refuse non-http(s)                                                                                                                                                    | 🟠  | `runEngine.ts:480-485`, `assets.ts:165-180`, `render.ts:162` |
+| Low-severity batch: deny-all `setPermissionRequestHandler`, `base-uri`/`form-action`/`frame-ancestors` in the CSP, narrow `connect-src https:` to kie hosts, auth or strip `/health`, `timingSafeEqual` on the token, pin actions by SHA in `publish-release.yml`                                                    | 🟡  | various                                                      |
+
+Verified sound (do not "fix"): `media://` has no path traversal, the backup
+zip-slip guard is correct (absolute + Windows paths included), ffmpeg/ASS
+escaping is right, no kie-key leak path found (25 call sites checked), IPC
+validates input **and** output, no `dangerouslySetInnerHTML`, agent loop is
+bounded.
+
+### 7.2 Generation reliability (M)
+
+| Fix                                                                                                                                                                                                                                                                                                                                  | Sev | Where                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --- | ------------------------------------------------ |
+| Queue-slot leak: deleting a node/video/project with a run in flight never releases the slot (`pollGeneration` exits silently on a missing row, `release()` only fires on settle) — two deletions with the default limit of 2 and nothing generates until restart. Cancel before delete, or reconcile `queue.snapshot()` vs live rows | 🔴  | `runEngine.ts:54-59, 658-664`                    |
+| Poller timeout (10 min flat) marks possibly-succeeded generations `fail`, and `refreshStatus` never re-queries failed rows — credits spent, result unrecoverable. Kind-dependent cap + a re-queryable `timeout` status                                                                                                               | 🔴  | `runEngine.ts:44-45, 697-706, 889-901`           |
+| No graceful shutdown: `closeDatabase()`/`stopLocalApi()` never called on quit, active ffmpeg renders not killed — unchekpointed WAL, orphan processes. One `before-quit` handler                                                                                                                                                     | 🔴  | `src/main/index.ts:141-143`                      |
+| `activeRenders.set` before `mkdtempSync` outside the try: a tmpdir failure wedges "render already in progress" until restart                                                                                                                                                                                                         | 🔴  | `render.ts:216-217`                              |
+| Sync buffered media I/O freezes main (pollers, IPC, `media://`): whole MP4s through `writeFileSync`/`arrayBuffer`, `readFileSync` uploads, serial asset hashing — switch to streams                                                                                                                                                  | 🔴  | `runEngine.ts:485`, `kie.ts:285`, `assets.ts:21` |
+| Settle bus doesn't isolate listeners: one throwing subscriber starves queue release / OS notification / chat wake-up. try/catch per listener                                                                                                                                                                                         | 🟠  | `bus.ts:25-27`                                   |
+| A settle only wakes the FIRST watching thread (`return` instead of `continue` in the loop)                                                                                                                                                                                                                                           | 🟡  | `chat.ts:1313-1339`                              |
+| Failed result download is invisible: row stays `success` with null `resultPath`, retried only at next startup. Store the error + a "re-download" action                                                                                                                                                                              | 🟡  | `runEngine.ts:553-557`                           |
+| Unpurged in-memory state: undo stacks per deleted video, chat `sessions`, `retryCounts` — purge on delete + LRU                                                                                                                                                                                                                      | 🟡  | `graphHistory.ts:40-42`, `chat.ts:872`           |
+
+### 7.3 Product bug quick wins (S)
+
+| Fix                                                                                                                                                                                                  | Sev | Where                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ----------------------------------------------------- |
+| ⌘C is dead outside inputs while the editor is mounted: `useShortcut` calls `preventDefault()` before the handler's text-selection guard — selecting assistant-transcript text then ⌘C copies nothing | 🔴  | `useShortcut.ts:42`, `WorkflowEditor.tsx:542`         |
+| Space no longer activates focused buttons anywhere in the editor (`playPause` binds bare Space + systematic preventDefault; only `VIDEO` targets are exempt)                                         | 🔴  | `lib/shortcuts.ts:45`, `TimelineV2.tsx:807`           |
+| Casting/checkpoints/annotations created by the assistant stay invisible until remount: `event:workflowChanged` never invalidates those query keys. Centralize the list in `data.ts`                  | 🔴  | `main.tsx:56-67`                                      |
+| Merged scenario beats inherit `closesOn` (and `screenDirection`) from the FIRST beat — the shot claims an exit frame it no longer closes on, and the raccord warning never fires                     | 🔴  | `shared/scenario.ts:163-193`                          |
+| `'4K'` (contracts) ≠ `'4k'` (seedance-2): the video-level 4K default silently never applies to the only model that reaches 4K. Add the enum-vs-models invariant test                                 | 🔴  | `contracts.ts:98`, `models/seedance-2.ts:6`           |
+| Unknown `select` value in a recipe injects the literal string `"undefined"` into the prompt (`frag()` should fall back to the default; MCP promises it does)                                         | 🔴  | `designs/registry.ts:528-534`                         |
+| MCP surface never validates args against `inputSchema` — `Number("abc")` NaN reaches `trim_start_sec`/text layers (all guards are false for NaN). Validate at entry + `Number.isFinite` in services  | 🟠  | `mcp/registry.ts:1673-1682`, `graph.ts:280`           |
+| Window listeners without unmount cleanup (timeline resize/drag, sidebar resize) keep firing `setState`/IPC after unmount mid-drag                                                                    | 🟠  | `TimelineV2.tsx:626,1324`, `AssistantSidebar.tsx:114` |
+| Modals (Compare, Annotate, CostPreview, FrameAnchor, Finalize, RestoreConfirm) have no Escape / focus trap / focus restore — a shared `useModal` next to `useDismissable`                            | 🟠  | 6 components                                          |
+| Six independent accent-folding implementations (two different Unicode spellings) — export one `foldText()` from `@shared`                                                                            | 🟡  | `assets/search.ts:17` + 5 more                        |
+| Dead code: 6 IPC channels with no consumer (incl. `settings:*GenerationConcurrency` — the documented setting has NO UI), `features/projects/useProjects.ts` unused                                   | 🟡  | `ipc/index.ts:314`, others                            |
+
+### 7.4 Package size & startup (M)
+
+- **≈75 MB of dead asar** (DMG is 237 MB): renderer deps (`lucide-react`
+  39 MB, `react-dom`, `@xyflow/react`, routers…) are copied into the asar
+  _on top of_ the Vite bundle, and `@anthropic-ai/sdk` (10 MB) is only ever
+  `import type`. Move them to `devDependencies` (keep `@dagrejs/dagre` — main
+  imports it via `graphLayout`). `electron-builder.yml:9-12`,
+  `package.json:50`.
+- **First paint waits on everything**: window is created only after
+  `await startLocalApi()` + sync migrations + backfills + `resumePolling()`
+  (two full-scan SELECTs) + `initUpdater()`. Create the window right after
+  `registerIpcHandlers()`, defer the rest. `src/main/index.ts:123-130`.
+- **Zero `React.lazy` in the renderer** (editor chunk 825 KB, index 1.12 MB):
+  lazy-load ExportDialog, AnnotateModal, Checkpoints/Scenario/History panels,
+  ChatPanel (react-markdown only serves the assistant).
+- `initI18n` blocks `createRoot` on a `settings:getLocale` IPC round-trip,
+  and both 40 KB locale JSONs are bundled statically — dynamic-import the
+  non-active locale, paint a shell first. `renderer/src/main.tsx:37-39`.
+- `files: out/**` also packs stray `out/tsc-*` typecheck output — narrow to
+  the three real bundles; add `sourcemap: 'hidden'` (maps are already
+  excluded from the package, but a packaged crash is currently unsymbolizable).
+
+### 7.5 Runtime performance (M)
+
+One recurring shape: **broadcasts too wide × queries too heavy**. Every
+poller tick emits `event:generationsChanged`; the renderer ignores the
+`{videoId, nodeId}` payload and invalidates 7 root query keys; and
+`generations:listForVideo` returns every column including multi-MB
+`inputSnapshot` blobs (`generations.ts:20-27`) while every `ModelNode` also
+runs its own per-node query (30 nodes = 30 IPC per tick). Fixes, in order of
+yield: filter invalidations by the payload's videoId, project the SELECT
+(drop `inputSnapshot`/`qc_notes`), derive per-node data from the single
+per-video query via `select:`. Then: the lint's per-edge node SELECT ×2
+multiplied by `planBatch` (`lint.ts:47-54`), `projectsOverview` loading every
+generation on disk for a thumbnail (`library.ts:27-41`), serial
+`useAssetNodeMedia` (`data.ts:56-75` — `Promise.all` or `assets:getMany`),
+settings/safeStorage hit on every poll (`kie.ts:22-30` — cache, invalidate on
+write), zod output-parsing of large lists on every invalidation
+(`ipc/index.ts:44-48` — keep strict in dev/E2E only).
+
+### 7.6 Test gaps on risk-bearing code (M)
+
+The pure modules are well tested; the services that MOVE the risk are not:
+
+| Gap                                                                                                                                                                                  | Where                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `checkpoints.ts` — the product's only `destructive` op: zero tests, not in `coverage.include`, zero E2E spec (its twin `graphHistory.ts` is at 94.5%)                                | `services/checkpoints.ts:121-167`                                  |
+| `lint.ts` `connectionsFor` — the "@Image2 here == @Image2 at payload" promise (edge ordering + per-handle counter) rests on untested sorting                                         | `services/lint.ts:29-60`                                           |
+| `estimateNodeRunCredits` (the number shown before spending, draft-aware), `annotations.ts` `createEditNodeFromAnnotations`, `wrapPromptWithStyle` (all 3 branches)                   | `generations.ts:39`, `annotations.ts:96`, `styles/registry.ts:221` |
+| The §6.11 `durationSeconds` invariant ("the subtle part") — no test builds a recipe node with an imposed duration and checks param + beat timeline agree                             | `designs/registry.ts:1416-1435`                                    |
+| Template test has dead branches asserting the INVERSE doctrine — replace with `no edge has output === 'lastFrame'` across all templates                                              | `templates/registry.test.ts:244-262`                               |
+| `transitions.ts` is the only registry without a registry test; board/anchorSafe invariant claimed "registry-tested" but isn't; i18n parity untested for templates/styles/transitions | various                                                            |
+| `checkpointDiff` edge key ignores `edge.output` — an output→lastFrame rewire can read `identical: true` before a destructive restore                                                 | `shared/checkpointDiff.ts:41-43`                                   |
+| E2E: no checkpoints spec; text-layers covered only by `create`; casting missing the idempotence second pass (`alreadyCast`)                                                          | `e2e/specs/`                                                       |
+
+### 7.7 i18n debt (S)
+
+Both locales are at perfect parity (746 keys each) — the problem is ~50
+strings that never enter them: ~35 in `NodeParamsPanel` (the most-used
+surface), ~15 in `ModelNode` (extends the existing §4 row), plus main-built
+sentences (`casting.ts` skip reasons, `scenarioGraph` notes,
+`describeRegion`) displayed raw — those should become code + params
+translated renderer-side (the English text stays for prompts/agents). Add a
+CI guard (grep capitalized JSX text) so it can't regress. Also: raw hex
+colors in React Flow props duplicate the styles.css tokens and are invisible
+to the ESLint rule (`WorkflowEditor.tsx:260`, `ModelNode.tsx:337,462`) —
+extend the rule to hex literals.
+
+### 7.8 CI chain (S/M)
+
+- `package.yml` **notarizes macOS on every PR** (3-15 min, rate-limited) and
+  exposes the `.p12` signing secrets to PR code — restrict packaging to main
+  - dispatch, gate secrets on `event_name != 'pull_request'`.
+- typecheck/test run 4× per push across `ci.yml`/`package.yml`; `pnpm build`
+  runs twice in the same CI run; no Electron/electron-builder cache (~200 MB
+  re-downloaded × 5 jobs); no `concurrency` groups; no `timeout-minutes` on
+  most jobs; `ci.yml`/`package.yml` lack a `permissions` block.
+- `pnpm lint` is laxer than the pre-commit hook (no `--max-warnings 0`, no
+  `--cache`); `typecheck` runs two sequential `tsc` with incremental
+  explicitly disabled (`--composite false`) — use `tsc -b`.
+- E2E runner: spec timeout (8 min × 6 specs) exceeds the job timeout
+  (20 min) so a wedged spec is killed by GitHub without diagnostics, and
+  SIGKILL hits the wrapper, not the Electron grandchild — orphans poison the
+  following specs (`e2e/run.mjs:43-55`: `detached: true` + kill the group,
+  listen on `'close'`).
+
 ## Suggested order
 
-1. **Finish §1** — what is left is four GitHub-side actions a maintainer takes
-   in a minute, plus the README visuals.
-2. **Ecosystem** (§5) — the unified tool registry shipped with the assistant
-   sidebar doubles as MCP-surface hardening for the "public API" pitch.
-3. **Ambient layer** (§6.7) — now unblocked: the loop produces the signals it
+1. **§7.1 security** — the two critical items are ~15 lines and close the
+   widest gap between SECURITY.md's stated model and reality.
+2. **§7.2 generation reliability** — the slot leak and the poller timeout
+   lose user credits today.
+3. **§7.3 quick wins** — ⌘C/Space/invalidations/`closesOn`/`4K` are each
+   small and user-visible.
+4. **Finish §1** — four GitHub-side actions plus the README visuals.
+5. **§7.4–7.8** — size/startup, perf, tests, i18n, CI, in whatever order
+   touches files already being edited.
+6. **Ecosystem** (§5) — the unified tool registry doubles as MCP-surface
+   hardening for the "public API" pitch.
+7. **Ambient layer** (§6.7) — now unblocked: the loop produces the signals it
    needs (selections, annotations, QC verdicts).
 
 Growing the E2E suite is not a step of its own any more: a flow worth
-protecting gets its spec in `e2e/` as part of the work that introduces it.
+protecting gets its spec in `e2e/` as part of the work that introduces it —
+§7.6 lists the three specs the audit found missing.

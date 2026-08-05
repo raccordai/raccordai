@@ -41,6 +41,7 @@ export default defineConfig({
         'src/main/services/chatCache.ts',
         'src/main/services/logger.ts',
         'src/main/services/continuity.ts',
+        'src/main/services/niches.ts',
         'src/main/services/assets.ts',
         'src/main/services/backup.ts',
         'src/main/services/textLayers.ts',

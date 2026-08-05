@@ -65,6 +65,10 @@ async function bootstrap(): Promise<void> {
     // The home assistant can create projects and videos.
     void queryClient.invalidateQueries({ queryKey: ['projects'] })
   })
+  // Niche research (§7) — any actor (UI, MCP, assistant) touched a niche.
+  window.api.on('event:nichesChanged', () => {
+    void queryClient.invalidateQueries({ queryKey: ['niches'] })
+  })
 
   const container = document.getElementById('root')
   if (!container) throw new Error('#root element missing')

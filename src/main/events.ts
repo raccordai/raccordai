@@ -69,3 +69,10 @@ export function broadcastNavigate(payload: NavigatePayload): void {
     window.webContents.send('event:navigate', payload)
   }
 }
+
+/** Niche research data changed (any actor) — the Niches pages refetch. */
+export function broadcastNichesChanged(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:nichesChanged', {})
+  }
+}

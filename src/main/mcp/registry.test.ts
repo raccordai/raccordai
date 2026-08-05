@@ -60,8 +60,13 @@ describe('AGENT_TOOLS registry', () => {
       'delete_asset',
       // The captured state can never be restored again.
       'delete_checkpoint',
+      // §7 — takes every tracked channel, video and transcript with it.
+      'delete_niche',
       'delete_project',
+      // §7b — a researched idea (evidence, drafts) is gone for good.
+      'delete_roadmap_item',
       'delete_video',
+      'remove_niche_channel',
       'remove_node',
       // A model swap deletes the node's generations (a new model can't reuse them).
       'replace_node_model',

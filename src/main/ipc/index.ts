@@ -22,6 +22,7 @@ import * as library from '../services/library'
 import * as projects from '../services/projects'
 import { kieGetCredits, kieTestApiKey } from '../services/kie'
 import { getLogger, logWarn } from '../services/logger'
+import * as nichesService from '../services/niches'
 import * as notificationsService from '../services/notifications'
 import * as qcService from '../services/qc'
 import * as recipesService from '../services/recipes'
@@ -305,6 +306,47 @@ export function registerIpcHandlers(): void {
   handle('settings:setKieApiKey', ({ key }) => settingsService.setKieApiKey(key))
   handle('settings:kieApiKeyStatus', () => settingsService.kieApiKeyStatus())
   handle('settings:testKieApiKey', async () => ({ status: await kieTestApiKey() }))
+  handle('settings:setYoutubeApiKey', ({ key }) => settingsService.setYoutubeApiKey(key))
+  handle('settings:setDataForSeoLogin', ({ value }) => settingsService.setDataForSeoLogin(value))
+  handle('settings:setDataForSeoPassword', ({ value }) =>
+    settingsService.setDataForSeoPassword(value)
+  )
+  handle('settings:nicheKeysStatus', () => settingsService.nicheKeysStatus())
+
+  // YouTube niche research (§7) — services broadcast event:nichesChanged themselves.
+  handle('niches:list', () => nichesService.listNiches())
+  handle('niches:get', ({ nicheId }) => nichesService.getNiche(nicheId))
+  handle('niches:create', (input) => nichesService.createNiche(input))
+  handle('niches:update', ({ nicheId, ...patch }) => nichesService.updateNiche(nicheId, patch))
+  handle('niches:delete', ({ nicheId }) => nichesService.deleteNiche(nicheId))
+  handle('niches:addChannel', (input) => nichesService.addChannel(input))
+  handle('niches:updateChannel', ({ nicheChannelId, ...patch }) =>
+    nichesService.updateChannel(nicheChannelId, patch)
+  )
+  handle('niches:removeChannel', ({ nicheChannelId }) =>
+    nichesService.removeChannel(nicheChannelId)
+  )
+  handle('niches:refresh', ({ nicheId, videosPerChannel }) =>
+    nichesService.refreshNiche(nicheId, videosPerChannel)
+  )
+  handle('niches:videos', ({ nicheId, filters, limit }) =>
+    nichesService.listNicheVideos(nicheId, filters, limit)
+  )
+  handle('niches:keywordSearch', (input) => nichesService.keywordSearch(input))
+  handle('niches:roadmap', ({ nicheId }) => nichesService.listRoadmap(nicheId))
+  handle('niches:addRoadmapItem', (input) => nichesService.addRoadmapItem(input))
+  handle('niches:updateRoadmapItem', ({ itemId, ...patch }) =>
+    nichesService.updateRoadmapItem(itemId, patch)
+  )
+  handle('niches:deleteRoadmapItem', ({ itemId }) => nichesService.deleteRoadmapItem(itemId))
+  handle('niches:assignRoadmapItem', ({ itemId, ...target }) =>
+    nichesService.assignRoadmapItem(itemId, target)
+  )
+  handle('niches:markRoadmapPublished', ({ itemId, url }) =>
+    nichesService.markRoadmapPublished(itemId, url)
+  )
+  handle('niches:fetchTranscripts', (input) => nichesService.fetchTranscripts(input))
+  handle('niches:getTranscript', ({ nicheVideoId }) => nichesService.getTranscript(nicheVideoId))
   handle('settings:getOnboardingCompleted', () => settingsService.getOnboardingCompleted())
   handle('settings:setOnboardingCompleted', () => settingsService.setOnboardingCompleted())
   handle('settings:getNotifyOnCompletion', () => settingsService.getNotifyOnCompletion())

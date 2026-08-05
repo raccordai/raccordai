@@ -406,3 +406,134 @@ export const videoCheckpoints = sqliteTable(
   },
   (table) => [index('checkpoints_by_video').on(table.videoId)]
 )
+
+/**
+ * YouTube niche research (§7) — a niche is a watchlist: competitor channels,
+ * the user's own channels, and the videos tracked for both, refreshed on
+ * demand through DataForSEO (SERP) + the YouTube Data API (stats/metadata).
+ * App-level, not project-scoped — one niche can feed several projects.
+ */
+export const niches = sqliteTable('niches', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  /** Free positioning notes / brief — the assistant reads AND writes this. */
+  description: text('description'),
+  /** Defaults for keyword searches (DataForSEO location + language codes). */
+  languageCode: text('language_code').notNull(),
+  locationCode: integer('location_code').notNull(),
+  /**
+   * Production profile — what "a video of this niche" looks like. Applied to
+   * every workflow created from the roadmap (style, format, target length).
+   */
+  styleId: text('style_id'),
+  aspectRatio: text('aspect_ratio'),
+  targetSeconds: integer('target_seconds'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
+
+export const nicheChannels = sqliteTable(
+  'niche_channels',
+  {
+    id: text('id').primaryKey(),
+    nicheId: text('niche_id')
+      .notNull()
+      .references(() => niches.id, { onDelete: 'cascade' }),
+    /** YouTube channel id (UC…). */
+    channelId: text('channel_id').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    handle: text('handle'),
+    url: text('url').notNull(),
+    thumbnail: text('thumbnail'),
+    /** -1 = hidden subscriber count (HIDDEN_SUBSCRIBERS sentinel). */
+    subscribers: integer('subscribers').notNull(),
+    videoCount: integer('video_count').notNull(),
+    viewCount: integer('view_count').notNull(),
+    /** Channel creation date (ISO), for the age filter. */
+    channelCreatedAt: text('channel_created_at'),
+    uploadsPlaylistId: text('uploads_playlist_id'),
+    /** True for the user's own channels — the ones the niche analysis compares against. */
+    isMine: integer('is_mine', { mode: 'boolean' }).notNull(),
+    notes: text('notes'),
+    lastRefreshedAt: integer('last_refreshed_at'),
+    createdAt: integer('created_at').notNull()
+  },
+  (table) => [
+    index('niche_channels_by_niche').on(table.nicheId),
+    uniqueIndex('niche_channels_unique').on(table.nicheId, table.channelId)
+  ]
+)
+
+/**
+ * The niche's video roadmap (§7b): ideas backed by tracked-data evidence,
+ * carried through production. `video_id` links the Raccord workflow the item
+ * was assigned to (SET NULL when that video is deleted — the idea survives);
+ * `published_video_id` is the real YouTube id once live, which ties the item
+ * back to the niche's tracked stats (the channel is usually one of "mine").
+ */
+export const nicheRoadmapItems = sqliteTable(
+  'niche_roadmap_items',
+  {
+    id: text('id').primaryKey(),
+    nicheId: text('niche_id')
+      .notNull()
+      .references(() => niches.id, { onDelete: 'cascade' }),
+    /** Working title — becomes the Raccord video name on assignment. */
+    title: text('title').notNull(),
+    /** One-line pitch. */
+    angle: text('angle'),
+    /** YouTube description draft (assistant-generated, user-edited). */
+    description: text('description'),
+    /** Prompt brief for the thumbnail — seeds the `thumbnail` recipe node. */
+    thumbnailBrief: text('thumbnail_brief'),
+    /** Why this video: the tracked videos that prove demand, with numbers. */
+    evidence: text('evidence'),
+    videoType: text('video_type').$type<'long' | 'short'>().notNull(),
+    status: text('status').$type<'idea' | 'in_production' | 'published'>().notNull(),
+    videoId: text('video_id').references(() => videos.id, { onDelete: 'set null' }),
+    publishedVideoId: text('published_video_id'),
+    sortOrder: integer('sort_order').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+  },
+  (table) => [index('roadmap_by_niche').on(table.nicheId)]
+)
+
+export const nicheVideos = sqliteTable(
+  'niche_videos',
+  {
+    id: text('id').primaryKey(),
+    nicheId: text('niche_id')
+      .notNull()
+      .references(() => niches.id, { onDelete: 'cascade' }),
+    /** YouTube ids — the video may belong to a channel we don't track. */
+    videoId: text('video_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    channelTitle: text('channel_title').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    url: text('url').notNull(),
+    thumbnail: text('thumbnail'),
+    publishedAt: text('published_at'),
+    views: integer('views').notNull(),
+    durationSeconds: integer('duration_seconds').notNull(),
+    madeForKids: integer('made_for_kids', { mode: 'boolean' }).notNull(),
+    /** Channel stats frozen at ingest time — the niche-score denominator. */
+    channelSubscribers: integer('channel_subscribers').notNull(),
+    channelCreatedAt: text('channel_created_at'),
+    /** How the video entered the niche: a tracked channel or a keyword search. */
+    source: text('source').$type<'channel' | 'search'>().notNull(),
+    /** The keyword that surfaced it (search source only). */
+    keyword: text('keyword'),
+    transcript: text('transcript'),
+    transcriptFetchedAt: integer('transcript_fetched_at'),
+    statsRefreshedAt: integer('stats_refreshed_at'),
+    createdAt: integer('created_at').notNull()
+  },
+  (table) => [
+    index('niche_videos_by_niche').on(table.nicheId),
+    index('niche_videos_by_channel').on(table.nicheId, table.channelId),
+    uniqueIndex('niche_videos_unique').on(table.nicheId, table.videoId)
+  ]
+)

@@ -59,19 +59,38 @@ export function getLocalApiPort(): number {
  * settings table as base64. Never leaves the main process in clear text.
  */
 export function setKieApiKey(key: string): void {
-  const trimmed = key.trim()
+  setEncryptedSetting('kieApiKeyEncrypted', key)
+}
+
+export function getKieApiKey(): string | null {
+  return getEncryptedSetting('kieApiKeyEncrypted')
+}
+
+export function kieApiKeyStatus(): { configured: boolean; encryptionAvailable: boolean } {
+  return {
+    configured: getKieApiKey() !== null,
+    encryptionAvailable: safeStorage.isEncryptionAvailable()
+  }
+}
+
+/**
+ * safeStorage-encrypted secrets (kie key above, niche-research credentials
+ * below): stored base64 in the settings table, an empty value clears the row.
+ */
+function setEncryptedSetting(key: string, value: string): void {
+  const trimmed = value.trim()
   if (trimmed === '') {
-    getDb().delete(settings).where(eq(settings.key, 'kieApiKeyEncrypted')).run()
+    getDb().delete(settings).where(eq(settings.key, key)).run()
     return
   }
   if (!safeStorage.isEncryptionAvailable()) {
     throw new Error('OS-level encryption is unavailable; refusing to store the API key.')
   }
-  setSetting('kieApiKeyEncrypted', safeStorage.encryptString(trimmed).toString('base64'))
+  setSetting(key, safeStorage.encryptString(trimmed).toString('base64'))
 }
 
-export function getKieApiKey(): string | null {
-  const stored = getSetting('kieApiKeyEncrypted')
+function getEncryptedSetting(key: string): string | null {
+  const stored = getSetting(key)
   if (typeof stored !== 'string' || stored === '') return null
   try {
     return safeStorage.decryptString(Buffer.from(stored, 'base64'))
@@ -80,10 +99,37 @@ export function getKieApiKey(): string | null {
   }
 }
 
-export function kieApiKeyStatus(): { configured: boolean; encryptionAvailable: boolean } {
+export function setYoutubeApiKey(key: string): void {
+  setEncryptedSetting('youtubeApiKeyEncrypted', key)
+}
+
+export function getYoutubeApiKey(): string | null {
+  return getEncryptedSetting('youtubeApiKeyEncrypted')
+}
+
+export function setDataForSeoLogin(login: string): void {
+  setEncryptedSetting('dataForSeoLoginEncrypted', login)
+}
+
+export function getDataForSeoLogin(): string | null {
+  return getEncryptedSetting('dataForSeoLoginEncrypted')
+}
+
+export function setDataForSeoPassword(password: string): void {
+  setEncryptedSetting('dataForSeoPasswordEncrypted', password)
+}
+
+export function getDataForSeoPassword(): string | null {
+  return getEncryptedSetting('dataForSeoPasswordEncrypted')
+}
+
+export function nicheKeysStatus(): {
+  youtubeConfigured: boolean
+  dataForSeoConfigured: boolean
+} {
   return {
-    configured: getKieApiKey() !== null,
-    encryptionAvailable: safeStorage.isEncryptionAvailable()
+    youtubeConfigured: getYoutubeApiKey() !== null,
+    dataForSeoConfigured: getDataForSeoLogin() !== null && getDataForSeoPassword() !== null
   }
 }
 

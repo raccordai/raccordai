@@ -9,6 +9,7 @@ import { initNotifications } from './services/notifications'
 import { resumePolling } from './services/runEngine'
 import { ensureDefaultThread } from './services/chat'
 import { backfillChatThreads } from './services/chatStore'
+import { autoRefreshStaleNiches } from './services/niches'
 import {
   backfillOnboardingCompleted,
   getChatThreadsBackfilled,
@@ -119,6 +120,11 @@ if (!app.requestSingleInstanceLock()) {
       initNotifications()
       resumePolling()
       initUpdater() // no-op in dev; packaged builds check the channel feed
+      // Niche watchlists refresh themselves when older than 24 h — delayed so
+      // startup never waits on the network, and every failure only logs.
+      setTimeout(() => {
+        void autoRefreshStaleNiches()
+      }, 10_000)
 
       try {
         await startLocalApi()

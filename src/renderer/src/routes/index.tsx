@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { Clapperboard, Plus, Search } from 'lucide-react'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { Clapperboard, Plus, Search, Telescope } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { nameMatchesQuery } from '@shared/assets/search'
@@ -66,12 +66,20 @@ function LibraryPage(): React.JSX.Element {
             <span className="text-sm font-normal text-neutral-500">{projects.data?.length}</span>
           )}
         </h1>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-neutral-900 hover:bg-accent-hover"
-        >
-          <Plus className="h-4 w-4" /> {t('library.newProject')}
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/niches"
+            className="flex items-center gap-1.5 rounded-lg border border-neutral-700 px-3.5 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
+          >
+            <Telescope className="h-4 w-4" /> {t('niches.title')}
+          </Link>
+          <button
+            onClick={() => setShowForm((v) => !v)}
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-neutral-900 hover:bg-accent-hover"
+          >
+            <Plus className="h-4 w-4" /> {t('library.newProject')}
+          </button>
+        </div>
       </div>
 
       {showForm && (

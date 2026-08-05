@@ -10,7 +10,9 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as NichesRouteImport } from './routes/niches'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as NichesNicheIdRouteImport } from './routes/niches.$nicheId'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 import { Route as ProjectsProjectIdVideosVideoIdRouteImport } from './routes/projects.$projectId.videos.$videoId'
 
@@ -19,10 +21,20 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NichesRoute = NichesRouteImport.update({
+  id: '/niches',
+  path: '/niches',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => rootRouteImport,
+} as any)
+const NichesNicheIdRoute = NichesNicheIdRouteImport.update({
+  id: '/$nicheId',
+  path: '/$nicheId',
+  getParentRoute: () => NichesRoute,
 } as any)
 const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
@@ -38,20 +50,26 @@ const ProjectsProjectIdVideosVideoIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/niches': typeof NichesRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/niches/$nicheId': typeof NichesNicheIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
   '/projects/$projectId/videos/$videoId': typeof ProjectsProjectIdVideosVideoIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/niches': typeof NichesRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/niches/$nicheId': typeof NichesNicheIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
   '/projects/$projectId/videos/$videoId': typeof ProjectsProjectIdVideosVideoIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/niches': typeof NichesRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/niches/$nicheId': typeof NichesNicheIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRouteWithChildren
   '/projects/$projectId/videos/$videoId': typeof ProjectsProjectIdVideosVideoIdRoute
 }
@@ -59,25 +77,32 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/niches'
     | '/settings'
+    | '/niches/$nicheId'
     | '/projects/$projectId'
     | '/projects/$projectId/videos/$videoId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/niches'
     | '/settings'
+    | '/niches/$nicheId'
     | '/projects/$projectId'
     | '/projects/$projectId/videos/$videoId'
   id:
     | '__root__'
     | '/'
+    | '/niches'
     | '/settings'
+    | '/niches/$nicheId'
     | '/projects/$projectId'
     | '/projects/$projectId/videos/$videoId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  NichesRoute: typeof NichesRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRouteWithChildren
 }
@@ -91,12 +116,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/niches': {
+      id: '/niches'
+      path: '/niches'
+      fullPath: '/niches'
+      preLoaderRoute: typeof NichesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/niches/$nicheId': {
+      id: '/niches/$nicheId'
+      path: '/$nicheId'
+      fullPath: '/niches/$nicheId'
+      preLoaderRoute: typeof NichesNicheIdRouteImport
+      parentRoute: typeof NichesRoute
     }
     '/projects/$projectId': {
       id: '/projects/$projectId'
@@ -115,6 +154,17 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface NichesRouteChildren {
+  NichesNicheIdRoute: typeof NichesNicheIdRoute
+}
+
+const NichesRouteChildren: NichesRouteChildren = {
+  NichesNicheIdRoute: NichesNicheIdRoute,
+}
+
+const NichesRouteWithChildren =
+  NichesRoute._addFileChildren(NichesRouteChildren)
+
 interface ProjectsProjectIdRouteChildren {
   ProjectsProjectIdVideosVideoIdRoute: typeof ProjectsProjectIdVideosVideoIdRoute
 }
@@ -128,6 +178,7 @@ const ProjectsProjectIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  NichesRoute: NichesRouteWithChildren,
   SettingsRoute: SettingsRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRouteWithChildren,
 }

@@ -122,6 +122,8 @@ export const RECIPE_FIELDS = {
     ]
   },
   wardrobe: { key: 'wardrobe', type: 'text' },
+  /** Thumbnail overlay text — 2-4 punch words burned into the image. */
+  overlayText: { key: 'overlayText', type: 'text' },
   background: {
     key: 'background',
     type: 'select',
@@ -658,6 +660,34 @@ const REFERENCE_RECIPES: Recipe[] = [
         `${frag(args.values, 'framing')}, ${frag(args.values, 'lighting')}, ${frag(args.values, 'lensLook')}.`,
         text(args.values, 'palette') && `Color palette: ${text(args.values, 'palette')}.`,
         `Production-design quality, coherent light sources, ${NO_TEXT}`,
+        styled(args.style)
+      )
+  },
+  {
+    id: 'thumbnail',
+    kind: 'reference',
+    // A thumbnail IS the image that ships — never a "sheet that must not appear".
+    anchorSafe: true,
+    label: 'YouTube thumbnail',
+    description:
+      'One high-CTR YouTube thumbnail — a single dominant subject, exaggerated emotion, optional 2-4 word overlay. Generate variants (×N) and pick the strongest.',
+    slot: '[SUBJECT]',
+    modes: imageModes,
+    fields: [F.description, F.emotions, F.overlayText, F.palette, F.preserve],
+    params: { aspect_ratio: '16:9' },
+    supportedModels: [IMAGE_T2I, IMAGE_I2I],
+    buildPrompt: (args) =>
+      join(
+        `YouTube thumbnail of ${subjectOf(args.values, '[SUBJECT]')}:`,
+        'one bold, instantly readable composition designed to stay legible at 200 pixels wide — a single dominant subject filling most of the frame, strong contrast, clean separation from the background.',
+        fromSource(args),
+        text(args.values, 'emotions') &&
+          `Facial expression / emotional tone, exaggerated for the small size: ${text(args.values, 'emotions')}.`,
+        text(args.values, 'overlayText')
+          ? `Bold overlay text, thick sans-serif with a strong outline, 2-4 words maximum: "${text(args.values, 'overlayText')}". No other text.`
+          : NO_TEXT,
+        text(args.values, 'palette') && `Color palette: ${text(args.values, 'palette')}.`,
+        'Saturated colors, rim light separating the subject, no clutter, no watermark.',
         styled(args.style)
       )
   },

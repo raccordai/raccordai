@@ -275,6 +275,160 @@ export const scenarioGraphResultSchema = z.object({
   unknownRoles: z.array(z.string())
 })
 
+/**
+ * YouTube niche research (§7) — a niche is a watchlist of competitor channels,
+ * the user's own channels, and the videos tracked for both. App-level (not
+ * project-scoped); refreshed on demand via DataForSEO + the YouTube Data API.
+ */
+export const nicheSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Free positioning notes / brief — the assistant reads AND writes this. */
+  description: z.string().nullable(),
+  languageCode: z.string(),
+  locationCode: z.number().int(),
+  /** Production profile, applied to every workflow created from the roadmap. */
+  styleId: z.string().nullable(),
+  aspectRatio: videoAspectRatioSchema.nullable(),
+  targetSeconds: z.number().int().positive().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number()
+})
+export type Niche = z.infer<typeof nicheSchema>
+
+/** A roadmap entry: a video to make, backed by tracked-data evidence. */
+export const nicheRoadmapItemSchema = z.object({
+  id: z.string(),
+  nicheId: z.string(),
+  title: z.string(),
+  angle: z.string().nullable(),
+  /** YouTube description draft. */
+  description: z.string().nullable(),
+  thumbnailBrief: z.string().nullable(),
+  evidence: z.string().nullable(),
+  videoType: z.enum(['long', 'short']),
+  status: z.enum(['idea', 'in_production', 'published']),
+  /** The Raccord workflow it was assigned to (with its project, for links). */
+  videoId: z.string().nullable(),
+  projectId: z.string().nullable(),
+  publishedVideoId: z.string().nullable(),
+  /** Live stats once published, when the video is tracked in the niche. */
+  published: z.object({ views: z.number(), nicheMedianViews: z.number() }).nullable(),
+  sortOrder: z.number(),
+  createdAt: z.number(),
+  updatedAt: z.number()
+})
+export type NicheRoadmapItem = z.infer<typeof nicheRoadmapItemSchema>
+
+export const nicheOverviewSchema = nicheSchema.extend({
+  channelCount: z.number(),
+  mineChannelCount: z.number(),
+  videoCount: z.number()
+})
+export type NicheOverview = z.infer<typeof nicheOverviewSchema>
+
+export const nicheChannelSchema = z.object({
+  id: z.string(),
+  nicheId: z.string(),
+  channelId: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  handle: z.string().nullable(),
+  url: z.string(),
+  thumbnail: z.string().nullable(),
+  /** -1 = hidden subscriber count. */
+  subscribers: z.number(),
+  videoCount: z.number(),
+  viewCount: z.number(),
+  channelCreatedAt: z.string().nullable(),
+  uploadsPlaylistId: z.string().nullable(),
+  /** True for the user's own channels — what the niche analysis compares against. */
+  isMine: z.boolean(),
+  notes: z.string().nullable(),
+  lastRefreshedAt: z.number().nullable(),
+  createdAt: z.number()
+})
+export type NicheChannel = z.infer<typeof nicheChannelSchema>
+
+/** Transcript text stays out of list payloads — fetch it per video. */
+export const nicheVideoSchema = z.object({
+  id: z.string(),
+  nicheId: z.string(),
+  videoId: z.string(),
+  channelId: z.string(),
+  channelTitle: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  url: z.string(),
+  thumbnail: z.string().nullable(),
+  publishedAt: z.string().nullable(),
+  views: z.number(),
+  durationSeconds: z.number(),
+  madeForKids: z.boolean(),
+  channelSubscribers: z.number(),
+  channelCreatedAt: z.string().nullable(),
+  source: z.enum(['channel', 'search']),
+  keyword: z.string().nullable(),
+  hasTranscript: z.boolean(),
+  statsRefreshedAt: z.number().nullable(),
+  createdAt: z.number()
+})
+export type NicheVideo = z.infer<typeof nicheVideoSchema>
+
+/** One keyword-search hit, enriched and scorable (ratio = views/subscribers). */
+export const nicheScoredVideoSchema = z.object({
+  videoId: z.string(),
+  title: z.string(),
+  description: z.string(),
+  url: z.string(),
+  thumbnail: z.string(),
+  publishedAt: z.string().nullable(),
+  views: z.number(),
+  durationSeconds: z.number(),
+  madeForKids: z.boolean(),
+  channelId: z.string(),
+  channelTitle: z.string(),
+  channelUrl: z.string(),
+  channelThumbnail: z.string(),
+  channelSubscribers: z.number(),
+  channelVideoCount: z.number(),
+  channelViewCount: z.number(),
+  channelCreatedAt: z.string().nullable(),
+  language: z.string().nullable()
+})
+export type NicheScoredVideoDto = z.infer<typeof nicheScoredVideoSchema>
+
+export const nicheVideoFiltersSchema = z.object({
+  format: z.enum(['all', 'long', 'short']).optional(),
+  maxSubscribers: z.number().int().positive().nullable().optional(),
+  maxChannelAgeMonths: z.number().positive().nullable().optional(),
+  minViews: z.number().int().min(0).nullable().optional(),
+  madeForKidsOnly: z.boolean().optional(),
+  sort: z.enum(['ratio', 'views', 'date']).optional(),
+  language: z.string().nullable().optional()
+})
+export type NicheVideoFiltersInput = z.infer<typeof nicheVideoFiltersSchema>
+
+/** Per-channel aggregates over the videos tracked in the niche. */
+export const nicheChannelAggregatesSchema = z.object({
+  videosTracked: z.number(),
+  totalViews: z.number(),
+  avgViews: z.number(),
+  medianViews: z.number(),
+  avgDurationSeconds: z.number(),
+  uploadsPerMonth: z.number().nullable()
+})
+export type NicheChannelAggregates = z.infer<typeof nicheChannelAggregatesSchema>
+
+export const nicheRefreshResultSchema = z.object({
+  channelsRefreshed: z.number(),
+  videosAdded: z.number(),
+  videosUpdated: z.number(),
+  /** YouTube Data API units spent (estimation — quota resets midnight Pacific). */
+  quotaUsed: z.number()
+})
+export type NicheRefreshResult = z.infer<typeof nicheRefreshResultSchema>
+
 export const positionSchema = z.object({ x: z.number(), y: z.number() })
 
 export const clipTransitionSchema = z.enum(CLIP_TRANSITION_IDS)
@@ -1289,6 +1443,173 @@ export const ipcContracts = {
   'chat:listTools': {
     input: z.void(),
     output: z.array(z.object({ name: z.string(), description: z.string() }))
+  },
+
+  // YouTube niche research (§7). Mutations broadcast event:nichesChanged.
+  'niches:list': { input: z.void(), output: z.array(nicheOverviewSchema) },
+  'niches:get': {
+    input: z.object({ nicheId: z.string() }),
+    output: z.object({
+      niche: nicheSchema,
+      channels: z.array(nicheChannelSchema),
+      /** Keyed by YouTube channel id. */
+      aggregates: z.record(z.string(), nicheChannelAggregatesSchema),
+      videoCount: z.number()
+    })
+  },
+  'niches:create': {
+    input: z.object({
+      name: z.string().trim().min(1).max(120),
+      description: z.string().nullable().optional(),
+      languageCode: z.string().trim().min(2).max(5).optional(),
+      locationCode: z.number().int().positive().optional()
+    }),
+    output: nicheSchema
+  },
+  'niches:update': {
+    input: z.object({
+      nicheId: z.string(),
+      name: z.string().trim().min(1).max(120).optional(),
+      description: z.string().nullable().optional(),
+      languageCode: z.string().trim().min(2).max(5).optional(),
+      locationCode: z.number().int().positive().optional(),
+      styleId: z.string().nullable().optional(),
+      aspectRatio: videoAspectRatioSchema.nullable().optional(),
+      targetSeconds: z.number().int().positive().nullable().optional()
+    }),
+    output: nicheSchema
+  },
+  // Roadmap (§7b): the videos to make, idea → workflow → published.
+  'niches:roadmap': {
+    input: z.object({ nicheId: z.string() }),
+    output: z.array(nicheRoadmapItemSchema)
+  },
+  'niches:addRoadmapItem': {
+    input: z.object({
+      nicheId: z.string(),
+      title: z.string().trim().min(1).max(200),
+      angle: z.string().nullable().optional(),
+      description: z.string().nullable().optional(),
+      thumbnailBrief: z.string().nullable().optional(),
+      evidence: z.string().nullable().optional(),
+      videoType: z.enum(['long', 'short']).optional()
+    }),
+    output: nicheRoadmapItemSchema
+  },
+  'niches:updateRoadmapItem': {
+    input: z.object({
+      itemId: z.string(),
+      title: z.string().trim().min(1).max(200).optional(),
+      angle: z.string().nullable().optional(),
+      description: z.string().nullable().optional(),
+      thumbnailBrief: z.string().nullable().optional(),
+      evidence: z.string().nullable().optional(),
+      videoType: z.enum(['long', 'short']).optional(),
+      status: z.enum(['idea', 'in_production', 'published']).optional(),
+      sortOrder: z.number().int().optional()
+    }),
+    output: nicheRoadmapItemSchema
+  },
+  'niches:deleteRoadmapItem': { input: z.object({ itemId: z.string() }), output: z.void() },
+  /** Creates (or links) the Raccord workflow; the thumbnail node comes with it. */
+  'niches:assignRoadmapItem': {
+    input: z.object({
+      itemId: z.string(),
+      projectId: z.string().optional(),
+      videoId: z.string().optional()
+    }),
+    output: z.object({
+      item: nicheRoadmapItemSchema,
+      videoId: z.string(),
+      projectId: z.string(),
+      thumbnailNodeId: z.string().nullable()
+    })
+  },
+  'niches:markRoadmapPublished': {
+    input: z.object({ itemId: z.string(), url: z.string().trim().min(1) }),
+    output: nicheRoadmapItemSchema
+  },
+  'niches:delete': { input: z.object({ nicheId: z.string() }), output: z.void() },
+  /** `ref` accepts a channel id (UC…), a @handle or any youtube.com channel URL. */
+  'niches:addChannel': {
+    input: z.object({
+      nicheId: z.string(),
+      ref: z.string().trim().min(1),
+      isMine: z.boolean().optional(),
+      notes: z.string().nullable().optional()
+    }),
+    output: nicheChannelSchema
+  },
+  'niches:updateChannel': {
+    input: z.object({
+      nicheChannelId: z.string(),
+      isMine: z.boolean().optional(),
+      notes: z.string().nullable().optional()
+    }),
+    output: nicheChannelSchema
+  },
+  'niches:removeChannel': { input: z.object({ nicheChannelId: z.string() }), output: z.void() },
+  /** Re-pulls channel stats + latest uploads + video stats for the whole niche. */
+  'niches:refresh': {
+    input: z.object({
+      nicheId: z.string(),
+      videosPerChannel: z.number().int().min(1).max(200).optional()
+    }),
+    output: nicheRefreshResultSchema
+  },
+  'niches:videos': {
+    input: z.object({
+      nicheId: z.string(),
+      filters: nicheVideoFiltersSchema.optional(),
+      limit: z.number().int().min(1).max(500).optional()
+    }),
+    output: z.array(nicheVideoSchema)
+  },
+  /** DataForSEO SERP + YouTube enrichment; `save` upserts hits into the niche. */
+  'niches:keywordSearch': {
+    input: z.object({
+      keyword: z.string().trim().min(1),
+      nicheId: z.string().optional(),
+      locationCode: z.number().int().positive().optional(),
+      languageCode: z.string().trim().min(2).max(5).optional(),
+      depth: z.number().int().min(20).max(700).optional(),
+      /** Raw/encoded sp value, a preset id from SP_PRESETS, or a YouTube URL. */
+      searchParam: z.string().optional(),
+      save: z.boolean().optional()
+    }),
+    output: z.object({
+      videos: z.array(nicheScoredVideoSchema),
+      quotaUsed: z.number(),
+      saved: z.number()
+    })
+  },
+  /** Fetches missing transcripts, oldest tracked first. */
+  'niches:fetchTranscripts': {
+    input: z.object({
+      nicheId: z.string(),
+      videoIds: z.array(z.string()).optional(),
+      limit: z.number().int().min(1).max(50).optional()
+    }),
+    output: z.object({
+      fetched: z.number(),
+      failed: z.array(z.string()),
+      remaining: z.number()
+    })
+  },
+  'niches:getTranscript': {
+    input: z.object({ nicheVideoId: z.string() }),
+    output: z.object({
+      videoId: z.string(),
+      title: z.string(),
+      transcript: z.string().nullable()
+    })
+  },
+  'settings:setYoutubeApiKey': { input: z.object({ key: z.string() }), output: z.void() },
+  'settings:setDataForSeoLogin': { input: z.object({ value: z.string() }), output: z.void() },
+  'settings:setDataForSeoPassword': { input: z.object({ value: z.string() }), output: z.void() },
+  'settings:nicheKeysStatus': {
+    input: z.void(),
+    output: z.object({ youtubeConfigured: z.boolean(), dataForSeoConfigured: z.boolean() })
   }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
@@ -1301,7 +1622,8 @@ export const ipcEvents = [
   'event:renderProgress',
   'event:queueChanged',
   'event:focusNode',
-  'event:navigate'
+  'event:navigate',
+  'event:nichesChanged'
 ] as const
 export type IpcEvent = (typeof ipcEvents)[number]
 

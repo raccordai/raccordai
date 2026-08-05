@@ -641,8 +641,75 @@ Workflow JSON (pass as-is to import_workflow after filling the slots):
 ${JSON.stringify(t.workflow, null, 2)}`
 }
 
+const NICHES = `YouTube niche research (§7) — find under-served topics, watch the channels that own
+them, and turn what works into briefs for new Raccord videos and channels.
+
+THE OBJECT. A niche is an app-level watchlist: tracked channels (competitors AND the user's own,
+flagged is_mine) plus the videos tracked for both. Its "description" is the positioning brief — a
+living document the assistant maintains (update_niche) with the angle, the formats that work, and
+channel-identity conclusions.
+
+THE SCORE. ratio = views / channel subscribers. ≥ 10 is a strong niche signal (a small channel
+pulling big views means the TOPIC carries, not the brand), ≥ 2 is interesting, null means
+hidden/zero subscribers with views — treat as very strong. The detector defaults: small channel
+(≤ 100k subs) + young channel (≤ 12 months) + long-form + ratio sort.
+
+THE HUNT (niche_keyword_search). DataForSEO scrapes the real YouTube SERP — native filters
+included via search_param presets: relevance, views, date, viewsThisYear, viewsMonthLong, and
+nicheHunt (sort by views + 4-20 min + this year — the good default). It is billed per 20 results;
+the YouTube enrichment behind it is nearly free (1 quota unit per 50 ids). Pass save=true to keep
+the hits in the niche (source "search", keyword recorded).
+
+THE ITERATION LOOP. (1) refresh_niche — fresh channel stats, latest uploads, updated view counts
+(free, do it at the start of a session). (2) fetch_niche_transcripts — captions of the tracked
+videos, most-viewed first. (3) Read: get_niche for per-channel aggregates (avg/median views, upload
+cadence), list_niche_videos for the scored list, get_niche_video for full description + transcript.
+(4) Compare is_mine channels against the rest: which topics/titles/formats outperform, where the
+user's own videos sit against the niche median. (5) Write conclusions into the brief (update_niche).
+
+THE ROADMAP (§7b) — where analysis becomes production. Each niche carries a roadmap of videos to
+make (list_roadmap / add_roadmap_item / update_roadmap_item / assign_roadmap_item /
+mark_roadmap_published). An item is a GROUNDED idea: YouTube title, one-line angle, evidence
+(the tracked videos proving demand — ALWAYS cite ratio and views, an idea without numbers is an
+opinion), a YouTube description draft, and a thumbnail_brief (subject + exaggerated emotion +
+2-4 word overlay text).
+
+STARTING A NICHE FROM SCRATCH ("I want to launch a channel about X"):
+1. create_niche, then map the demand for FREE: youtube_keyword_suggestions on the seed, then on
+   the promising suggestions recursively — autocomplete is what people actually type. Cluster the
+   results into sub-niches (formats, audiences, intents).
+2. Spend niche_keyword_search (paid, per 20 results) ONLY on the best 2-3 keywords, nicheHunt
+   preset. From the results, add_niche_channel the recurring strong channels (high ratio, several
+   hits) — the SERP told you who owns the niche.
+3. refresh_niche → the analysis below takes over. Conclusions (chosen sub-niche, channel identity,
+   production profile) go into update_niche.
+
+THE SUGGESTION METHOD, when asked for video ideas:
+1. refresh_niche, then fetch_niche_transcripts.
+2. get_niche — compare is_mine channels against competitors (aggregates: median views, cadence).
+3. list_niche_videos sorted by ratio — the outliers are the demand signal. Read the top ones in
+   full (get_niche_video): mine their transcripts for hooks, structure, pacing.
+4. GAP ANALYSIS: topics that overperform for competitors and that the user's own channels have
+   not covered — that intersection is where new videos go.
+5. Write 3-5 add_roadmap_item, each complete (title, angle, evidence, description,
+   thumbnail_brief). Update the niche brief (update_niche) with durable conclusions.
+
+THE PRODUCTION PROFILE — "what a video of this niche looks like": style_id (docs "styles"),
+aspect_ratio, target_seconds, set once via update_niche. assign_roadmap_item then creates the
+workflow with the profile applied (a 'short' item forces 9:16) and the thumbnail recipe node
+seeded from the brief. Next steps on the new video: write_scenario (use the angle + the evidence
+videos' transcripts as the brief, respect target_seconds) → build_graph_from_scenario. Generate
+2-4 thumbnail variants (run_node with variants) and let the user pick.
+
+CHANNEL IDENTITY (for a new channel in the niche): name/title, channel description, and a
+profile-image brief — generated right here (add_recipe_node, styleframe/packshot, square).
+
+COSTS. YouTube Data API: free 10k units/day (a full refresh of a 10-channel niche costs ~15
+units). DataForSEO: real money per search — never launch a batch of keyword searches without the
+user asking. Transcripts: free, but unofficial (YouTube captions) — some videos have none.`
+
 export const DOC_TOPICS =
-  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | casting | continuity | styles | designs | shots | templates | template:<id>'
+  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | casting | continuity | niches | styles | designs | shots | templates | template:<id>'
 
 export function getDoc(topic: string): string {
   if (topic === 'overview') return OVERVIEW
@@ -651,6 +718,7 @@ export function getDoc(topic: string): string {
   if (topic === 'scenario') return SCENARIO
   if (topic === 'casting') return CASTING
   if (topic === 'continuity') return CONTINUITY
+  if (topic === 'niches') return NICHES
   if (topic.startsWith('model:')) return modelDetail(topic.slice('model:'.length))
   if (topic.startsWith('prompting:')) return promptingGuide(topic.slice('prompting:'.length))
   if (topic === 'styles') return stylesIndex()

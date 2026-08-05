@@ -46,6 +46,7 @@ function SettingsPage(): React.JSX.Element {
             label={t('integrations.kieKeyLabel')}
             missingText={t('integrations.kieKeyMissing')}
           />
+          <NicheKeysBlock />
           <McpBlock />
         </div>
       </Section>
@@ -403,5 +404,105 @@ function ApiKeyRow({
         {status.data?.configured ? t('integrations.kieKeyConfigured') : missingText}
       </p>
     </div>
+  )
+}
+
+/** One niche-research secret (YouTube key, DataForSEO login/password). */
+function SecretRow({
+  label,
+  channel,
+  configured,
+  missingText
+}: {
+  label: string
+  channel:
+    'settings:setYoutubeApiKey' | 'settings:setDataForSeoLogin' | 'settings:setDataForSeoPassword'
+  configured: boolean
+  missingText: string
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [value, setValue] = useState('')
+  const save = useMutation({
+    mutationFn: (secret: string) =>
+      channel === 'settings:setYoutubeApiKey'
+        ? invoke(channel, { key: secret })
+        : invoke(channel, { value: secret }),
+    onSuccess: () => {
+      setValue('')
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    }
+  })
+
+  return (
+    <div className="island px-4 py-3">
+      <label className="text-xs text-neutral-400">{label}</label>
+      <form
+        className="mt-1.5 flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (value.trim()) save.mutate(value)
+        }}
+      >
+        <input
+          type="password"
+          autoComplete="off"
+          className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 font-mono text-sm text-neutral-200 placeholder:font-sans placeholder:text-neutral-600"
+          placeholder={t('integrations.secretPlaceholder')}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+        <button
+          type="submit"
+          disabled={save.isPending || value.trim() === ''}
+          className="rounded-md bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 disabled:opacity-40"
+        >
+          {t('integrations.save')}
+        </button>
+        {configured && (
+          <button
+            type="button"
+            className="text-xs text-neutral-500 hover:text-danger"
+            onClick={() => save.mutate('')}
+          >
+            {t('integrations.clear')}
+          </button>
+        )}
+      </form>
+      <p className={`mt-2 text-xs ${configured ? 'text-success' : 'text-warning'}`}>
+        {configured ? t('integrations.secretConfigured') : missingText}
+      </p>
+    </div>
+  )
+}
+
+/** YouTube niche research credentials (§7) — same safeStorage vault as the kie key. */
+function NicheKeysBlock(): React.JSX.Element {
+  const { t } = useTranslation()
+  const status = useQuery({
+    queryKey: ['settings', 'settings:nicheKeysStatus'],
+    queryFn: () => invoke('settings:nicheKeysStatus')
+  })
+  return (
+    <>
+      <SecretRow
+        label={t('integrations.youtubeKeyLabel')}
+        channel="settings:setYoutubeApiKey"
+        configured={status.data?.youtubeConfigured ?? false}
+        missingText={t('integrations.youtubeKeyMissing')}
+      />
+      <SecretRow
+        label={t('integrations.dataForSeoLoginLabel')}
+        channel="settings:setDataForSeoLogin"
+        configured={status.data?.dataForSeoConfigured ?? false}
+        missingText={t('integrations.dataForSeoMissing')}
+      />
+      <SecretRow
+        label={t('integrations.dataForSeoPasswordLabel')}
+        channel="settings:setDataForSeoPassword"
+        configured={status.data?.dataForSeoConfigured ?? false}
+        missingText={t('integrations.dataForSeoMissing')}
+      />
+    </>
   )
 }
