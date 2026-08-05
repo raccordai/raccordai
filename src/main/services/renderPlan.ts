@@ -541,53 +541,75 @@ export interface MusicTrack {
 }
 
 /**
- * Mux the audio lane over the concatenated video: music tracks are trimmed to
- * their window (atrim — the preview player honours the same bounds), chained
- * in timeline order, padded with silence to cover the whole sequence, then
- * mixed with the video's own audio (or used as the only track when the video
- * is silent). Video stream is copied, never re-encoded here.
+ * Mux the audio lanes over the concatenated video. Two lanes, same mechanics
+ * each: tracks trimmed to their window (atrim — the preview player honours the
+ * same bounds), chained in timeline order, padded with silence to cover the
+ * whole sequence. `music` (Suno bed) and `speech` (ElevenLabs voice-over) are
+ * SEPARATE lanes mixed together with the video's own audio — speech plays OVER
+ * the music, never after it. Video stream is copied, never re-encoded here.
+ * With an empty speech lane the argv is byte-identical to the historical
+ * music-only builder.
  */
 export function buildMuxArgs(
   videoPath: string,
   music: MusicTrack[],
+  speech: MusicTrack[],
   videoHasAudio: boolean,
   durationSeconds: number,
   outPath: string
 ): string[] {
   const args = ['-y', '-hide_banner', '-nostdin', '-i', videoPath]
-  for (const m of music) args.push('-i', m.path)
+  for (const t of [...music, ...speech]) args.push('-i', t.path)
 
   const chains: string[] = []
   // An untrimmed track feeds the chain directly — the argv stays byte-identical
   // to the pre-trim builder; a trimmed one goes through its own atrim first
   // (asetpts rebases timestamps so concat/apad see a stream starting at 0).
-  const labels = music.map((m, i) => {
-    const src = `[${i + 1}:a]`
-    const start = m.trimStartSec ?? 0
-    if (start <= 0 && m.trimEndSec === undefined) return src
-    const parts = [`start=${start}`]
-    if (m.trimEndSec !== undefined) parts.push(`end=${m.trimEndSec}`)
-    chains.push(`${src}atrim=${parts.join(':')},asetpts=PTS-STARTPTS[t${i + 1}]`)
-    return `[t${i + 1}]`
-  })
-  let musicLabel: string
-  if (labels.length > 1) {
-    chains.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[mcat]`)
-    musicLabel = '[mcat]'
-  } else {
-    musicLabel = labels[0] ?? '[1:a]'
+  const buildLane = (
+    tracks: MusicTrack[],
+    firstInput: number,
+    catLabel: string,
+    padLabel: string
+  ): string | null => {
+    if (tracks.length === 0) return null
+    const labels = tracks.map((m, i) => {
+      const idx = firstInput + i
+      const src = `[${idx}:a]`
+      const start = m.trimStartSec ?? 0
+      if (start <= 0 && m.trimEndSec === undefined) return src
+      const parts = [`start=${start}`]
+      if (m.trimEndSec !== undefined) parts.push(`end=${m.trimEndSec}`)
+      chains.push(`${src}atrim=${parts.join(':')},asetpts=PTS-STARTPTS[t${idx}]`)
+      return `[t${idx}]`
+    })
+    let label: string
+    if (labels.length > 1) {
+      chains.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[${catLabel}]`)
+      label = `[${catLabel}]`
+    } else {
+      label = labels[0] as string
+    }
+    chains.push(`${label}apad[${padLabel}]`)
+    return `[${padLabel}]`
   }
-  chains.push(`${musicLabel}apad[mpad]`)
-  let audioMap = '[mpad]'
-  if (videoHasAudio) {
+
+  const musicLane = buildLane(music, 1, 'mcat', 'mpad')
+  const speechLane = buildLane(speech, 1 + music.length, 'scat', 'spad')
+  const mixInputs = [videoHasAudio ? '[0:a]' : null, musicLane, speechLane].filter(
+    (l): l is string => l !== null
+  )
+  let audioMap = mixInputs[0] ?? '[0:a]'
+  if (mixInputs.length > 1) {
     // duration=first ends the mix with the video's own audio track.
-    chains.push('[0:a][mpad]amix=inputs=2:duration=first:normalize=0[mix]')
+    chains.push(
+      `${mixInputs.join('')}amix=inputs=${mixInputs.length}:duration=first:normalize=0[mix]`
+    )
     audioMap = '[mix]'
   }
 
   args.push('-filter_complex', chains.join(';'))
   args.push('-map', '0:v', '-map', audioMap, '-c:v', 'copy', ...AUDIO_ENCODE_ARGS)
-  // -t caps the padded (infinite) music when the video track carries no audio.
+  // -t caps the padded (infinite) lanes when the video track carries no audio.
   args.push('-t', durationSeconds.toFixed(3), '-movflags', '+faststart', outPath)
   return args
 }

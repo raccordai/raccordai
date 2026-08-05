@@ -47,6 +47,7 @@ function SettingsPage(): React.JSX.Element {
             missingText={t('integrations.kieKeyMissing')}
           />
           <NicheKeysBlock />
+          <ElevenLabsKeyBlock />
           <McpBlock />
         </div>
       </Section>
@@ -416,7 +417,10 @@ function SecretRow({
 }: {
   label: string
   channel:
-    'settings:setYoutubeApiKey' | 'settings:setDataForSeoLogin' | 'settings:setDataForSeoPassword'
+    | 'settings:setYoutubeApiKey'
+    | 'settings:setDataForSeoLogin'
+    | 'settings:setDataForSeoPassword'
+    | 'settings:setElevenLabsApiKey'
   configured: boolean
   missingText: string
 }): React.JSX.Element {
@@ -473,6 +477,23 @@ function SecretRow({
         {configured ? t('integrations.secretConfigured') : missingText}
       </p>
     </div>
+  )
+}
+
+/** ElevenLabs key (§8 speech) — same safeStorage vault as the kie key. */
+function ElevenLabsKeyBlock(): React.JSX.Element {
+  const { t } = useTranslation()
+  const status = useQuery({
+    queryKey: ['settings', 'settings:elevenLabsKeyStatus'],
+    queryFn: () => invoke('settings:elevenLabsKeyStatus')
+  })
+  return (
+    <SecretRow
+      label={t('integrations.elevenLabsKeyLabel')}
+      channel="settings:setElevenLabsApiKey"
+      configured={status.data?.configured ?? false}
+      missingText={t('integrations.elevenLabsKeyMissing')}
+    />
   )
 }
 

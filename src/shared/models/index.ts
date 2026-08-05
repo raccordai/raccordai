@@ -12,6 +12,8 @@ import { grokImagineI2V } from './grok-imagine-i2v'
 import { grokImagineT2V } from './grok-imagine-t2v'
 import { kling3 } from './kling-3'
 import { sunoMusic } from './suno-music'
+import { elevenlabsTts } from './elevenlabs-tts'
+import { elevenlabsDialogue } from './elevenlabs-dialogue'
 
 /**
  * Single source of truth for every model the studio supports.
@@ -31,7 +33,9 @@ export const MODELS: ModelDefinition[] = [
   kling3,
   grokImagineT2V,
   grokImagineI2V,
-  sunoMusic
+  sunoMusic,
+  elevenlabsTts,
+  elevenlabsDialogue
 ]
 
 const MODEL_MAP = new Map<string, ModelDefinition>(MODELS.map((m) => [m.id, m]))

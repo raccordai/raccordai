@@ -39,6 +39,14 @@ import {
   updateTextLayer
 } from '../services/textLayers'
 import { createRecipeNode } from '../services/recipes'
+import { elevenlabsListVoices } from '../services/elevenlabs'
+import {
+  createVoicePersona,
+  deleteVoicePersona,
+  listVoicePersonas,
+  updateVoicePersona
+} from '../services/voicePersonas'
+import { formatTranscript, type SpeechTranscript } from '@shared/speech'
 import * as scenarioGraph from '../services/scenarioGraph'
 import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
@@ -1107,6 +1115,115 @@ export const AGENT_TOOLS: AgentTool[] = [
       return { ok: true }
     }
   },
+  // ── Speech (§8): ElevenLabs voices + the channel's voice personas ─────────
+  {
+    name: 'list_voice_personas',
+    description:
+      'The channel’s named voice identities ("Narrateur" = this ElevenLabs voice id), app-wide, optionally filtered to one niche. Check it BEFORE writing a speech node’s voice — recurring characters must keep their voice across videos. Details: docs "speech".',
+    inputSchema: obj({
+      niche_id: str('Only this niche’s personas plus the unpinned ones.')
+    }),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ niche_id }) =>
+      listVoicePersonas(niche_id !== undefined ? String(niche_id) : undefined)
+  },
+  {
+    name: 'create_voice_persona',
+    description:
+      'Name an ElevenLabs voice as a persona of the channel ("Narrateur is this voice id"). The name is what dialogue scripts and future videos reuse — one persona per recurring character/narrator.',
+    inputSchema: obj(
+      {
+        name: str('Unique name, e.g. "Narrateur" or "Léa".'),
+        voice_id: str('ElevenLabs voice id (custom clone or premade).'),
+        description: str('Delivery notes, e.g. "calm, warm, slightly amused".'),
+        niche_id: str('Pin the persona to a niche/channel (omit = available everywhere).')
+      },
+      ['name', 'voice_id']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ name, voice_id, description, niche_id }) =>
+      createVoicePersona({
+        name: String(name),
+        voiceId: String(voice_id),
+        ...(description !== undefined ? { description: String(description) } : {}),
+        ...(niche_id !== undefined ? { nicheId: String(niche_id) } : {})
+      })
+  },
+  {
+    name: 'update_voice_persona',
+    description:
+      'Rename a voice persona, re-point it at another ElevenLabs voice id, or change its notes/niche. Existing speech nodes keep their already-written voice ids.',
+    inputSchema: obj(
+      {
+        persona_id: str(),
+        name: str(),
+        voice_id: str(),
+        description: str(),
+        niche_id: str('"" unpins the persona from its niche.')
+      },
+      ['persona_id']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ persona_id, name, voice_id, description, niche_id }) =>
+      updateVoicePersona(String(persona_id), {
+        ...(name !== undefined ? { name: String(name) } : {}),
+        ...(voice_id !== undefined ? { voiceId: String(voice_id) } : {}),
+        ...(description !== undefined ? { description: String(description) } : {}),
+        ...(niche_id !== undefined ? { nicheId: String(niche_id) || null } : {})
+      })
+  },
+  {
+    name: 'delete_voice_persona',
+    description:
+      'Forget a voice persona. Speech nodes keep their voice ids — this only removes the name from the channel’s cast of voices.',
+    inputSchema: obj({ persona_id: str() }, ['persona_id']),
+    scope: 'global',
+    risk: 'destructive',
+    execute: ({ persona_id }) => {
+      deleteVoicePersona(String(persona_id))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'list_elevenlabs_voices',
+    description:
+      'Search the ElevenLabs voice library of the configured account (name, category, voice id, preview URL) — the source of ids for voice personas and speech nodes.',
+    inputSchema: obj({ search: str('Filter by name/description/labels.') }),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ search }) =>
+      elevenlabsListVoices({ ...(search !== undefined ? { search: String(search) } : {}) })
+  },
+  {
+    name: 'get_transcript',
+    description:
+      'The timed transcript of a speech node’s output ([m:ss] per segment, speaker labels on dialogue) — reuse it for subtitles, shot timing or the YouTube description. Pass generation_id for a specific take.',
+    inputSchema: obj({ nodeId: str(), generation_id: str('Defaults to the node’s best output.') }, [
+      'nodeId'
+    ]),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ nodeId, generation_id }) => {
+      const rows = generations.listGenerationsForNode(String(nodeId))
+      const row =
+        generation_id !== undefined
+          ? rows.find((g) => g.id === String(generation_id))
+          : (rows.find((g) => g.status === 'success' && g.transcript) ?? rows[0])
+      if (!row) throw new Error('No generation on this node.')
+      const transcript = (row.transcript ?? null) as SpeechTranscript | null
+      if (!transcript) {
+        throw new Error('No transcript on this generation (only ElevenLabs speech runs carry one).')
+      }
+      return {
+        generationId: row.id,
+        text: transcript.text,
+        formatted: formatTranscript(transcript)
+      }
+    }
+  },
   {
     name: 'remove_node',
     description:
@@ -1393,6 +1510,8 @@ export const AGENT_TOOLS: AgentTool[] = [
         draft: g.draft ?? false,
         qcVerdict: g.qcVerdict,
         qcNotes: g.qcNotes,
+        // Speech runs only — read it with get_transcript.
+        hasTranscript: g.transcript != null,
         error: g.errorMessage,
         createdAt: g.createdAt
       }))

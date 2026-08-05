@@ -254,6 +254,7 @@ describe('buildMuxArgs', () => {
     const args = buildMuxArgs(
       '/tmp/video.mp4',
       [{ path: '/tmp/music.mp3' }],
+      [],
       true,
       12.5,
       '/tmp/out.mp4'
@@ -269,6 +270,7 @@ describe('buildMuxArgs', () => {
     const args = buildMuxArgs(
       '/tmp/video.mp4',
       [{ path: '/a.mp3' }, { path: '/b.mp3' }],
+      [],
       false,
       20,
       '/tmp/out.mp4'
@@ -284,6 +286,7 @@ describe('buildMuxArgs', () => {
     const args = buildMuxArgs(
       '/tmp/video.mp4',
       [{ path: '/a.mp3', trimStartSec: 2, trimEndSec: 9.5 }],
+      [],
       false,
       20,
       '/tmp/out.mp4'
@@ -297,6 +300,7 @@ describe('buildMuxArgs', () => {
     const args = buildMuxArgs(
       '/tmp/video.mp4',
       [{ path: '/a.mp3', trimEndSec: 8 }, { path: '/b.mp3' }],
+      [],
       false,
       20,
       '/tmp/out.mp4'
@@ -304,6 +308,30 @@ describe('buildMuxArgs', () => {
     const filter = args[args.indexOf('-filter_complex') + 1]!
     expect(filter).toContain('[1:a]atrim=start=0:end=8,asetpts=PTS-STARTPTS[t1]')
     expect(filter).toContain('[t1][2:a]concat=n=2:v=0:a=1[mcat]')
+  })
+
+  it('mixes the speech lane OVER the music bed and the video audio (3-input amix)', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/music.mp3' }],
+      [{ path: '/vo-1.mp3' }, { path: '/vo-2.mp3' }],
+      true,
+      30,
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    // Speech inputs come after the music inputs: [2:a][3:a].
+    expect(filter).toContain('[2:a][3:a]concat=n=2:v=0:a=1[scat]')
+    expect(filter).toContain('[scat]apad[spad]')
+    expect(filter).toContain('[0:a][mpad][spad]amix=inputs=3:duration=first:normalize=0[mix]')
+    expect(args.join(' ')).toContain('-map 0:v -map [mix]')
+  })
+
+  it('speech alone on a silent video maps its padded lane directly', () => {
+    const args = buildMuxArgs('/tmp/video.mp4', [], [{ path: '/vo.mp3' }], false, 10, '/tmp/o.mp4')
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toBe('[1:a]apad[spad]')
+    expect(args.join(' ')).toContain('-map 0:v -map [spad]')
   })
 })
 

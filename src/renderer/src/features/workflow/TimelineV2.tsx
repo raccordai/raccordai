@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Mic,
   Music,
   ChevronDown,
   ChevronLeft,
@@ -35,6 +36,7 @@ import {
 } from './data'
 import type { WorkflowGraph } from './workflowContext'
 import {
+  audioRoleOf,
   bestGeneration,
   clipDuration,
   clipTransitionAfter,
@@ -137,10 +139,15 @@ function EdgeHandle({
 
 // ── Playback engine ───────────────────────────────────────────────────────────
 
-function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
+function usePlaybackEngine(
+  clips: EngineClip[],
+  audioClips: EngineClip[],
+  speechClips: EngineClip[] = []
+) {
   const videoARef = useRef<HTMLVideoElement | null>(null)
   const videoBRef = useRef<HTMLVideoElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const speechRef = useRef<HTMLAudioElement | null>(null)
   const [activeSlot, setActiveSlot] = useState<'A' | 'B'>('A')
   const [activeIdx, setActiveIdx] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -186,7 +193,8 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
     [clips, durationOf]
   )
 
-  // Audio lane: independent sequential layout, slaved to the global clock.
+  // Audio lanes (music bed + speech): independent sequential layouts, both
+  // slaved to the global clock — the same two-lane mix the MP4 render produces.
   const audioStarts = useMemo(() => {
     const out: number[] = []
     let acc = 0
@@ -197,46 +205,70 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
     return out
   }, [audioClips, durationOf])
 
+  const speechStarts = useMemo(() => {
+    const out: number[] = []
+    let acc = 0
+    for (const clip of speechClips) {
+      out.push(acc)
+      acc += durationOf(clip)
+    }
+    return out
+  }, [speechClips, durationOf])
+
   const lastAudioSeekRef = useRef(0)
-  const syncAudio = useCallback(
-    (t: number, shouldPlay: boolean) => {
-      const audio = audioRef.current
-      if (!audio || audioClips.length === 0) return
+  const lastSpeechSeekRef = useRef(0)
+  const syncLane = useCallback(
+    (
+      element: HTMLAudioElement | null,
+      laneClips: EngineClip[],
+      laneStarts: number[],
+      lastSeekRef: { current: number },
+      t: number,
+      shouldPlay: boolean
+    ) => {
+      if (!element || laneClips.length === 0) return
       let idx = -1
-      for (let i = 0; i < audioClips.length; i++) {
-        const start = audioStarts[i] ?? 0
-        if (t >= start && t < start + durationOf(audioClips[i] as EngineClip)) {
+      for (let i = 0; i < laneClips.length; i++) {
+        const start = laneStarts[i] ?? 0
+        if (t >= start && t < start + durationOf(laneClips[i] as EngineClip)) {
           idx = i
           break
         }
       }
-      const clip = idx >= 0 ? audioClips[idx] : undefined
+      const clip = idx >= 0 ? laneClips[idx] : undefined
       if (!clip?.url) {
-        if (!audio.paused) audio.pause()
+        if (!element.paused) element.pause()
         return
       }
-      const offset = t - (audioStarts[idx] ?? 0) + trimOf(clip).start
-      if (!audio.src.endsWith(clip.url)) {
-        audio.src = clip.url
-        audio.currentTime = offset
+      const offset = t - (laneStarts[idx] ?? 0) + trimOf(clip).start
+      if (!element.src.endsWith(clip.url)) {
+        element.src = clip.url
+        element.currentTime = offset
       } else {
         // Drift correction is rate-limited: currentTime assignments are async
         // and each one aborts a pending play() — correcting every frame keeps
         // the element paused forever (and non-seekable streams never converge).
         const now = performance.now()
         if (
-          !audio.seeking &&
-          Math.abs(audio.currentTime - offset) > 0.5 &&
-          now - lastAudioSeekRef.current > 600
+          !element.seeking &&
+          Math.abs(element.currentTime - offset) > 0.5 &&
+          now - lastSeekRef.current > 600
         ) {
-          lastAudioSeekRef.current = now
-          audio.currentTime = offset
+          lastSeekRef.current = now
+          element.currentTime = offset
         }
       }
-      if (shouldPlay && audio.paused) void audio.play().catch(() => undefined)
-      if (!shouldPlay && !audio.paused) audio.pause()
+      if (shouldPlay && element.paused) void element.play().catch(() => undefined)
+      if (!shouldPlay && !element.paused) element.pause()
     },
-    [audioClips, audioStarts, durationOf, trimOf]
+    [durationOf, trimOf]
+  )
+  const syncAudio = useCallback(
+    (t: number, shouldPlay: boolean) => {
+      syncLane(audioRef.current, audioClips, audioStarts, lastAudioSeekRef, t, shouldPlay)
+      syncLane(speechRef.current, speechClips, speechStarts, lastSpeechSeekRef, t, shouldPlay)
+    },
+    [audioClips, audioStarts, speechClips, speechStarts, syncLane]
   )
 
   // Keep the audio lane glued to the playhead in every state.
@@ -247,7 +279,7 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
   // Probe real durations (declared params often differ from delivered media).
   useEffect(() => {
     const probes: HTMLVideoElement[] = []
-    for (const clip of [...clips, ...audioClips]) {
+    for (const clip of [...clips, ...audioClips, ...speechClips]) {
       if (clip.still || !clip.url || mediaDurations[clip.node.id] !== undefined) continue
       const probe = document.createElement('video')
       probe.preload = 'metadata'
@@ -265,7 +297,7 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
         p.onloadedmetadata = null
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [[...clips, ...audioClips].map((c) => `${c.node.id}:${c.url}`).join('|')])
+  }, [[...clips, ...audioClips, ...speechClips].map((c) => `${c.node.id}:${c.url}`).join('|')])
 
   const activeVideo = () => (activeSlot === 'A' ? videoARef.current : videoBRef.current)
   const standbyVideo = () => (activeSlot === 'A' ? videoBRef.current : videoARef.current)
@@ -447,6 +479,7 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
   const pause = useCallback(() => {
     activeVideo()?.pause()
     audioRef.current?.pause()
+    speechRef.current?.pause()
     setPlaying(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSlot])
@@ -491,7 +524,9 @@ function usePlaybackEngine(clips: EngineClip[], audioClips: EngineClip[]) {
     videoARef,
     videoBRef,
     audioRef,
+    speechRef,
     audioStarts,
+    speechStarts,
     activeSlot,
     activeIdx,
     setActiveIdx,
@@ -540,7 +575,19 @@ export function TimelineV2({
   const [playerHeight, setPlayerHeight] = useState(0)
   const clipNodes = useMemo(() => collectTimelineClips(graph.nodes), [graph.nodes])
   const audioNodes = useMemo(
-    () => graph.nodes.filter((n) => getModel(n.modelId)?.kind === 'audio'),
+    () =>
+      graph.nodes.filter(
+        (n) => getModel(n.modelId)?.kind === 'audio' && audioRoleOf(n) === 'music'
+      ),
+    [graph.nodes]
+  )
+  // §8 — the speech lane (ElevenLabs voice-over/dialogue): its own lane, mixed
+  // OVER the music at render time, so previewed the same way.
+  const speechNodes = useMemo(
+    () =>
+      graph.nodes.filter(
+        (n) => getModel(n.modelId)?.kind === 'audio' && audioRoleOf(n) === 'speech'
+      ),
     [graph.nodes]
   )
   const generations = useVideoGenerations(videoId).data
@@ -587,8 +634,8 @@ export function TimelineV2({
     })
   }, [clipNodes, generations, assetMedia])
 
-  const audioClips: EngineClip[] = useMemo(() => {
-    return audioNodes.map((node) => {
+  const toAudioClip = useCallback(
+    (node: GraphNode): EngineClip => {
       const gens = (generations ?? []).filter((g) => g.nodeId === node.id)
       const best = bestGeneration(node, gens)
       return {
@@ -596,10 +643,19 @@ export function TimelineV2({
         url: best?.status === 'success' ? (best.url ?? null) : null,
         declared: clipDuration(node) ?? DEFAULT_CLIP_SECONDS
       }
-    })
-  }, [audioNodes, generations])
+    },
+    [generations]
+  )
+  const audioClips: EngineClip[] = useMemo(
+    () => audioNodes.map(toAudioClip),
+    [audioNodes, toAudioClip]
+  )
+  const speechClips: EngineClip[] = useMemo(
+    () => speechNodes.map(toAudioClip),
+    [speechNodes, toAudioClip]
+  )
 
-  const engine = usePlaybackEngine(clips, audioClips)
+  const engine = usePlaybackEngine(clips, audioClips, speechClips)
   const anyRunning = (generations ?? []).some((g) => g.status === 'running')
   const trackRef = useRef<HTMLDivElement | null>(null)
   const scrubbing = useRef(false)
@@ -1018,6 +1074,7 @@ export function TimelineV2({
               className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
             />
             <audio ref={engine.audioRef} className="hidden" />
+            <audio ref={engine.speechRef} className="hidden" />
             {/* Still slot: the image itself covers the (paused) video stack. */}
             {activeClip?.still && activeClip.url && (
               <img
@@ -1176,7 +1233,10 @@ export function TimelineV2({
                 <div
                   className="absolute inset-x-0 top-6 flex"
                   style={{
-                    bottom: (audioClips.length > 0 ? 38 : 0) + (textLayers.length > 0 ? 26 : 0)
+                    bottom:
+                      (audioClips.length > 0 ? 38 : 0) +
+                      (speechClips.length > 0 ? 38 : 0) +
+                      (textLayers.length > 0 ? 26 : 0)
                   }}
                 >
                   {clips.map((clip, i) => {
@@ -1301,7 +1361,9 @@ export function TimelineV2({
                 {textLayers.length > 0 && engine.total > 0 && (
                   <div
                     className="absolute inset-x-0 h-6"
-                    style={{ bottom: audioClips.length > 0 ? 38 : 0 }}
+                    style={{
+                      bottom: (audioClips.length > 0 ? 38 : 0) + (speechClips.length > 0 ? 38 : 0)
+                    }}
                   >
                     {textLayers.map((layer) => {
                       const resizing = layerResize?.id === layer.id ? layerResize : null
@@ -1371,70 +1433,87 @@ export function TimelineV2({
                   </div>
                 )}
 
-                {/* Audio track */}
-                {audioClips.length > 0 &&
-                  (() => {
-                    // Sequential lane starts, honouring an in-flight edge resize.
-                    const audioStarts: number[] = []
-                    let acc = 0
-                    for (const c of audioClips) {
-                      audioStarts.push(acc)
-                      acc += displayDur(c)
+                {/* Audio tracks: speech lane (voice-over) above the music lane —
+                    the same two lanes the MP4 render mixes. */}
+                {(
+                  [
+                    {
+                      laneClips: speechClips,
+                      bottom: audioClips.length > 0 ? 38 : 0,
+                      Icon: Mic,
+                      activeClass: 'border-accent-soft/40 bg-accent-soft/15 text-accent-soft'
+                    },
+                    {
+                      laneClips: audioClips,
+                      bottom: 0,
+                      Icon: Music,
+                      activeClass:
+                        'border-highlight-soft/40 bg-highlight-soft/15 text-highlight-soft'
                     }
-                    return (
-                      <div className="absolute inset-x-0 bottom-0 flex h-8">
-                        {audioClips.map((clip, i) => {
-                          const width =
-                            displayTotal > 0
-                              ? Math.min(
-                                  (displayDur(clip) / displayTotal) * 100,
-                                  100 - ((audioStarts[i] ?? 0) / displayTotal) * 100
-                                )
-                              : 0
-                          return (
-                            <div
-                              key={clip.node.id}
-                              className={`group relative mr-px flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[10px] ${
-                                clip.url
-                                  ? 'border-highlight-soft/40 bg-highlight-soft/15 text-highlight-soft'
-                                  : 'border-neutral-800 bg-neutral-900/40 text-neutral-600'
-                              }`}
-                              style={{ width: `${Math.max(width, 0)}%` }}
-                              onPointerDown={(e) => {
-                                e.stopPropagation()
-                                onFocusNode?.(clip.node.id)
-                              }}
-                              title={clip.node.label ?? getModel(clip.node.modelId)?.label}
-                            >
-                              <Music className="h-3 w-3 flex-shrink-0" />
-                              <span className="truncate">
-                                {clip.node.label ??
-                                  getModel(clip.node.modelId)?.label ??
-                                  clip.node.key}
-                              </span>
-                              <span className="ml-auto flex-shrink-0 opacity-70">
-                                {fmt(displayDur(clip))}
-                              </span>
-                              {clip.url && (
-                                <>
-                                  <EdgeHandle
-                                    side="left"
-                                    title={t('timeline.trimIn')}
-                                    onPointerDown={beginClipResize(clip, 'left')}
-                                  />
-                                  <EdgeHandle
-                                    side="right"
-                                    title={t('timeline.trimOut')}
-                                    onPointerDown={beginClipResize(clip, 'right')}
-                                  />
-                                </>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )
-                  })()}
+                  ] as const
+                ).map(({ laneClips, bottom, Icon, activeClass }, laneIdx) => {
+                  if (laneClips.length === 0) return null
+                  // Sequential lane starts, honouring an in-flight edge resize.
+                  const laneStarts: number[] = []
+                  let acc = 0
+                  for (const c of laneClips) {
+                    laneStarts.push(acc)
+                    acc += displayDur(c)
+                  }
+                  return (
+                    <div key={laneIdx} className="absolute inset-x-0 flex h-8" style={{ bottom }}>
+                      {laneClips.map((clip, i) => {
+                        const width =
+                          displayTotal > 0
+                            ? Math.min(
+                                (displayDur(clip) / displayTotal) * 100,
+                                100 - ((laneStarts[i] ?? 0) / displayTotal) * 100
+                              )
+                            : 0
+                        return (
+                          <div
+                            key={clip.node.id}
+                            className={`group relative mr-px flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[10px] ${
+                              clip.url
+                                ? activeClass
+                                : 'border-neutral-800 bg-neutral-900/40 text-neutral-600'
+                            }`}
+                            style={{ width: `${Math.max(width, 0)}%` }}
+                            onPointerDown={(e) => {
+                              e.stopPropagation()
+                              onFocusNode?.(clip.node.id)
+                            }}
+                            title={clip.node.label ?? getModel(clip.node.modelId)?.label}
+                          >
+                            <Icon className="h-3 w-3 flex-shrink-0" />
+                            <span className="truncate">
+                              {clip.node.label ??
+                                getModel(clip.node.modelId)?.label ??
+                                clip.node.key}
+                            </span>
+                            <span className="ml-auto flex-shrink-0 opacity-70">
+                              {fmt(displayDur(clip))}
+                            </span>
+                            {clip.url && (
+                              <>
+                                <EdgeHandle
+                                  side="left"
+                                  title={t('timeline.trimIn')}
+                                  onPointerDown={beginClipResize(clip, 'left')}
+                                />
+                                <EdgeHandle
+                                  side="right"
+                                  title={t('timeline.trimOut')}
+                                  onPointerDown={beginClipResize(clip, 'right')}
+                                />
+                              </>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
 
                 {/* Playhead */}
                 {engine.total > 0 && (

@@ -76,3 +76,10 @@ export function broadcastNichesChanged(): void {
     window.webContents.send('event:nichesChanged', {})
   }
 }
+
+/** Voice personas changed (any actor) — persona pickers and lists refetch. */
+export function broadcastVoicePersonasChanged(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:voicePersonasChanged', {})
+  }
+}

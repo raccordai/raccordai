@@ -11,10 +11,18 @@
  *   POST /claude/v1/messages              assistant + vision QC proxy
  *   GET  /media/<file>                    the result bytes (Range-aware)
  *
+ * It also stands in for the ElevenLabs API (RACCORD_ELEVENLABS_BASE → same
+ * server): synchronous speech endpoints returning the music fixture as
+ * base64 audio plus a character-level alignment, and the voices listing.
+ *
+ *   POST /v1/text-to-speech/:voiceId/with-timestamps
+ *   POST /v1/text-to-dialogue/with-timestamps
+ *   GET  /v2/voices
+ *
  * It also records what the app sent (payloads, upload count, Claude requests),
  * which is how specs assert on the *request* side of a flow.
  */
-import { createReadStream, statSync } from 'node:fs'
+import { createReadStream, readFileSync, statSync } from 'node:fs'
 import http from 'node:http'
 import { join } from 'node:path'
 import { ensureFixtures, FIXTURES, FIXTURE_DIR } from './fixtures.mjs'
@@ -50,7 +58,7 @@ export async function startKieMock(options = {}) {
 
   /** taskId → {model, input, fixture, state, failMsg, polls, provider} */
   const tasks = new Map()
-  const recorded = { createTask: [], suno: [], claude: [], uploads: 0 }
+  const recorded = { createTask: [], suno: [], claude: [], elevenlabs: [], uploads: 0 }
   let taskSeq = 0
   let claudeSeq = 0
   let base = ''
@@ -204,6 +212,49 @@ export async function startKieMock(options = {}) {
       if (req.method === 'POST' && url.pathname === '/api/file-stream-upload') {
         recorded.uploads++
         json(envelope({ downloadUrl: mediaUrl('still'), fileName: 'upload.png' }))
+        return
+      }
+
+      // ── ElevenLabs stand-in (synchronous speech) ────────────────────────
+      const speechResponse = (text) => {
+        const characters = [...text]
+        return JSON.stringify({
+          audio_base64: readFileSync(join(FIXTURE_DIR, FIXTURES.music.file)).toString('base64'),
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, i) => i * 0.05),
+            character_end_times_seconds: characters.map((_, i) => (i + 1) * 0.05)
+          }
+        })
+      }
+
+      if (
+        req.method === 'POST' &&
+        /^\/v1\/text-to-speech\/[^/]+\/with-timestamps$/.test(url.pathname)
+      ) {
+        const input = parsed()
+        recorded.elevenlabs.push({ endpoint: 'tts', voiceId: url.pathname.split('/')[3], input })
+        json(speechResponse(String(input.text ?? '')))
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/text-to-dialogue/with-timestamps') {
+        const input = parsed()
+        recorded.elevenlabs.push({ endpoint: 'dialogue', input })
+        json(speechResponse((input.inputs ?? []).map((cue) => cue.text).join('')))
+        return
+      }
+
+      if (url.pathname === '/v2/voices') {
+        json(
+          JSON.stringify({
+            voices: [
+              { voice_id: 'mock-voice-a', name: 'Mock Narrator', category: 'premade', labels: {} },
+              { voice_id: 'mock-voice-b', name: 'Mock Léa', category: 'cloned', labels: {} }
+            ],
+            has_more: false
+          })
+        )
         return
       }
 

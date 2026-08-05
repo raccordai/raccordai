@@ -123,6 +123,18 @@ export function getDataForSeoPassword(): string | null {
   return getEncryptedSetting('dataForSeoPasswordEncrypted')
 }
 
+export function setElevenLabsApiKey(key: string): void {
+  setEncryptedSetting('elevenLabsApiKeyEncrypted', key)
+}
+
+export function getElevenLabsApiKey(): string | null {
+  return getEncryptedSetting('elevenLabsApiKeyEncrypted')
+}
+
+export function elevenLabsKeyStatus(): { configured: boolean } {
+  return { configured: getElevenLabsApiKey() !== null }
+}
+
 export function nicheKeysStatus(): {
   youtubeConfigured: boolean
   dataForSeoConfigured: boolean

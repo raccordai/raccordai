@@ -245,6 +245,41 @@ compose: cast every role, then chain only the cuts that need the previous clip's
 remove_casting forgets the name only — shots already cast keep their reference and their prompt.
 Re-pointing a role at a new sheet does not rewire what is already wired: run cast_role again.`
 
+const SPEECH = `Speech (§8) — ElevenLabs voice-over and dialogue, and the channel's voice personas.
+
+TWO MODELS (both audio nodes, both on the ElevenLabs key set in Integrations):
+  - elevenlabs/text-to-speech: ONE voice reads the prompt (Eleven v3). Params: voiceId,
+    stability (creative | natural | robust), languageCode. Audio tags in brackets color the read:
+    [whispers], [laughs], [excited]. Punctuation is the pacing instrument.
+  - elevenlabs/text-to-dialogue: several voices in ONE audio. The prompt is a script — one
+    "Name: line" per cue (unprefixed lines continue the previous cue); the voiceMap param maps
+    each speaker: one "Name = voice_id" line. Max 10 voices, ≤2000 chars per run — split longer
+    scenes into several nodes at natural beats.
+
+Runs are SYNCHRONOUS (a few seconds) and every success stores a TRANSCRIPT on the generation:
+the spoken text with per-segment [m:ss] timestamps (speaker labels on dialogue). Read it with
+get_transcript(nodeId) and reuse it for subtitles, matching shots to narration beats, trimming
+clips to the voice, or the YouTube description.
+
+VOICE PERSONAS — the consistency mechanism. A persona names an ElevenLabs voice app-wide:
+"Narrateur IS voice X", optionally pinned to a niche (the YouTube channel). Same doctrine as the
+visual cast (docs "casting") but for who SPEAKS instead of who appears:
+  1. list_elevenlabs_voices(search?) to find or verify a voice id (custom clones included).
+  2. create_voice_persona(name, voice_id, description?, niche_id?) once the user picks it.
+  3. Every later video: list_voice_personas first, then write the persona's voice id into the
+     TTS voiceId or the dialogue voiceMap ("Léa = <the persona's voice id>"). The name in the
+     script should BE the persona name — that is what keeps A/B/C characters recognizable
+     across every video of the channel.
+delete_voice_persona forgets the name only; nodes keep the ids already written.
+
+RENDER. Speech nodes ride their own timeline lane (audioRole: speech), mixed OVER the Suno
+music bed and the clips' own audio — never concatenated after the music. Order/trim them like
+any clip (set_timeline_order, set_clip_trim); the transcript's timestamps tell you where to cut.
+
+TIP for a narrated YouTube video: write_scenario first, one TTS node per narration block (or one
+dialogue node per scene), generate the speech EARLY — the transcript's real timings are better
+shot-duration ground truth than any estimate.`
+
 const CONTINUITY = `Making consecutive shots read as ONE sequence — the transition problem.
 
 The symptom: shot 3 is a courier weaving through traffic, shot 4 is a pursuer jumping onto a
@@ -709,7 +744,7 @@ units). DataForSEO: real money per search — never launch a batch of keyword se
 user asking. Transcripts: free, but unofficial (YouTube captions) — some videos have none.`
 
 export const DOC_TOPICS =
-  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | casting | continuity | niches | styles | designs | shots | templates | template:<id>'
+  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | casting | continuity | speech | niches | styles | designs | shots | templates | template:<id>'
 
 export function getDoc(topic: string): string {
   if (topic === 'overview') return OVERVIEW
@@ -718,6 +753,7 @@ export function getDoc(topic: string): string {
   if (topic === 'scenario') return SCENARIO
   if (topic === 'casting') return CASTING
   if (topic === 'continuity') return CONTINUITY
+  if (topic === 'speech') return SPEECH
   if (topic === 'niches') return NICHES
   if (topic.startsWith('model:')) return modelDetail(topic.slice('model:'.length))
   if (topic.startsWith('prompting:')) return promptingGuide(topic.slice('prompting:'.length))

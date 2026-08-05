@@ -217,7 +217,9 @@
     "youtubeKeyMissing": "No YouTube key — required for niche research",
     "dataForSeoLoginLabel": "DataForSEO API login",
     "dataForSeoPasswordLabel": "DataForSEO API password",
-    "dataForSeoMissing": "DataForSEO credentials missing — required for keyword search"
+    "dataForSeoMissing": "DataForSEO credentials missing — required for keyword search",
+    "elevenLabsKeyLabel": "ElevenLabs API key",
+    "elevenLabsKeyMissing": "No ElevenLabs key — required for voice-over and dialogue"
   },
   "niches": {
     "title": "YouTube niches",
@@ -243,6 +245,18 @@
       "styleNone": "No style",
       "aspectAny": "Any format",
       "targetPlaceholder": "Target length (s)"
+    },
+    "voices": {
+      "title": "Channel voices",
+      "hint": "A persona = a name + an ElevenLabs voice, reused across every video.",
+      "namePlaceholder": "Name (e.g. Narrator, Léa)…",
+      "voiceIdPlaceholder": "ElevenLabs voice id…",
+      "voiceIdLabel": "ElevenLabs voice id",
+      "descriptionPlaceholder": "Delivery notes (e.g. calm, warm)…",
+      "add": "Add",
+      "global": "All niches",
+      "delete": "Delete",
+      "deleteConfirm": "Forget the persona “{{name}}”? Existing nodes keep their voice."
     },
     "roadmap": {
       "title": "Video roadmap",
@@ -513,6 +527,12 @@
       "audio": "Audio",
       "asset": "Studio",
       "shot": "Shots"
+    },
+    "speech": {
+      "voiceIdPlaceholder": "ElevenLabs voice id…",
+      "usePersona": "— Use a voice persona —",
+      "insertPersonaHint": "Insert “Name = voice_id” into the voices map",
+      "transcript": "Transcript"
     },
     "designHint": "Describe the subject in a few words — the prompt is built for the model and the video's style. Then wire this node into your shots' “reference” inputs.",
     "designAdd": "Create node",

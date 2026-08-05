@@ -3,12 +3,14 @@ import type { z } from 'zod'
 export type ModelKind = 'image' | 'video' | 'audio'
 
 /**
- * Which kie.ai API a model is driven through.
- * - `jobs` (default): the unified `/api/v1/jobs/createTask` + `recordInfo` API.
- * - `suno`: the dedicated Suno music API (`/api/v1/generate` + `/api/v1/generate/record-info`),
+ * Which API a model is driven through.
+ * - `jobs` (default): kie.ai's unified `/api/v1/jobs/createTask` + `recordInfo` API.
+ * - `suno`: kie.ai's dedicated Suno music API (`/api/v1/generate` + `/api/v1/generate/record-info`),
  *   which has a flat request body and a different status/result shape.
+ * - `elevenlabs`: the official ElevenLabs API (own key, own host) — SYNCHRONOUS:
+ *   the submit call returns the finished audio, there is nothing to poll.
  */
-export type ModelProvider = 'jobs' | 'suno'
+export type ModelProvider = 'jobs' | 'suno' | 'elevenlabs'
 
 export type ParamFieldType = 'text' | 'textarea' | 'number' | 'select' | 'boolean'
 
@@ -77,8 +79,14 @@ export interface ModelDefinition<TParams = any> {
   label: string
   description: string
   kind: ModelKind
-  /** kie.ai API family. Defaults to `jobs` (the unified API) when omitted. */
+  /** API family. Defaults to `jobs` (kie.ai's unified API) when omitted. */
   provider?: ModelProvider
+  /**
+   * Audio models only: which final-mix lane the output belongs to. `music`
+   * (default) concatenates on the music bed; `speech` rides its own voice lane,
+   * mixed OVER the music and the clips' own audio at render time.
+   */
+  audioRole?: 'music' | 'speech'
   /** Output type is TParams; input type is permissive because we accept user/JSON-imported partial params. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   paramsSchema: z.ZodType<TParams, any>

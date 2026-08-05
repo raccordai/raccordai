@@ -285,27 +285,34 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     }
     if (clips.length === 0) throw new Error('No timeline clip has a usable output to render')
 
-    // Audio lane (Suno nodes), in timeline order, each carrying its journaled
-    // trim window (the preview honours the same bounds). Nodes without output
-    // are reported as skipped rather than silently dropped.
-    const musicTracks: MusicTrack[] = []
-    for (const [i, node] of collectAudioNodes(graph.nodes).entries()) {
-      const path = await resolveNodeMedia(workDir, node, `music-${i + 1}`)
-      if (path) {
-        // Infinity = media length unknown here (audio is never probed): an
-        // untrimmed track must NOT inherit the node's declared duration as an
-        // out-point — only an explicit trim survives the Infinity fallback.
-        const { start, end } = clipTrim(node, Number.POSITIVE_INFINITY)
-        musicTracks.push({
-          path,
-          ...(start > 0 ? { trimStartSec: start } : {}),
-          ...(end !== undefined && Number.isFinite(end) ? { trimEndSec: end } : {})
-        })
-      } else skipped.push(label(node))
+    // Audio lanes (music = Suno bed, speech = ElevenLabs voice-over), each in
+    // timeline order, each carrying its journaled trim window (the preview
+    // honours the same bounds). Nodes without output are reported as skipped
+    // rather than silently dropped.
+    const collectLane = async (role: 'music' | 'speech'): Promise<MusicTrack[]> => {
+      const tracks: MusicTrack[] = []
+      for (const [i, node] of collectAudioNodes(graph.nodes, role).entries()) {
+        const path = await resolveNodeMedia(workDir, node, `${role}-${i + 1}`)
+        if (path) {
+          // Infinity = media length unknown here (audio is never probed): an
+          // untrimmed track must NOT inherit the node's declared duration as an
+          // out-point — only an explicit trim survives the Infinity fallback.
+          const { start, end } = clipTrim(node, Number.POSITIVE_INFINITY)
+          tracks.push({
+            path,
+            ...(start > 0 ? { trimStartSec: start } : {}),
+            ...(end !== undefined && Number.isFinite(end) ? { trimEndSec: end } : {})
+          })
+        } else skipped.push(label(node))
+      }
+      return tracks
     }
+    const musicTracks = await collectLane('music')
+    const speechTracks = await collectLane('speech')
+    const hasAudioLane = musicTracks.length > 0 || speechTracks.length > 0
 
     // ── Probe ────────────────────────────────────────────────────────────
-    const probeSpansGuess = computeStageSpans(true, musicTracks.length > 0)
+    const probeSpansGuess = computeStageSpans(true, hasAudioLane)
     progress(probeSpansGuess, 'probe', 0)
     for (const [i, clip] of clips.entries()) {
       if (!clip.isStill) clip.probe = await probeFile(active, clip.path)
@@ -410,7 +417,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       }
     }
     const hasBurnPass = assEvents.length > 0
-    const spans = computeStageSpans(!lossless, musicTracks.length > 0, {
+    const spans = computeStageSpans(!lossless, hasAudioLane, {
       hasTransitions: hasCrossfades(clips),
       hasSubtitles: hasBurnPass
     })
@@ -528,9 +535,9 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       progress(spans, 'subtitles', 1)
     }
 
-    // ── Mux the music lane ───────────────────────────────────────────────
+    // ── Mux the audio lanes (music bed + speech) ─────────────────────────
     let finalPath = stagePath
-    if (musicTracks.length > 0) {
+    if (hasAudioLane) {
       const concatProbe = await probeFile(active, stagePath)
       const muxOut = join(workDir, 'final.mp4')
       const muxDuration = concatProbe.durationSeconds ?? finalDuration
@@ -538,7 +545,14 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         active,
         ffmpegPath(),
         [
-          ...buildMuxArgs(stagePath, musicTracks, concatProbe.hasAudio, muxDuration, muxOut),
+          ...buildMuxArgs(
+            stagePath,
+            musicTracks,
+            speechTracks,
+            concatProbe.hasAudio,
+            muxDuration,
+            muxOut
+          ),
           '-progress',
           'pipe:1'
         ],

@@ -57,6 +57,8 @@ export async function launchApp({ kieBase, locale = 'en', apiKey = 'e2e-key' }) 
     env: {
       ...process.env,
       RACCORD_KIE_BASE: kieBase,
+      // The same mock serves the ElevenLabs endpoints (speech §8).
+      RACCORD_ELEVENLABS_BASE: kieBase,
       RACCORD_LOCAL_API_PORT: String(localApiPort),
       // Lets main opt into safeStorage's in-memory password where no OS
       // keyring exists (headless Linux) — dev builds only, see src/main/index.ts.
@@ -101,6 +103,8 @@ export async function launchApp({ kieBase, locale = 'en', apiKey = 'e2e-key' }) 
         { cause: error }
       )
     }
+    // Speech (§8) runs on its own key — same vault, same mock server.
+    await invoke('settings:setElevenLabsApiKey', { value: apiKey })
     await invoke('settings:setOnboardingCompleted')
     await win.reload()
     await win.waitForLoadState('domcontentloaded')

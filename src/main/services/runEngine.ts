@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { describeParamsError, estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
+import type { ModelProvider } from '@shared/models/types'
 import { remapDraftInputs, resolveDraftRun } from '@shared/models/draft'
 import { getStyle, nodeAppliesVideoStyle, wrapPromptWithStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
@@ -29,8 +32,9 @@ import {
   parseResultUrl
 } from './kie'
 import { type GenerationRow } from './generations'
+import { elevenlabsGenerateAudio } from './elevenlabs'
 import { maybeRunQcOnSettle } from './qc'
-import { getKieApiKey, getMaxConcurrentGenerations } from './settings'
+import { getElevenLabsApiKey, getKieApiKey, getMaxConcurrentGenerations } from './settings'
 
 /**
  * Local generation engine — port of convex/generations.ts onto the Electron
@@ -143,6 +147,19 @@ async function checkRemoteStatus(
 ): Promise<{ state: 'success' | 'fail' | 'pending'; resultUrl?: string; failMsg?: string }> {
   const provider = getModel(modelId)?.provider ?? 'jobs'
   if (provider === 'suno') return kieGetSunoStatus(kieTaskId)
+  // ElevenLabs is synchronous: submitGeneration already wrote the finished
+  // audio to a local staging file and stored its file:// URL as the task id.
+  // The file's existence IS the remote status; a restart that lost the staging
+  // file fails the run, and smart retry re-submits from the input snapshot.
+  if (provider === 'elevenlabs') {
+    if (kieTaskId.startsWith('file://') && existsSync(fileURLToPath(kieTaskId))) {
+      return { state: 'success', resultUrl: kieTaskId }
+    }
+    return {
+      state: 'fail',
+      failMsg: 'ElevenLabs result staging file is gone (app restarted mid-run?)'
+    }
+  }
 
   const data = await kieGetTaskInfo(kieTaskId)
   if (data.state === 'success')
@@ -261,7 +278,7 @@ async function resolveRunInputUrl(node: NodeRow, sourceHandle: string): Promise<
 interface PreparedRun {
   videoId: string
   modelId: string
-  provider: 'jobs' | 'suno'
+  provider: ModelProvider
   /** True when the run was substituted to the model's draftEquivalent (§6.1). */
   draft: boolean
   payload: Record<string, unknown>
@@ -477,16 +494,28 @@ async function downloadResult(generationId: string): Promise<void> {
   const node = db.select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
   const kind = node ? getModel(node.modelId)?.kind : undefined
 
-  const res = await fetch(gen.resultUrl)
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-  const contentType = res.headers.get('content-type')
-  const ext = extForContentType(contentType, gen.resultUrl, kind ? EXT_BY_KIND[kind] : undefined)
-  const target = join(mediaDirFor(video.projectId), `gen-${gen.id}${ext}`)
-  writeFileSync(target, new Uint8Array(await res.arrayBuffer()))
-  // Store a *media* mime only — the protocol handler serves it as Content-Type
-  // (a generic application/octet-stream would make <video> undecodable).
-  const headerMime = contentType?.split(';')[0]?.trim() ?? ''
-  const mediaMime = /^(video|audio|image)\//.test(headerMime) ? headerMime : mimeTypeFor(target)
+  let target: string
+  let mediaMime: string | null
+  if (gen.resultUrl.startsWith('file://')) {
+    // Synchronous providers (ElevenLabs) stage their result locally — Node's
+    // fetch refuses file:// URLs, so copy into the media store instead.
+    const source = fileURLToPath(gen.resultUrl)
+    target = join(mediaDirFor(video.projectId), `gen-${gen.id}${extname(source) || '.mp3'}`)
+    copyFileSync(source, target)
+    rmSync(source, { force: true })
+    mediaMime = mimeTypeFor(target)
+  } else {
+    const res = await fetch(gen.resultUrl)
+    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
+    const contentType = res.headers.get('content-type')
+    const ext = extForContentType(contentType, gen.resultUrl, kind ? EXT_BY_KIND[kind] : undefined)
+    target = join(mediaDirFor(video.projectId), `gen-${gen.id}${ext}`)
+    writeFileSync(target, new Uint8Array(await res.arrayBuffer()))
+    // Store a *media* mime only — the protocol handler serves it as Content-Type
+    // (a generic application/octet-stream would make <video> undecodable).
+    const headerMime = contentType?.split(';')[0]?.trim() ?? ''
+    mediaMime = /^(video|audio|image)\//.test(headerMime) ? headerMime : mimeTypeFor(target)
+  }
   db.update(generations)
     .set({ resultPath: target, resultMimeType: mediaMime })
     .where(eq(generations.id, generationId))
@@ -801,15 +830,18 @@ async function submitGeneration(generationId: string, prep: PreparedRun): Promis
   let kieTaskId: string
   try {
     kieTaskId =
-      prep.provider === 'suno'
-        ? // The Suno client retries internally (its API 500s more often).
-          await kieCreateSunoTask({ input: prep.payload })
-        : await withRetry(() => kieCreateTask({ model: prep.modelId, input: prep.payload }), {
-            attempts: 3,
-            baseDelayMs: 2000,
-            // createTask surfaces the kie code in the message; 4xx codes won't heal.
-            isTransient: (err) => !/\((4\d\d)\)/.test(err instanceof Error ? err.message : '')
-          })
+      prep.provider === 'elevenlabs'
+        ? // Synchronous provider: the "task" is the staged result file.
+          await submitElevenLabs(generationId, prep)
+        : prep.provider === 'suno'
+          ? // The Suno client retries internally (its API 500s more often).
+            await kieCreateSunoTask({ input: prep.payload })
+          : await withRetry(() => kieCreateTask({ model: prep.modelId, input: prep.payload }), {
+              attempts: 3,
+              baseDelayMs: 2000,
+              // createTask surfaces the kie code in the message; 4xx codes won't heal.
+              isTransient: (err) => !/\((4\d\d)\)/.test(err instanceof Error ? err.message : '')
+            })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (!maybeScheduleRetry(generationId, msg)) {
@@ -822,6 +854,26 @@ async function submitGeneration(generationId: string, prep: PreparedRun): Promis
   schedulePoll(generationId, 1)
 }
 
+/**
+ * ElevenLabs generation is one synchronous HTTP call: run it inside the queue
+ * slot, stage the audio in a temp file whose file:// URL becomes the task id
+ * (checkRemoteStatus then reports instant success), and stamp the timed
+ * transcript on the row — the alignment only exists in this response.
+ */
+async function submitElevenLabs(generationId: string, prep: PreparedRun): Promise<string> {
+  const result = await elevenlabsGenerateAudio(prep.payload)
+  const dir = join(tmpdir(), 'raccord-speech')
+  mkdirSync(dir, { recursive: true })
+  const staged = join(dir, `speech-${generationId}.mp3`)
+  writeFileSync(staged, result.audio)
+  getDb()
+    .update(generations)
+    .set({ transcript: result.transcript })
+    .where(eq(generations.id, generationId))
+    .run()
+  return pathToFileURL(staged).href
+}
+
 export async function runNode(
   nodeId: string,
   reuseSatisfied = false,
@@ -829,7 +881,14 @@ export async function runNode(
 ): Promise<{ generationId: string; kieTaskId: string; generationIds: string[] }> {
   // Fail fast on the one config error the user can fix immediately — every
   // other submission error surfaces asynchronously on the generation row.
-  if (!getKieApiKey()) {
+  // ElevenLabs models run on their own key; everything else needs the kie key.
+  const node = getDb().select().from(nodes).where(eq(nodes.id, nodeId)).get()
+  const nodeProvider = node ? (getModel(node.modelId)?.provider ?? 'jobs') : 'jobs'
+  if (nodeProvider === 'elevenlabs') {
+    if (!getElevenLabsApiKey()) {
+      throw new Error('ElevenLabs API key is not configured. Add it in Settings → Integrations.')
+    }
+  } else if (!getKieApiKey()) {
     throw new Error(
       "kie.ai API key is not configured. Add it in the app's Integrations section on the home page."
     )

@@ -66,6 +66,9 @@ describe('AGENT_TOOLS registry', () => {
       // §7b — a researched idea (evidence, drafts) is gone for good.
       'delete_roadmap_item',
       'delete_video',
+      // §8 — forgetting a named voice; nodes keep their ids but the channel
+      // loses the name→voice mapping its consistency rests on.
+      'delete_voice_persona',
       'remove_niche_channel',
       'remove_node',
       // A model swap deletes the node's generations (a new model can't reuse them).

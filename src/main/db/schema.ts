@@ -270,6 +270,8 @@ export const generations = sqliteTable(
     qcVerdict: text('qc_verdict', { enum: ['pass', 'warn', 'error'] }),
     /** Human-readable QC issues, shown on the card and fed to "Fix with assistant". */
     qcNotes: text('qc_notes'),
+    /** Speech runs (§8): SpeechTranscript JSON — what was spoken, with timestamps. */
+    transcript: text('transcript', { mode: 'json' }),
     errorMessage: text('error_message'),
     createdAt: integer('created_at').notNull(),
     completedAt: integer('completed_at')
@@ -536,4 +538,29 @@ export const nicheVideos = sqliteTable(
     index('niche_videos_by_channel').on(table.nicheId, table.channelId),
     uniqueIndex('niche_videos_unique').on(table.nicheId, table.videoId)
   ]
+)
+
+/**
+ * Voice personas (§8): the channel's NAMED voice identities — "Narrateur IS
+ * ElevenLabs voice X". App-level like niches (the same narrator serves every
+ * video, which is what keeps a channel's voice consistent); optionally pinned
+ * to one niche. The casting table names who appears on screen — this names who
+ * speaks. Deleting a niche keeps its personas (SET NULL): the voice outlives
+ * the watchlist.
+ */
+export const voicePersonas = sqliteTable(
+  'voice_personas',
+  {
+    id: text('id').primaryKey(),
+    /** The name scripts call this voice — unique app-wide, case-insensitive. */
+    name: text('name').notNull(),
+    /** ElevenLabs voice id (custom clone or premade). */
+    voiceId: text('voice_id').notNull(),
+    /** Delivery notes folded into speech direction ("calm, warm, slow"). */
+    description: text('description'),
+    nicheId: text('niche_id').references(() => niches.id, { onDelete: 'set null' }),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+  },
+  (table) => [index('voice_personas_by_niche').on(table.nicheId)]
 )

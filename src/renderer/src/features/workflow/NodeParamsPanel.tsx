@@ -29,6 +29,7 @@ import type { ModelDefinition } from '@shared/models'
 import { clampParamToField, defaultParamsFor, getModel, videoDefaultParams } from '@shared/models'
 import { getStyle } from '@shared/styles/registry'
 import { lintNode, type LintFix } from '@shared/promptLint'
+import { formatTranscript, type SpeechTranscript } from '@shared/speech'
 import { Button } from '@renderer/components/ui/Button'
 import { Lightbox } from '@renderer/components/Lightbox'
 import { MentionMenu, useMentionMenu, type MentionItem } from '@renderer/components/ui/MentionMenu'
@@ -358,6 +359,16 @@ function ModelNodeEditor({
   const costEstimate = useQuery({
     queryKey: ['generations', 'estimate', node.id, node.updatedAt],
     queryFn: () => invoke('generations:estimateCost', { nodeId: node.id })
+  })
+
+  // Voice personas (§8): the channel's named voices, offered on the speech
+  // params (voiceId picker, dialogue voice-map inserts). Only fetched when the
+  // model actually declares one of those fields.
+  const isSpeechModel = model?.paramFields.some((f) => f.key === 'voiceId' || f.key === 'voiceMap')
+  const voicePersonas = useQuery({
+    queryKey: ['voicePersonas'],
+    queryFn: () => invoke('voicePersonas:list', {}),
+    enabled: isSpeechModel === true
   })
 
   // "@" in the prompt opens the connected-input aliases (@Image1, @Video1…) —
@@ -777,15 +788,64 @@ function ModelNodeEditor({
               </div>
             )}
             {field.type === 'textarea' && field.key !== 'prompt' && (
-              <TextArea
-                value={(params[field.key] as string | undefined) ?? ''}
-                onChange={(e) => setField(field.key, e.target.value)}
-                onBlur={(e) => commit(field.key, e.target.value)}
-                placeholder={field.description}
-                rows={3}
-              />
+              <>
+                <TextArea
+                  value={(params[field.key] as string | undefined) ?? ''}
+                  onChange={(e) => setField(field.key, e.target.value)}
+                  onBlur={(e) => commit(field.key, e.target.value)}
+                  placeholder={field.description}
+                  rows={3}
+                />
+                {field.key === 'voiceMap' && (voicePersonas.data?.length ?? 0) > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {voicePersonas.data?.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        title={t('editor.speech.insertPersonaHint')}
+                        className="rounded-full border border-neutral-700 px-2 py-0.5 text-[10px] text-neutral-300 hover:border-accent hover:text-neutral-100"
+                        onClick={() => {
+                          const current = (
+                            (params[field.key] as string | undefined) ?? ''
+                          ).trimEnd()
+                          const line = `${p.name} = ${p.voiceId}`
+                          if (current.includes(p.voiceId)) return
+                          commit(field.key, current === '' ? line : `${current}\n${line}`)
+                        }}
+                      >
+                        + {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
-            {field.type === 'text' && (
+            {field.type === 'text' && field.key === 'voiceId' && (
+              <div className="flex flex-col gap-1.5">
+                <TextField
+                  value={(params[field.key] as string | undefined) ?? ''}
+                  onChange={(e) => setField(field.key, e.target.value)}
+                  onBlur={(e) => commit(field.key, e.target.value)}
+                  placeholder={t('editor.speech.voiceIdPlaceholder')}
+                />
+                {(voicePersonas.data?.length ?? 0) > 0 && (
+                  <Select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) commit(field.key, e.target.value)
+                    }}
+                  >
+                    <option value="">{t('editor.speech.usePersona')}</option>
+                    {voicePersonas.data?.map((p) => (
+                      <option key={p.id} value={p.voiceId}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </div>
+            )}
+            {field.type === 'text' && field.key !== 'voiceId' && (
               <TextField
                 value={(params[field.key] as string | undefined) ?? ''}
                 onChange={(e) => setField(field.key, e.target.value)}
@@ -1339,6 +1399,8 @@ type GenRow = {
   /** §6.2 — vision-QC outcome ('error' = the QC call itself failed). */
   qcVerdict?: 'pass' | 'warn' | 'error' | null
   qcNotes?: string | null
+  /** §8 — speech runs store what was spoken, with timestamps. */
+  transcript?: SpeechTranscript | null
 }
 
 function GenerationCard({
@@ -1427,6 +1489,20 @@ function GenerationCard({
         {g.status === 'success' && g.url ? (
           model.kind === 'video' ? (
             <video src={g.url} muted loop controls className="w-full" />
+          ) : model.kind === 'audio' ? (
+            <div className="p-2">
+              <audio src={g.url} controls className="w-full" />
+              {g.transcript && (
+                <details className="mt-1.5 rounded border border-neutral-800 bg-neutral-900/40 px-2 py-1">
+                  <summary className="cursor-pointer select-none text-[10px] font-semibold text-neutral-400">
+                    {t('editor.speech.transcript')}
+                  </summary>
+                  <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap font-sans text-[10px] leading-relaxed text-neutral-300">
+                    {formatTranscript(g.transcript)}
+                  </pre>
+                </details>
+              )}
+            </div>
           ) : (
             <img
               src={g.url}

@@ -121,13 +121,25 @@ export function collectTimelineClips(nodes: GraphNode[]): GraphNode[] {
   return timelineOrder([...byNumber.values(), ...keptAsIs])
 }
 
+/** Which final-mix lane an audio node belongs to (model-declared, music default). */
+export function audioRoleOf(node: GraphNode): 'music' | 'speech' {
+  return getModel(node.modelId)?.audioRole ?? 'music'
+}
+
 /**
- * The audio lane: every audio-kind node (Suno music), in timeline order. The
- * MP4 render muxes their outputs over the concatenated video track.
+ * The audio lanes, in timeline order. `music` (Suno) concatenates as the music
+ * bed; `speech` (ElevenLabs voice-over/dialogue) is its own lane, mixed OVER
+ * the bed at render time. Omit `role` for the historical "every audio node"
+ * list (used where the lanes behave identically, e.g. duration probing).
  */
-export function collectAudioNodes(nodes: GraphNode[]): GraphNode[] {
+export function collectAudioNodes(nodes: GraphNode[], role?: 'music' | 'speech'): GraphNode[] {
   return timelineOrder(
-    nodes.filter((n) => n.modelId !== 'studio/asset' && getModel(n.modelId)?.kind === 'audio')
+    nodes.filter(
+      (n) =>
+        n.modelId !== 'studio/asset' &&
+        getModel(n.modelId)?.kind === 'audio' &&
+        (role === undefined || audioRoleOf(n) === role)
+    )
   )
 }
 

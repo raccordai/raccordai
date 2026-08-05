@@ -217,7 +217,9 @@
     "youtubeKeyMissing": "Aucune clé YouTube — requise pour la veille de niches",
     "dataForSeoLoginLabel": "Login API DataForSEO",
     "dataForSeoPasswordLabel": "Mot de passe API DataForSEO",
-    "dataForSeoMissing": "Identifiants DataForSEO manquants — requis pour la recherche par mot-clé"
+    "dataForSeoMissing": "Identifiants DataForSEO manquants — requis pour la recherche par mot-clé",
+    "elevenLabsKeyLabel": "Clé API ElevenLabs",
+    "elevenLabsKeyMissing": "Aucune clé ElevenLabs — requise pour la voix off et les dialogues"
   },
   "niches": {
     "title": "Niches YouTube",
@@ -243,6 +245,18 @@
       "styleNone": "Aucun style",
       "aspectAny": "Format libre",
       "targetPlaceholder": "Durée cible (s)"
+    },
+    "voices": {
+      "title": "Voix du canal",
+      "hint": "Un persona = un nom + une voix ElevenLabs, réutilisés dans toutes les vidéos.",
+      "namePlaceholder": "Nom (ex. Narrateur, Léa)…",
+      "voiceIdPlaceholder": "ID de voix ElevenLabs…",
+      "voiceIdLabel": "ID de voix ElevenLabs",
+      "descriptionPlaceholder": "Notes de jeu (ex. calme, chaleureux)…",
+      "add": "Ajouter",
+      "global": "Toutes niches",
+      "delete": "Supprimer",
+      "deleteConfirm": "Oublier le persona « {{name}} » ? Les nœuds existants gardent leur voix."
     },
     "roadmap": {
       "title": "Roadmap des vidéos",
@@ -513,6 +527,12 @@
       "audio": "Audio",
       "asset": "Studio",
       "shot": "Plans"
+    },
+    "speech": {
+      "voiceIdPlaceholder": "ID de voix ElevenLabs…",
+      "usePersona": "— Utiliser un persona de voix —",
+      "insertPersonaHint": "Insérer « Nom = voice_id » dans la table des voix",
+      "transcript": "Transcription"
     },
     "designHint": "Décris le sujet en quelques mots — le prompt est généré pour le modèle et le style de la vidéo. Branche ensuite ce nœud en entrée « reference » de tes plans.",
     "designAdd": "Créer le nœud",

@@ -30,6 +30,8 @@ import * as runBatchService from '../services/runBatch'
 import * as renderService from '../services/render'
 import * as runEngine from '../services/runEngine'
 import * as settingsService from '../services/settings'
+import { elevenlabsListVoices } from '../services/elevenlabs'
+import * as voicePersonasService from '../services/voicePersonas'
 import * as textLayersService from '../services/textLayers'
 import * as videosService from '../services/videos'
 
@@ -312,6 +314,19 @@ export function registerIpcHandlers(): void {
     settingsService.setDataForSeoPassword(value)
   )
   handle('settings:nicheKeysStatus', () => settingsService.nicheKeysStatus())
+  handle('settings:setElevenLabsApiKey', ({ value }) => settingsService.setElevenLabsApiKey(value))
+  handle('settings:elevenLabsKeyStatus', () => settingsService.elevenLabsKeyStatus())
+
+  // Speech (§8) — ElevenLabs voices + the channel's named voice personas.
+  handle('speech:listVoices', ({ search }) => elevenlabsListVoices({ search }))
+  handle('voicePersonas:list', ({ nicheId }) => voicePersonasService.listVoicePersonas(nicheId))
+  handle('voicePersonas:create', (input) => voicePersonasService.createVoicePersona(input))
+  handle('voicePersonas:update', ({ personaId, ...patch }) =>
+    voicePersonasService.updateVoicePersona(personaId, patch)
+  )
+  handle('voicePersonas:remove', ({ personaId }) =>
+    voicePersonasService.deleteVoicePersona(personaId)
+  )
 
   // YouTube niche research (§7) — services broadcast event:nichesChanged themselves.
   handle('niches:list', () => nichesService.listNiches())

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { MAX_VARIANTS } from '../config'
 import { SCENARIO_VERSION, SCREEN_DIRECTIONS, type Scenario } from '../scenario'
+import { type SpeechTranscript } from '../speech'
 import { CLIP_TRANSITION_IDS, TRANSITION_MAX_SECONDS, TRANSITION_MIN_SECONDS } from '../transitions'
 
 /**
@@ -233,6 +234,36 @@ export const castRoleResultSchema = z.object({
   alreadyCast: z.array(z.object({ nodeId: z.string(), alias: z.string() })),
   skipped: z.array(z.object({ nodeId: z.string(), reason: z.string() }))
 })
+
+/**
+ * A voice persona: the channel's named voice identity (ElevenLabs voice id +
+ * standing direction), app-level like niches so the same narrator serves every
+ * video; optionally pinned to one niche. The casting table names who appears
+ * on screen — this names who SPEAKS.
+ */
+export const voicePersonaSchema = z.object({
+  id: z.string(),
+  /** The name scripts call this voice, e.g. "Narrateur" or "Léa" — unique app-wide. */
+  name: z.string(),
+  /** ElevenLabs voice id (custom or premade). */
+  voiceId: z.string(),
+  /** Delivery notes the assistant folds into speech prompts ("calm, warm, slow"). */
+  description: z.string().nullable(),
+  /** Pinned channel/niche — null means available everywhere. */
+  nicheId: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number()
+})
+export type VoicePersona = z.infer<typeof voicePersonaSchema>
+
+export const elevenLabsVoiceSchema = z.object({
+  voiceId: z.string(),
+  name: z.string(),
+  category: z.string().nullable(),
+  previewUrl: z.string().nullable(),
+  labels: z.record(z.string(), z.string())
+})
+export type ElevenLabsVoiceInfo = z.infer<typeof elevenLabsVoiceSchema>
 
 /** Scenario → graph (§6.11): what building the shot list would create. */
 export const scenarioGraphPlanSchema = z.object({
@@ -518,6 +549,19 @@ export const generationStatusSchema = z.enum(['pending', 'running', 'success', '
 export const qcVerdictSchema = z.enum(['pass', 'warn', 'error'])
 export type QcVerdict = z.infer<typeof qcVerdictSchema>
 
+/** Zod mirror of shared/speech's SpeechTranscript (compile-checked below). */
+export const speechTranscriptSchema: z.ZodType<SpeechTranscript> = z.object({
+  text: z.string(),
+  segments: z.array(
+    z.object({
+      start: z.number().nullable(),
+      end: z.number().nullable(),
+      text: z.string(),
+      speaker: z.string().optional()
+    })
+  )
+})
+
 export const generationSchema = z.object({
   id: z.string(),
   nodeId: z.string(),
@@ -534,6 +578,8 @@ export const generationSchema = z.object({
   /** Vision-QC verdict (§6.2) — 'pass' | 'warn' | 'error', null = not checked. */
   qcVerdict: qcVerdictSchema.nullable(),
   qcNotes: z.string().nullable(),
+  /** Speech runs only (§8): what was spoken, with per-segment timestamps. */
+  transcript: speechTranscriptSchema.nullable(),
   errorMessage: z.string().nullable(),
   createdAt: z.number(),
   completedAt: z.number().nullable()
@@ -1610,7 +1656,40 @@ export const ipcContracts = {
   'settings:nicheKeysStatus': {
     input: z.void(),
     output: z.object({ youtubeConfigured: z.boolean(), dataForSeoConfigured: z.boolean() })
-  }
+  },
+  'settings:setElevenLabsApiKey': { input: z.object({ value: z.string() }), output: z.void() },
+  'settings:elevenLabsKeyStatus': {
+    input: z.void(),
+    output: z.object({ configured: z.boolean() })
+  },
+  'speech:listVoices': {
+    input: z.object({ search: z.string().optional() }),
+    output: z.object({ voices: z.array(elevenLabsVoiceSchema), hasMore: z.boolean() })
+  },
+  'voicePersonas:list': {
+    input: z.object({ nicheId: z.string().optional() }),
+    output: z.array(voicePersonaSchema)
+  },
+  'voicePersonas:create': {
+    input: z.object({
+      name: z.string().trim().min(1),
+      voiceId: z.string().trim().min(1),
+      description: z.string().nullable().optional(),
+      nicheId: z.string().nullable().optional()
+    }),
+    output: voicePersonaSchema
+  },
+  'voicePersonas:update': {
+    input: z.object({
+      personaId: z.string(),
+      name: z.string().trim().min(1).optional(),
+      voiceId: z.string().trim().min(1).optional(),
+      description: z.string().nullable().optional(),
+      nicheId: z.string().nullable().optional()
+    }),
+    output: voicePersonaSchema
+  },
+  'voicePersonas:remove': { input: z.object({ personaId: z.string() }), output: z.void() }
 } as const satisfies Record<string, { input: z.ZodType; output: z.ZodType }>
 
 /** Main→renderer push events the preload is allowed to subscribe to. */
@@ -1623,7 +1702,8 @@ export const ipcEvents = [
   'event:queueChanged',
   'event:focusNode',
   'event:navigate',
-  'event:nichesChanged'
+  'event:nichesChanged',
+  'event:voicePersonasChanged'
 ] as const
 export type IpcEvent = (typeof ipcEvents)[number]
 

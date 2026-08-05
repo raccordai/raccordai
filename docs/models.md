@@ -69,9 +69,16 @@ export const myModel: ModelDefinition<Params> = {
   lane), the project "clip count", and FCPXML export.
 - `provider` — omit for the unified jobs API. `'suno'` routes through the
   dedicated Suno endpoints in `kie.ts` (flat body, different status polling).
-  A new provider = new client functions in `src/main/services/kie.ts` + a
-  branch in `checkRemoteStatus`/`submitGeneration` (`runEngine.ts`) — avoid
-  unless the API family truly differs.
+  `'elevenlabs'` routes through the official ElevenLabs client
+  (`src/main/services/elevenlabs.ts`, own key, own host, SYNCHRONOUS — the
+  submit call returns the finished audio; the staged file's `file://` URL is
+  stored as the task id and `checkRemoteStatus` reports instant success).
+  A new provider = a client service + a branch in
+  `checkRemoteStatus`/`submitGeneration` (`runEngine.ts`) — avoid unless the
+  API family truly differs.
+- `audioRole` — audio models only: `'music'` (default, the Suno bed) or
+  `'speech'` (ElevenLabs voice-over) — decides which timeline/render lane the
+  output rides; speech is mixed OVER the music, never concatenated after it.
 
 ### Parameters: `paramsSchema` + `paramFields` (keep them in sync)
 

@@ -13,6 +13,7 @@ import type {
 } from '@shared/ipc/contracts'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { RoadmapSection } from '@renderer/features/niches/RoadmapSection'
+import { VoicePersonasSection } from '@renderer/features/niches/VoicePersonasSection'
 import { compactNumber, formatSubscribers, VideoRow } from '@renderer/features/niches/VideoRow'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
@@ -296,6 +297,8 @@ function NicheDetailPage(): React.JSX.Element {
       </div>
 
       <RoadmapSection nicheId={nicheId} />
+
+      <VoicePersonasSection nicheId={nicheId} />
 
       {/* ── Channels: add, then mine / competitors ── */}
       <section className="flex flex-col gap-3">

@@ -69,6 +69,10 @@ async function bootstrap(): Promise<void> {
   window.api.on('event:nichesChanged', () => {
     void queryClient.invalidateQueries({ queryKey: ['niches'] })
   })
+  // Voice personas (§8) — persona pickers and lists refetch.
+  window.api.on('event:voicePersonasChanged', () => {
+    void queryClient.invalidateQueries({ queryKey: ['voicePersonas'] })
+  })
 
   const container = document.getElementById('root')
   if (!container) throw new Error('#root element missing')

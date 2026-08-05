@@ -127,6 +127,13 @@
       "when": 1785928323733,
       "tag": "0017_old_newton_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1785934121793,
+      "tag": "0018_wild_solo",
+      "breakpoints": true
     }
   ]
 }
