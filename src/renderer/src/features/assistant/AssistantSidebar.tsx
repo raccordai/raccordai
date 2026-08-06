@@ -95,7 +95,8 @@ export function AssistantSidebar(): React.JSX.Element | null {
   const viewed = useMemo(
     () => ({
       projectId: /^\/projects\/([^/]+)/.exec(pathname)?.[1],
-      videoId: VIDEO_ROUTE.exec(pathname)?.[2]
+      videoId: VIDEO_ROUTE.exec(pathname)?.[2],
+      nicheId: /^\/niches\/([^/]+)/.exec(pathname)?.[1]
     }),
     [pathname]
   )
@@ -105,6 +106,7 @@ export function AssistantSidebar(): React.JSX.Element | null {
       route: pathname,
       projectId: viewed.projectId,
       videoId: viewed.videoId,
+      nicheId: viewed.nicheId,
       selectedNodeId: editor.selectedNodeId ?? undefined,
       lastError: editor.lastError ?? undefined
     }

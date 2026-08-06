@@ -286,7 +286,17 @@
       "publishedUrlPlaceholder": "YouTube URL of the published video…",
       "publishedPerf": "{{views}} views · niche median: {{median}}",
       "deleteConfirm": "Delete the idea \"{{title}}\"? Its drafts (description, thumbnail brief, evidence) go with it.",
-      "noProjects": "Create a project first to assign a workflow."
+      "noProjects": "Create a project first to assign a workflow.",
+      "titleVariantsLabel": "Title variants",
+      "promoteTitle": "Use this title",
+      "feedPreview": "Feed preview",
+      "feedPreviewShort": "Feed",
+      "feedPreviewHint": "Your packaging next to the niche's real thumbnails — click the candidate title to cycle through the variants.",
+      "feedYourChannel": "Your channel",
+      "cycleTitles": "Click to cycle to the next variant",
+      "noThumbnailYet": "No thumbnail generated yet — run the workflow's thumbnail node",
+      "exportThumbnail": "Export thumbnail",
+      "thumbnailExported": "Thumbnail exported: {{path}}"
     },
     "keysMissing": "API keys missing — configure YouTube (and DataForSEO for search) in Settings → Integrations.",
     "channels": "Tracked channels",
@@ -359,7 +369,11 @@
       "youngChannels": "Young channels (≤ 12 months)"
     },
     "panelHint": "Select a niche: the results' \"+ Track\" buttons will add channels to it.",
-    "open": "Open"
+    "open": "Open",
+    "searchCost": "cost ${{cost}}",
+    "viewsPerDayTitle": "Velocity: views per day (measured between refreshes, lifetime average as fallback)",
+    "viewsPerDaySuffix": "/d",
+    "channelRatioTitle": "Views vs the channel's own median — a ×5 is an outlier whatever the channel size"
   },
   "project": {
     "back": "Back to projects",

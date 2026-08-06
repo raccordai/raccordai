@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type {
   Niche,
   NicheChannel,
@@ -7,19 +7,25 @@ import type {
   NicheRefreshResult,
   NicheRoadmapItem,
   NicheVideo,
-  NicheVideoFiltersInput
+  NicheVideoFiltersInput,
+  VoicePersona
 } from '@shared/ipc/contracts'
+import { getModel } from '@shared/models'
 import {
+  channelOutlierRatio,
   computeChannelAggregates,
   DEFAULT_LANGUAGE_CODE,
   DEFAULT_LOCATION_CODE,
   DEFAULT_NICHE_FILTERS,
   filterNicheVideos,
   formatTranscriptWithTimestamps,
+  lifetimeViewsPerDay,
   mergeSearchResults,
   parseChannelRef,
   parseYoutubeVideoUrl,
+  shouldSnapshot,
   spPresetRaw,
+  viewVelocity,
   type ChannelAggregates,
   type ChannelStats,
   type NicheScoredVideo,
@@ -30,13 +36,23 @@ import {
 } from '@shared/niches'
 import { getStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
-import { nicheChannels, nicheRoadmapItems, nicheVideos, niches } from '../db/schema'
+import {
+  nicheChannels,
+  nicheRoadmapItems,
+  nicheVideoSnapshots,
+  nicheVideos,
+  niches,
+  videos
+} from '../db/schema'
 import { broadcastNichesChanged } from '../events'
 import { searchYoutubeSerp } from './dataforseo'
+import { listGraph, updateNodeParams } from './graph'
+import { withGraphHistoryGroup } from './graphHistory'
 import { logInfo, logWarn } from './logger'
 import { createRecipeNode } from './recipes'
 import { nicheKeysStatus } from './settings'
 import { createVideo, getVideo, setVideoDefaults, setVideoStyle } from './videos'
+import { listVoicePersonas } from './voicePersonas'
 import {
   fetchChannelByHandle,
   fetchChannelsByIds,
@@ -98,7 +114,13 @@ function toChannel(row: ChannelRow): NicheChannel {
   }
 }
 
-function toVideo(row: VideoRow): NicheVideo {
+/** Computed lenses attached at read time (they need the niche-wide context). */
+interface VideoLenses {
+  channelRatio: number | null
+  viewsPerDay: number | null
+}
+
+function toVideo(row: VideoRow, lenses?: VideoLenses): NicheVideo {
   return {
     id: row.id,
     nicheId: row.nicheId,
@@ -111,6 +133,11 @@ function toVideo(row: VideoRow): NicheVideo {
     thumbnail: row.thumbnail ?? null,
     publishedAt: row.publishedAt ?? null,
     views: row.views,
+    likeCount: row.likeCount ?? null,
+    commentCount: row.commentCount ?? null,
+    language: row.language ?? null,
+    hasCaptions: row.hasCaptions ?? null,
+    serpRank: row.serpRank ?? null,
     durationSeconds: row.durationSeconds,
     madeForKids: row.madeForKids,
     channelSubscribers: row.channelSubscribers,
@@ -118,9 +145,101 @@ function toVideo(row: VideoRow): NicheVideo {
     source: row.source,
     keyword: row.keyword ?? null,
     hasTranscript: row.transcript !== null && row.transcript !== '',
+    channelRatio: lenses?.channelRatio ?? null,
+    viewsPerDay: lenses?.viewsPerDay ?? null,
     statsRefreshedAt: row.statsRefreshedAt ?? null,
     createdAt: row.createdAt
   }
+}
+
+/**
+ * Views vs the channel's own median over its tracked videos — the second
+ * outlier lens. Needs ≥3 videos per channel to mean anything.
+ */
+function channelMediansOf(rows: readonly VideoRow[]): Map<string, number> {
+  const byChannel = new Map<string, number[]>()
+  for (const row of rows) {
+    const list = byChannel.get(row.channelId) ?? []
+    list.push(row.views)
+    byChannel.set(row.channelId, list)
+  }
+  const medians = new Map<string, number>()
+  for (const [channelId, views] of byChannel) {
+    if (views.length < 3) continue
+    const sorted = [...views].sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    medians.set(
+      channelId,
+      sorted.length % 2 === 1
+        ? (sorted[mid] ?? 0)
+        : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
+    )
+  }
+  return medians
+}
+
+/** Snapshot series for a set of tracked-video rows, grouped by row id. */
+function snapshotsByRow(
+  rowIds: readonly string[]
+): Map<string, { views: number; capturedAt: number }[]> {
+  const out = new Map<string, { views: number; capturedAt: number }[]>()
+  if (rowIds.length === 0) return out
+  const rows = getDb()
+    .select()
+    .from(nicheVideoSnapshots)
+    .where(inArray(nicheVideoSnapshots.nicheVideoId, [...rowIds]))
+    .all()
+  for (const snap of rows) {
+    const list = out.get(snap.nicheVideoId) ?? []
+    list.push({ views: snap.views, capturedAt: snap.capturedAt })
+    out.set(snap.nicheVideoId, list)
+  }
+  return out
+}
+
+function lensesOf(
+  row: VideoRow,
+  medians: Map<string, number>,
+  snapshots: Map<string, { views: number; capturedAt: number }[]>,
+  now: Date
+): VideoLenses {
+  return {
+    channelRatio: channelOutlierRatio(row.views, medians.get(row.channelId) ?? 0),
+    viewsPerDay:
+      viewVelocity(snapshots.get(row.id) ?? []) ??
+      lifetimeViewsPerDay(row.views, row.publishedAt ?? null, now)
+  }
+}
+
+/**
+ * One time-series point per refresh where the numbers moved (plus a daily
+ * heartbeat) — refreshes overwrite `views` on the row, the series lives here.
+ */
+function recordSnapshot(
+  nicheVideoRowId: string,
+  values: { views: number; likeCount: number | null; channelSubscribers: number },
+  now: number
+): void {
+  const db = getDb()
+  const previous = db
+    .select()
+    .from(nicheVideoSnapshots)
+    .where(eq(nicheVideoSnapshots.nicheVideoId, nicheVideoRowId))
+    .orderBy(desc(nicheVideoSnapshots.capturedAt))
+    .limit(1)
+    .get()
+  const prev = previous ? { views: previous.views, capturedAt: previous.capturedAt } : null
+  if (!shouldSnapshot(prev, values.views, now)) return
+  db.insert(nicheVideoSnapshots)
+    .values({
+      id: randomUUID(),
+      nicheVideoId: nicheVideoRowId,
+      views: values.views,
+      likeCount: values.likeCount,
+      channelSubscribers: values.channelSubscribers,
+      capturedAt: now
+    })
+    .run()
 }
 
 function getNicheRow(nicheId: string): NicheRow {
@@ -357,11 +476,29 @@ export function removeChannel(nicheChannelId: string): void {
 // Refresh (channel stats + latest uploads + video stats)
 // ---------------------------------------------------------------------------
 
+/** The stat columns a videos.list meta refreshes on an existing row. */
+function metaStatsPatch(meta: VideoMeta, subscribers: number): Partial<VideoRow> {
+  return {
+    views: meta.views,
+    likeCount: meta.likeCount,
+    commentCount: meta.commentCount,
+    tags: meta.tags.length > 0 ? meta.tags : null,
+    categoryId: meta.categoryId,
+    language: meta.language,
+    hasCaptions: meta.hasCaptions,
+    durationSeconds: meta.durationSeconds,
+    madeForKids: meta.madeForKids,
+    channelSubscribers: subscribers
+  }
+}
+
 function upsertChannelVideo(
   nicheId: string,
   meta: VideoMeta,
   channel: ChannelRow,
-  counters: { added: number; updated: number }
+  counters: { added: number; updated: number },
+  /** Row ids already written this refresh — the tracked-rows loop skips them. */
+  touched: Set<string>
 ): void {
   const db = getDb()
   const now = Date.now()
@@ -375,20 +512,24 @@ function upsertChannelVideo(
       .set({
         title: meta.title || existing.title,
         description: meta.description || existing.description,
-        views: meta.views,
-        durationSeconds: meta.durationSeconds,
-        madeForKids: meta.madeForKids,
-        channelSubscribers: channel.subscribers,
+        ...metaStatsPatch(meta, channel.subscribers),
         statsRefreshedAt: now
       })
       .where(eq(nicheVideos.id, existing.id))
       .run()
+    recordSnapshot(
+      existing.id,
+      { views: meta.views, likeCount: meta.likeCount, channelSubscribers: channel.subscribers },
+      now
+    )
     counters.updated += 1
+    touched.add(existing.id)
     return
   }
+  const id = randomUUID()
   db.insert(nicheVideos)
     .values({
-      id: randomUUID(),
+      id,
       nicheId,
       videoId: meta.videoId,
       channelId: channel.channelId,
@@ -398,20 +539,33 @@ function upsertChannelVideo(
       url: `https://www.youtube.com/watch?v=${meta.videoId}`,
       thumbnail: meta.thumbnail || null,
       publishedAt: meta.publishedAt,
-      views: meta.views,
       durationSeconds: meta.durationSeconds,
       madeForKids: meta.madeForKids,
-      channelSubscribers: channel.subscribers,
       channelCreatedAt: channel.channelCreatedAt,
       source: 'channel',
       keyword: null,
+      serpRank: null,
       transcript: null,
       transcriptFetchedAt: null,
       statsRefreshedAt: now,
-      createdAt: now
+      createdAt: now,
+      views: meta.views,
+      likeCount: meta.likeCount,
+      commentCount: meta.commentCount,
+      tags: meta.tags.length > 0 ? meta.tags : null,
+      categoryId: meta.categoryId,
+      language: meta.language,
+      hasCaptions: meta.hasCaptions,
+      channelSubscribers: channel.subscribers
     })
     .run()
+  recordSnapshot(
+    id,
+    { views: meta.views, likeCount: meta.likeCount, channelSubscribers: channel.subscribers },
+    now
+  )
   counters.added += 1
+  touched.add(id)
 }
 
 /**
@@ -463,29 +617,32 @@ export async function refreshNiche(
 
   const channelByYtId = new Map(refreshed.map((c) => [c.channelId, c]))
   // New uploads first (insert), then refresh the stats of what we already track.
+  // `touched` collects the row ids the upsert pass wrote, so the loop below
+  // neither re-writes nor double-counts them in videosUpdated.
+  const touched = new Set<string>()
   for (const [channelId, videoIds] of wantedByChannel) {
     const channel = channelByYtId.get(channelId)
     if (!channel) continue
     for (const videoId of videoIds) {
       const meta = metaById.get(videoId)
-      if (meta) upsertChannelVideo(nicheId, meta, channel, counters)
+      if (meta) upsertChannelVideo(nicheId, meta, channel, counters, touched)
     }
   }
   const now = Date.now()
   for (const row of trackedRows) {
     const meta = metaById.get(row.videoId)
-    if (!meta || row.statsRefreshedAt === now) continue
+    if (!meta || touched.has(row.id)) continue
     const channel = channelByYtId.get(row.channelId)
+    const subscribers = channel?.subscribers ?? row.channelSubscribers
     db.update(nicheVideos)
-      .set({
-        views: meta.views,
-        durationSeconds: meta.durationSeconds,
-        madeForKids: meta.madeForKids,
-        channelSubscribers: channel?.subscribers ?? row.channelSubscribers,
-        statsRefreshedAt: now
-      })
+      .set({ ...metaStatsPatch(meta, subscribers), statsRefreshedAt: now })
       .where(eq(nicheVideos.id, row.id))
       .run()
+    recordSnapshot(
+      row.id,
+      { views: meta.views, likeCount: meta.likeCount, channelSubscribers: subscribers },
+      now
+    )
     counters.updated += 1
   }
 
@@ -516,8 +673,14 @@ function rowToScored(row: VideoRow): NicheScoredVideo {
     thumbnail: row.thumbnail ?? '',
     publishedAt: row.publishedAt ?? null,
     views: row.views,
+    likeCount: row.likeCount ?? null,
+    commentCount: row.commentCount ?? null,
+    tags: row.tags ?? [],
+    categoryId: row.categoryId ?? null,
     durationSeconds: row.durationSeconds,
     madeForKids: row.madeForKids,
+    hasCaptions: row.hasCaptions ?? null,
+    serpRank: row.serpRank ?? null,
     channelId: row.channelId,
     channelTitle: row.channelTitle,
     channelUrl: `https://www.youtube.com/channel/${row.channelId}`,
@@ -526,9 +689,9 @@ function rowToScored(row: VideoRow): NicheScoredVideo {
     channelVideoCount: 0,
     channelViewCount: 0,
     channelCreatedAt: row.channelCreatedAt ?? null,
-    // Not persisted on tracked rows — the language filter falls back to the
-    // title-script heuristic there.
-    language: null
+    // Persisted at ingest since the language column exists; legacy rows fall
+    // back to the title-script heuristic.
+    language: row.language ?? null
   }
 }
 
@@ -549,9 +712,12 @@ export function listNicheVideos(
       : {})
   }
   const byId = new Map(rows.map((r) => [r.videoId, r]))
-  return filterNicheVideos(rows.map(rowToScored), effective, new Date())
-    .slice(0, limit)
-    .map((scored) => toVideo(byId.get(scored.videoId) as VideoRow))
+  const kept = filterNicheVideos(rows.map(rowToScored), effective, new Date()).slice(0, limit)
+  const keptRows = kept.map((scored) => byId.get(scored.videoId) as VideoRow)
+  const medians = channelMediansOf(rows)
+  const snapshots = snapshotsByRow(keptRows.map((r) => r.id))
+  const now = new Date()
+  return keptRows.map((row) => toVideo(row, lensesOf(row, medians, snapshots, now)))
 }
 
 // ---------------------------------------------------------------------------
@@ -566,12 +732,17 @@ export async function keywordSearch(input: {
   depth?: number
   searchParam?: string
   save?: boolean
-}): Promise<{ videos: NicheScoredVideo[]; quotaUsed: number; saved: number }> {
+}): Promise<{
+  videos: NicheScoredVideo[]
+  quotaUsed: number
+  saved: number
+  costUsd: number | null
+}> {
   const niche = input.nicheId ? getNicheRow(input.nicheId) : null
   if (input.save && !niche) {
     throw new Error('Saving search results requires a nicheId.')
   }
-  const serp = await searchYoutubeSerp({
+  const { videos: serp, costUsd } = await searchYoutubeSerp({
     keyword: input.keyword,
     locationCode: input.locationCode ?? niche?.locationCode ?? DEFAULT_LOCATION_CODE,
     languageCode: input.languageCode ?? niche?.languageCode ?? DEFAULT_LANGUAGE_CODE,
@@ -603,9 +774,10 @@ export async function keywordSearch(input: {
         .where(and(eq(nicheVideos.nicheId, niche.id), eq(nicheVideos.videoId, video.videoId)))
         .get()
       if (existing) continue
+      const rowId = randomUUID()
       db.insert(nicheVideos)
         .values({
-          id: randomUUID(),
+          id: rowId,
           nicheId: niche.id,
           videoId: video.videoId,
           channelId: video.channelId,
@@ -616,6 +788,13 @@ export async function keywordSearch(input: {
           thumbnail: video.thumbnail || null,
           publishedAt: video.publishedAt,
           views: video.views,
+          likeCount: video.likeCount,
+          commentCount: video.commentCount,
+          tags: video.tags.length > 0 ? video.tags : null,
+          categoryId: video.categoryId,
+          language: video.language,
+          hasCaptions: video.hasCaptions,
+          serpRank: video.serpRank,
           durationSeconds: video.durationSeconds,
           madeForKids: video.madeForKids,
           channelSubscribers: video.channelSubscribers,
@@ -628,6 +807,15 @@ export async function keywordSearch(input: {
           createdAt: now
         })
         .run()
+      recordSnapshot(
+        rowId,
+        {
+          views: video.views,
+          likeCount: video.likeCount,
+          channelSubscribers: video.channelSubscribers
+        },
+        now
+      )
       saved += 1
     }
     if (saved > 0) {
@@ -635,7 +823,7 @@ export async function keywordSearch(input: {
       broadcastNichesChanged()
     }
   }
-  return { videos, quotaUsed: quota.units, saved }
+  return { videos, quotaUsed: quota.units, saved, costUsd }
 }
 
 // ---------------------------------------------------------------------------
@@ -657,6 +845,9 @@ export async function fetchTranscripts(input: {
     .orderBy(desc(nicheVideos.views))
     .all()
     .filter((row) => !input.videoIds || input.videoIds.includes(row.videoId))
+    // The API says these have no captions — don't burn unofficial fetches on
+    // them (an explicit videoIds request overrides, captions do appear late).
+    .filter((row) => row.hasCaptions !== false || input.videoIds?.includes(row.videoId))
   // Never-attempted videos first; once none remain, a new call RETRIES the
   // previously-failed ones (captions appear late, and fetch bugs get fixed).
   const fresh = withoutTranscript.filter((row) => row.transcriptFetchedAt === null)
@@ -671,6 +862,8 @@ export async function fetchTranscripts(input: {
     db.update(nicheVideos)
       .set({
         transcript: transcript ? formatTranscriptWithTimestamps(transcript.segments) : null,
+        transcriptLanguage: transcript?.languageCode ?? null,
+        transcriptIsAsr: transcript ? transcript.autoGenerated : null,
         transcriptFetchedAt: Date.now()
       })
       .where(eq(nicheVideos.id, row.id))
@@ -695,10 +888,24 @@ export function getTranscript(nicheVideoId: string): {
 /** Full detail of one tracked video — description + transcript included (agents). */
 export function getNicheVideoDetail(nicheVideoId: string): NicheVideo & {
   transcript: string | null
+  transcriptLanguage: string | null
+  transcriptIsAsr: boolean | null
+  tags: string[]
+  categoryId: string | null
 } {
-  const row = getDb().select().from(nicheVideos).where(eq(nicheVideos.id, nicheVideoId)).get()
+  const db = getDb()
+  const row = db.select().from(nicheVideos).where(eq(nicheVideos.id, nicheVideoId)).get()
   if (!row) throw new Error(`Unknown nicheVideoId "${nicheVideoId}".`)
-  return { ...toVideo(row), transcript: row.transcript ?? null }
+  const siblings = db.select().from(nicheVideos).where(eq(nicheVideos.nicheId, row.nicheId)).all()
+  const lenses = lensesOf(row, channelMediansOf(siblings), snapshotsByRow([row.id]), new Date())
+  return {
+    ...toVideo(row, lenses),
+    transcript: row.transcript ?? null,
+    transcriptLanguage: row.transcriptLanguage ?? null,
+    transcriptIsAsr: row.transcriptIsAsr ?? null,
+    tags: row.tags ?? [],
+    categoryId: row.categoryId ?? null
+  }
 }
 
 /** Per-channel aggregates over the tracked videos (cadence, avg/median views). */
@@ -767,6 +974,7 @@ function toRoadmapItem(row: RoadmapRow): NicheRoadmapItem {
     id: row.id,
     nicheId: row.nicheId,
     title: row.title,
+    titleVariants: row.titleVariants ?? null,
     angle: row.angle ?? null,
     description: row.description ?? null,
     thumbnailBrief: row.thumbnailBrief ?? null,
@@ -797,6 +1005,7 @@ export function listRoadmap(nicheId: string): NicheRoadmapItem[] {
 export function addRoadmapItem(input: {
   nicheId: string
   title: string
+  titleVariants?: string[] | null
   angle?: string | null
   description?: string | null
   thumbnailBrief?: string | null
@@ -816,6 +1025,7 @@ export function addRoadmapItem(input: {
     id: randomUUID(),
     nicheId: input.nicheId,
     title: input.title,
+    titleVariants: input.titleVariants?.length ? input.titleVariants : null,
     angle: input.angle ?? null,
     description: input.description ?? null,
     thumbnailBrief: input.thumbnailBrief ?? null,
@@ -837,6 +1047,7 @@ export function updateRoadmapItem(
   itemId: string,
   patch: {
     title?: string
+    titleVariants?: string[] | null
     angle?: string | null
     description?: string | null
     thumbnailBrief?: string | null
@@ -849,6 +1060,12 @@ export function updateRoadmapItem(
   const row = getRoadmapRow(itemId)
   const next = {
     title: patch.title ?? row.title,
+    titleVariants:
+      patch.titleVariants === undefined
+        ? row.titleVariants
+        : patch.titleVariants?.length
+          ? patch.titleVariants
+          : null,
     angle: patch.angle === undefined ? row.angle : patch.angle,
     description: patch.description === undefined ? row.description : patch.description,
     thumbnailBrief: patch.thumbnailBrief === undefined ? row.thumbnailBrief : patch.thumbnailBrief,
@@ -864,15 +1081,58 @@ export function updateRoadmapItem(
 }
 
 export function deleteRoadmapItem(itemId: string): void {
-  getDb().delete(nicheRoadmapItems).where(eq(nicheRoadmapItems.id, itemId)).run()
+  const db = getDb()
+  // roadmap_item_id has no FK (it would cycle) — clear the back-link by hand.
+  db.update(videos).set({ roadmapItemId: null }).where(eq(videos.roadmapItemId, itemId)).run()
+  db.delete(nicheRoadmapItems).where(eq(nicheRoadmapItems.id, itemId)).run()
   broadcastNichesChanged()
 }
 
 /**
- * Idea → workflow. Creates the Raccord video (or links an existing one) and
- * applies the niche's production profile: style, aspect ratio (a `short`
- * item forces 9:16), and the thumbnail recipe node seeded with the item's
- * brief. This is where "workflows personnalisés par niche" happens.
+ * The item's thumbnail node, created from the brief if the graph has none yet
+ * (idempotent on re-assign). A `short` gets a vertical 9:16 thumbnail when the
+ * model offers the ratio — creation + override land as ONE undo step.
+ */
+function ensureThumbnailNode(
+  videoId: string,
+  brief: string,
+  videoType: RoadmapVideoType
+): string | null {
+  const existing = listGraph(videoId).nodes.find(
+    (n) => (n.params as Record<string, unknown> | null)?.designId === 'thumbnail'
+  )
+  if (existing) return existing.id
+  return withGraphHistoryGroup(videoId, () => {
+    const { nodeId, modelId } = createRecipeNode({
+      videoId,
+      recipeId: 'thumbnail',
+      values: { description: brief }
+    })
+    if (videoType === 'short') {
+      const field = getModel(modelId)?.paramFields.find(
+        (f) => f.key === 'aspect_ratio' && f.type === 'select'
+      )
+      if (field?.options?.some((o) => o.value === '9:16')) {
+        const node = listGraph(videoId).nodes.find((n) => n.id === nodeId)
+        if (node) {
+          updateNodeParams(nodeId, {
+            ...(node.params as Record<string, unknown>),
+            aspect_ratio: '9:16'
+          })
+        }
+      }
+    }
+    return nodeId
+  })
+}
+
+/**
+ * Idea → workflow. Creates the Raccord video (or links an existing one),
+ * applies the niche's production profile — style, aspect ratio (a `short`
+ * item forces 9:16), the thumbnail recipe node seeded with the item's brief —
+ * and stamps the video's `roadmapItemId` back-link, which is what lets the
+ * editor's assistant see the channel strategy behind the workflow. Both
+ * branches apply the profile: linking an existing video is not a downgrade.
  */
 export function assignRoadmapItem(
   itemId: string,
@@ -887,7 +1147,6 @@ export function assignRoadmapItem(
   const niche = getNicheRow(row.nicheId)
   let videoId: string
   let projectId: string
-  let thumbnailNodeId: string | null = null
 
   if (input.videoId) {
     const video = getVideo(input.videoId)
@@ -900,21 +1159,18 @@ export function assignRoadmapItem(
         'Provide a projectId (to create the workflow) or a videoId (to link an existing one).'
       )
     }
-    const video = createVideo(input.projectId, row.title)
-    videoId = video.id
+    videoId = createVideo(input.projectId, row.title).id
     projectId = input.projectId
-    // The niche's production profile shapes the new workflow.
-    if (niche.styleId) setVideoStyle(videoId, niche.styleId)
-    const aspectRatio = row.videoType === 'short' ? '9:16' : niche.aspectRatio
-    if (aspectRatio) setVideoDefaults(videoId, { defaultAspectRatio: aspectRatio })
-    if (row.thumbnailBrief) {
-      thumbnailNodeId = createRecipeNode({
-        videoId,
-        recipeId: 'thumbnail',
-        values: { description: row.thumbnailBrief }
-      }).nodeId
-    }
   }
+
+  // The niche's production profile shapes the workflow — created OR linked.
+  if (niche.styleId) setVideoStyle(videoId, niche.styleId)
+  const aspectRatio = row.videoType === 'short' ? '9:16' : niche.aspectRatio
+  if (aspectRatio) setVideoDefaults(videoId, { defaultAspectRatio: aspectRatio })
+  const thumbnailNodeId = row.thumbnailBrief
+    ? ensureThumbnailNode(videoId, row.thumbnailBrief, row.videoType)
+    : null
+  getDb().update(videos).set({ roadmapItemId: itemId }).where(eq(videos.id, videoId)).run()
 
   const next = {
     videoId,
@@ -924,6 +1180,35 @@ export function assignRoadmapItem(
   getDb().update(nicheRoadmapItems).set(next).where(eq(nicheRoadmapItems.id, itemId)).run()
   broadcastNichesChanged()
   return { item: toRoadmapItem({ ...row, ...next }), videoId, projectId, thumbnailNodeId }
+}
+
+/**
+ * Everything the assistant should know when it works on a video born from the
+ * roadmap (§7b): the item (angle, evidence, packaging), the niche's brief and
+ * production profile — target_seconds included, the field write_scenario needs
+ * — and the niche's voice personas. Null when the video has no back-link.
+ */
+export function getRoadmapContextForVideo(videoId: string): {
+  niche: Niche
+  item: NicheRoadmapItem
+  voicePersonas: VoicePersona[]
+} | null {
+  const db = getDb()
+  const video = db.select().from(videos).where(eq(videos.id, videoId)).get()
+  if (!video?.roadmapItemId) return null
+  const item = db
+    .select()
+    .from(nicheRoadmapItems)
+    .where(eq(nicheRoadmapItems.id, video.roadmapItemId))
+    .get()
+  if (!item) return null
+  const niche = db.select().from(niches).where(eq(niches.id, item.nicheId)).get()
+  if (!niche) return null
+  return {
+    niche: toNiche(niche),
+    item: toRoadmapItem(item),
+    voicePersonas: listVoicePersonas(niche.id)
+  }
 }
 
 /** Paste the live URL once uploaded — ties the item to the niche's tracking. */

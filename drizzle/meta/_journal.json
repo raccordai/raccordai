@@ -134,6 +134,13 @@
       "when": 1785934121793,
       "tag": "0018_wild_solo",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786016906582,
+      "tag": "0019_absurd_blackheart",
+      "breakpoints": true
     }
   ]
 }

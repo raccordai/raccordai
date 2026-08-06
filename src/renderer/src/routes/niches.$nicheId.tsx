@@ -435,7 +435,9 @@ function NicheDetailPage(): React.JSX.Element {
                   durationSeconds: video.durationSeconds,
                   publishedAt: video.publishedAt,
                   channelSubscribers: video.channelSubscribers,
-                  hasTranscript: video.hasTranscript
+                  hasTranscript: video.hasTranscript,
+                  channelRatio: video.channelRatio,
+                  viewsPerDay: video.viewsPerDay
                 }}
                 onTranscript={setTranscriptOf}
               />

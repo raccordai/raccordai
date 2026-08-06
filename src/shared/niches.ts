@@ -101,6 +101,8 @@ export interface SerpVideoItem {
   thumbnail: string
   publishedAt: string | null
   views: number
+  /** SERP position (rank_absolute) — the one thing only a paid scrape knows. */
+  rank: number | null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -145,7 +147,8 @@ export function extractSerpVideos(items: unknown): SerpVideoItem[] {
       url: str(item.url) || `https://www.youtube.com/watch?v=${videoId}`,
       thumbnail: str(item.thumbnail_url) || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
       publishedAt: str(item.publication_date) || str(item.publish_date) || null,
-      views: num(item.views_count)
+      views: num(item.views_count),
+      rank: num(item.rank_absolute) || num(item.rank_group) || null
     })
   }
   return out
@@ -190,6 +193,14 @@ export function serpTaskItems(body: unknown): unknown {
   const task = asRecord(Array.isArray(root?.tasks) ? root.tasks[0] : null)
   const result = asRecord(Array.isArray(task?.result) ? task.result[0] : null)
   return result?.items
+}
+
+/** What the task actually billed (USD) — real money, worth logging every time. */
+export function serpTaskCost(body: unknown): number | null {
+  const root = asRecord(body)
+  const task = asRecord(Array.isArray(root?.tasks) ? root.tasks[0] : null)
+  const cost = task?.cost
+  return typeof cost === 'number' && Number.isFinite(cost) ? cost : null
 }
 
 // ---------------------------------------------------------------------------
@@ -255,8 +266,14 @@ export interface VideoMeta {
   thumbnail: string
   views: number
   likeCount: number
+  commentCount: number
+  /** The competitor's explicit SEO (snippet.tags) — empty when undeclared. */
+  tags: string[]
+  categoryId: string | null
   durationSeconds: number
   madeForKids: boolean
+  /** contentDetails.caption — false means a transcript fetch is pointless. */
+  hasCaptions: boolean | null
   /** BCP-47 from defaultAudioLanguage/defaultLanguage — often absent. */
   language: string | null
 }
@@ -301,8 +318,12 @@ export function parseVideoListResponse(body: unknown): VideoMeta[] {
         `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
       views: num(stats?.viewCount),
       likeCount: num(stats?.likeCount),
+      commentCount: num(stats?.commentCount),
+      tags: Array.isArray(snippet?.tags) ? snippet.tags.filter((t) => typeof t === 'string') : [],
+      categoryId: str(snippet?.categoryId) || null,
       durationSeconds: parseIsoDuration(str(content?.duration) || null),
       madeForKids: status?.madeForKids === true || status?.selfDeclaredMadeForKids === true,
+      hasCaptions: content?.caption === 'true' ? true : content?.caption === 'false' ? false : null,
       language: str(snippet?.defaultAudioLanguage) || str(snippet?.defaultLanguage) || null
     })
   }
@@ -405,8 +426,15 @@ export interface NicheScoredVideo {
   thumbnail: string
   publishedAt: string | null
   views: number
+  likeCount: number | null
+  commentCount: number | null
+  tags: string[]
+  categoryId: string | null
   durationSeconds: number
   madeForKids: boolean
+  hasCaptions: boolean | null
+  /** SERP position when the video came from a keyword search. */
+  serpRank: number | null
   channelId: string
   channelTitle: string
   channelUrl: string
@@ -435,6 +463,33 @@ export function ratioSignal(ratio: number): RatioSignal {
   if (ratio >= 10) return 'strong'
   if (ratio >= 2) return 'interesting'
   return 'neutral'
+}
+
+/**
+ * Second outlier lens: views vs the channel's own median (the "7×" badge).
+ * Complementary to views/subscribers — the subscriber ratio finds small
+ * channels breaking out, this one finds the videos a channel of ANY size
+ * overperformed on (insensitive to giant channels). Null when the median is
+ * unknown or zero.
+ */
+export function channelOutlierRatio(views: number, channelMedianViews: number): number | null {
+  if (channelMedianViews <= 0) return null
+  return views / channelMedianViews
+}
+
+/** ≥5× the channel's median = strong outlier; ≥2× = interesting. */
+export function channelRatioSignal(ratio: number | null): RatioSignal {
+  if (ratio === null) return 'neutral'
+  if (ratio >= 5) return 'strong'
+  if (ratio >= 2) return 'interesting'
+  return 'neutral'
+}
+
+const SIGNAL_RANK: Record<RatioSignal, number> = { neutral: 0, interesting: 1, strong: 2 }
+
+/** The strongest of several lenses wins — one ratio alone over/under-flags. */
+export function combineSignals(...signals: RatioSignal[]): RatioSignal {
+  return signals.reduce((best, s) => (SIGNAL_RANK[s] > SIGNAL_RANK[best] ? s : best), 'neutral')
 }
 
 const MS_PER_MONTH = 30.44 * 24 * 3600 * 1000
@@ -583,8 +638,14 @@ export function mergeSearchResults(
       thumbnail: item.thumbnail,
       publishedAt: meta?.publishedAt ?? item.publishedAt,
       views: item.views || meta?.views || 0,
+      likeCount: meta ? meta.likeCount : null,
+      commentCount: meta ? meta.commentCount : null,
+      tags: meta?.tags ?? [],
+      categoryId: meta?.categoryId ?? null,
       durationSeconds: meta?.durationSeconds ?? 0,
       madeForKids: meta?.madeForKids ?? false,
+      hasCaptions: meta?.hasCaptions ?? null,
+      serpRank: item.rank,
       channelId: item.channelId,
       channelTitle: channel?.title || item.channelTitle,
       channelUrl: channel?.url || item.channelUrl,
@@ -655,6 +716,65 @@ export function computeChannelAggregates(videos: readonly ChannelVideoLite[]): C
     avgDurationSeconds,
     uploadsPerMonth
   }
+}
+
+// ---------------------------------------------------------------------------
+// Snapshots — the time series under the score (velocity, growth, "taking off")
+// ---------------------------------------------------------------------------
+
+export interface VideoSnapshotLite {
+  views: number
+  capturedAt: number
+}
+
+const MS_PER_DAY = 24 * 3600 * 1000
+const SNAPSHOT_HEARTBEAT_MS = 24 * 3600 * 1000
+
+/**
+ * Whether a refresh deserves a new snapshot row: always on first sight, then
+ * whenever the views moved, plus a daily heartbeat so a flat line stays
+ * datable (velocity needs the time axis even when nothing happens).
+ */
+export function shouldSnapshot(
+  previous: VideoSnapshotLite | null,
+  nextViews: number,
+  now: number
+): boolean {
+  if (!previous) return true
+  if (previous.views !== nextViews) return true
+  return now - previous.capturedAt >= SNAPSHOT_HEARTBEAT_MS
+}
+
+/**
+ * Measured velocity in views/day over the snapshot series (first → last).
+ * Null below two snapshots or under an hour of span — too short to mean
+ * anything. Clamped at 0: YouTube occasionally corrects counts downward.
+ */
+export function viewVelocity(snapshots: readonly VideoSnapshotLite[]): number | null {
+  if (snapshots.length < 2) return null
+  const sorted = [...snapshots].sort((a, b) => a.capturedAt - b.capturedAt)
+  const first = sorted[0]
+  const last = sorted[sorted.length - 1]
+  if (!first || !last) return null
+  const spanMs = last.capturedAt - first.capturedAt
+  if (spanMs < 3600 * 1000) return null
+  return Math.max(0, ((last.views - first.views) / spanMs) * MS_PER_DAY)
+}
+
+/**
+ * Lifetime average views/day since publication — the fallback velocity when
+ * the series is too young to measure (a single snapshot knows no slope).
+ */
+export function lifetimeViewsPerDay(
+  views: number,
+  publishedAt: string | null,
+  now: Date
+): number | null {
+  if (!publishedAt) return null
+  const published = Date.parse(publishedAt)
+  if (Number.isNaN(published)) return null
+  const days = Math.max((now.getTime() - published) / MS_PER_DAY, 1)
+  return views / days
 }
 
 // ---------------------------------------------------------------------------

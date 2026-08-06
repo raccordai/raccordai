@@ -1,11 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { ChevronDown, ChevronRight, ExternalLink, Loader2, Map, Plus } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  LayoutGrid,
+  Loader2,
+  Map,
+  Plus
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { NicheRoadmapItem } from '@shared/ipc/contracts'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { invoke } from '@renderer/lib/ipc'
+import { FeedPreviewModal } from './FeedPreviewModal'
 import { compactNumber } from './VideoRow'
 
 /**
@@ -115,6 +124,7 @@ function RoadmapItemCard({
   })
   const [targetProjectId, setTargetProjectId] = useState('')
   const [publishedUrl, setPublishedUrl] = useState('')
+  const [feedPreviewOpen, setFeedPreviewOpen] = useState(false)
 
   const dirty =
     drafts.angle !== (item.angle ?? '') ||
@@ -181,6 +191,15 @@ function RoadmapItemCard({
           </span>
         )}
         <span className="line-clamp-1 flex-1 text-sm text-neutral-100">{item.title}</span>
+        {item.videoId && (
+          <button
+            onClick={() => setFeedPreviewOpen(true)}
+            title={t('niches.roadmap.feedPreview')}
+            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+          >
+            <LayoutGrid className="h-3 w-3" /> {t('niches.roadmap.feedPreviewShort')}
+          </button>
+        )}
         {item.videoId && item.projectId && (
           <button
             onClick={() =>
@@ -224,6 +243,40 @@ function RoadmapItemCard({
 
       {expanded && (
         <div className="mt-3 ml-6 flex flex-col gap-3">
+          {/* Packaging-first: the candidate titles written before production.
+              Promoting one swaps it into `title`; the old title joins the list. */}
+          {(item.titleVariants?.length ?? 0) > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium tracking-wide text-neutral-500 uppercase">
+                {t('niches.roadmap.titleVariantsLabel')}
+              </span>
+              <div className="flex flex-col gap-1">
+                {(item.titleVariants ?? []).map((variant) => (
+                  <div
+                    key={variant}
+                    className="flex items-center gap-2 rounded-md border border-neutral-800 px-2.5 py-1.5"
+                  >
+                    <span className="line-clamp-1 flex-1 text-xs text-neutral-300">{variant}</span>
+                    <button
+                      onClick={() =>
+                        update.mutate({
+                          title: variant,
+                          titleVariants: [
+                            item.title,
+                            ...(item.titleVariants ?? []).filter((v) => v !== variant)
+                          ]
+                        })
+                      }
+                      disabled={update.isPending}
+                      className="shrink-0 rounded-md px-2 py-0.5 text-[11px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 disabled:opacity-40"
+                    >
+                      {t('niches.roadmap.promoteTitle')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {(
             [
               ['angle', 'anglePlaceholder', 'angleLabel', 2],
@@ -318,12 +371,22 @@ function RoadmapItemCard({
           </div>
         </div>
       )}
+
+      {feedPreviewOpen && (
+        <FeedPreviewModal
+          nicheId={item.nicheId}
+          item={item}
+          onClose={() => setFeedPreviewOpen(false)}
+        />
+      )}
     </div>
   )
 }
 
 function buildPatch(patch: {
   status?: NicheRoadmapItem['status']
+  title?: string
+  titleVariants?: string[] | null
   angle?: string | null
   description?: string | null
   thumbnailBrief?: string | null

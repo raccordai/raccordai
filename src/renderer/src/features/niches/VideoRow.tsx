@@ -1,6 +1,12 @@
 import { Captions } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { HIDDEN_SUBSCRIBERS, nicheRatio, ratioSignal, type RatioSignal } from '@shared/niches'
+import {
+  channelRatioSignal,
+  HIDDEN_SUBSCRIBERS,
+  nicheRatio,
+  ratioSignal,
+  type RatioSignal
+} from '@shared/niches'
 import { formatSeconds } from '@renderer/lib/formatSeconds'
 
 /** Shared presentation of one scored video (niche detail + global search). */
@@ -40,6 +46,29 @@ export function RatioBadge({
   )
 }
 
+/**
+ * The second outlier lens: views vs the channel's own median ("×5 chaîne") —
+ * a channel of ANY size overperforming its norm, where the subscriber ratio
+ * only sees small channels breaking out.
+ */
+export function ChannelRatioBadge({
+  ratio,
+  title
+}: {
+  ratio: number
+  title: string
+}): React.JSX.Element {
+  const label = `×${ratio >= 10 ? Math.round(ratio) : ratio.toFixed(1)}`
+  return (
+    <span
+      title={title}
+      className={`rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${SIGNAL_CLASS[channelRatioSignal(ratio)]}`}
+    >
+      {label} ⌂
+    </span>
+  )
+}
+
 export interface VideoRowData {
   key: string
   nicheVideoId?: string
@@ -52,6 +81,10 @@ export interface VideoRowData {
   publishedAt: string | null
   channelSubscribers: number
   hasTranscript?: boolean
+  /** Views vs the channel's own median (null below 3 tracked videos). */
+  channelRatio?: number | null
+  /** Velocity in views/day (measured over snapshots, lifetime fallback). */
+  viewsPerDay?: number | null
 }
 
 export function VideoRow({
@@ -114,10 +147,22 @@ export function VideoRow({
         {video.durationSeconds > 0 && (
           <span className="tabular-nums">{formatSeconds(video.durationSeconds)}</span>
         )}
+        {video.viewsPerDay !== null && video.viewsPerDay !== undefined && (
+          <span
+            className="hidden w-20 text-right tabular-nums text-neutral-500 sm:inline"
+            title={t('niches.viewsPerDayTitle')}
+          >
+            {compactNumber.format(Math.round(video.viewsPerDay))}
+            {t('niches.viewsPerDaySuffix')}
+          </span>
+        )}
         <span className="w-16 text-right tabular-nums">
           {compactNumber.format(video.views)} {t('niches.viewsShort')}
         </span>
         <RatioBadge views={video.views} subscribers={video.channelSubscribers} />
+        {video.channelRatio !== null && video.channelRatio !== undefined && (
+          <ChannelRatioBadge ratio={video.channelRatio} title={t('niches.channelRatioTitle')} />
+        )}
         {trailing}
       </div>
     </div>

@@ -684,10 +684,19 @@ flagged is_mine) plus the videos tracked for both. Its "description" is the posi
 living document the assistant maintains (update_niche) with the angle, the formats that work, and
 channel-identity conclusions.
 
-THE SCORE. ratio = views / channel subscribers. ≥ 10 is a strong niche signal (a small channel
-pulling big views means the TOPIC carries, not the brand), ≥ 2 is interesting, null means
-hidden/zero subscribers with views — treat as very strong. The detector defaults: small channel
-(≤ 100k subs) + young channel (≤ 12 months) + long-form + ratio sort.
+THE SCORE — three lenses, combined in list_niche_videos's "signal":
+1. ratio = views / channel subscribers. ≥ 10 is a strong niche signal (a small channel pulling big
+   views means the TOPIC carries, not the brand), ≥ 2 is interesting, null means hidden/zero
+   subscribers with views — treat as very strong. Finds SMALL channels breaking out.
+2. channel_ratio = views vs the channel's own median over its tracked videos (needs ≥ 3). A ×5 is
+   a strong outlier WHATEVER the channel size — this is how you use giant competitors: their ×5+
+   videos reveal the topics that overperform even a huge baseline. ≥ 2 is interesting.
+3. views_per_day = velocity. Measured between refreshes once snapshots accumulate (every refresh
+   stores a time-series point), lifetime average as fallback — a high velocity on a recent video
+   means "taking off NOW", the freshest demand signal of the three.
+The detector defaults: small channel (≤ 100k subs) + young channel (≤ 12 months) + long-form +
+ratio sort. Also stored per video: like/comment counts, the competitor's own SEO tags and
+category, the declared language, has_captions, and the SERP rank a paid search found it at.
 
 THE HUNT (niche_keyword_search). DataForSEO scrapes the real YouTube SERP — native filters
 included via search_param presets: relevance, views, date, viewsThisYear, viewsMonthLong, and
@@ -708,6 +717,14 @@ mark_roadmap_published). An item is a GROUNDED idea: YouTube title, one-line ang
 (the tracked videos proving demand — ALWAYS cite ratio and views, an idea without numbers is an
 opinion), a YouTube description draft, and a thumbnail_brief (subject + exaggerated emotion +
 2-4 word overlay text).
+
+PACKAGING-FIRST (§7c). The pros (MrBeast, Colin & Samir doctrine) write MANY title+thumbnail
+pairs BEFORE producing anything: the click is decided at ideation, not in the edit. So every
+roadmap item also carries title_variants (5-10 candidates, different PROMISES — not rewordings
+of one promise). The user promotes their pick in the UI, and previews the packaging in a mock
+YouTube feed built from the niche's real thumbnails (the standard a candidate must beat). After
+assignment, generate 2-4 thumbnail variants (run_node with variants) and let the user pick; the
+chosen image can be exported to a file for the YouTube upload from the feed preview.
 
 STARTING A NICHE FROM SCRATCH ("I want to launch a channel about X"):
 1. create_niche, then map the demand for FREE: youtube_keyword_suggestions on the seed, then on
@@ -730,11 +747,13 @@ THE SUGGESTION METHOD, when asked for video ideas:
    thumbnail_brief). Update the niche brief (update_niche) with durable conclusions.
 
 THE PRODUCTION PROFILE — "what a video of this niche looks like": style_id (docs "styles"),
-aspect_ratio, target_seconds, set once via update_niche. assign_roadmap_item then creates the
-workflow with the profile applied (a 'short' item forces 9:16) and the thumbnail recipe node
-seeded from the brief. Next steps on the new video: write_scenario (use the angle + the evidence
-videos' transcripts as the brief, respect target_seconds) → build_graph_from_scenario. Generate
-2-4 thumbnail variants (run_node with variants) and let the user pick.
+aspect_ratio, target_seconds, set once via update_niche. assign_roadmap_item then creates (or
+links) the workflow with the profile applied — a 'short' item forces 9:16 AND gets a vertical
+9:16 thumbnail node — seeds the thumbnail recipe node from the brief, and stamps the video↔item
+back-link: from then on, the editor assistant of that video receives the whole niche context
+(brief, angle, evidence, target_seconds, channel voices) in its system prompt automatically.
+Next steps on the new video: write_scenario (use the angle + the evidence videos' transcripts as
+the brief, respect target_seconds) → build_graph_from_scenario.
 
 CHANNEL IDENTITY (for a new channel in the niche): name/title, channel description, and a
 profile-image brief — generated right here (add_recipe_node, styleframe/packshot, square).

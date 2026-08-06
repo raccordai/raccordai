@@ -1,3 +1,5 @@
+import { copyFile } from 'node:fs/promises'
+import { extname } from 'node:path'
 import { app, ipcMain } from 'electron'
 import { ipcContracts, type IpcChannel, type IpcInput, type IpcOutput } from '@shared/ipc/contracts'
 import { dialog } from 'electron'
@@ -282,6 +284,26 @@ export function registerIpcHandlers(): void {
   handle('generations:setLastFrame', ({ generationId, jpegBase64 }) =>
     runEngine.setLastFrame(generationId, jpegBase64)
   )
+  handle('generations:exportImage', async ({ generationId, defaultFileName }) => {
+    const row = generationsService.getGeneration(generationId)
+    if (!row?.resultPath) {
+      throw new Error('This generation has no downloaded media to export.')
+    }
+    if (!(row.resultMimeType ?? '').startsWith('image/')) {
+      throw new Error('Only image generations can be exported as a file.')
+    }
+    const ext = extname(row.resultPath).replace('.', '') || 'png'
+    const base =
+      (defaultFileName ?? 'thumbnail').replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'thumbnail'
+    const result = await dialog.showSaveDialog({
+      title: 'Export image',
+      defaultPath: `${base}.${ext}`,
+      filters: [{ name: 'Image', extensions: [ext] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    await copyFile(row.resultPath, result.filePath)
+    return { path: result.filePath }
+  })
   handle('generations:queueState', () => runEngine.queueState())
   handle('notifications:batchSummary', ({ succeeded, failed }) =>
     notificationsService.notifyBatchSummary(succeeded, failed)

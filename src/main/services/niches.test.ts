@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChannelStats, VideoMeta } from '@shared/niches'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
+import { listGraph } from './graph'
 import { createProject } from './projects'
 import { createVideo, getVideo } from './videos'
 import {
@@ -15,6 +16,7 @@ import {
   fetchTranscripts,
   getNiche,
   getNicheVideoDetail,
+  getRoadmapContextForVideo,
   getTranscript,
   keywordSearch,
   listNiches,
@@ -69,8 +71,12 @@ function meta(videoId: string, overrides: Partial<VideoMeta> = {}): VideoMeta {
     thumbnail: `https://thumb/${videoId}.jpg`,
     views: 50_000,
     likeCount: 100,
+    commentCount: 10,
+    tags: [],
+    categoryId: null,
     durationSeconds: 600,
     madeForKids: false,
+    hasCaptions: null,
     language: null,
     ...overrides
   }
@@ -175,18 +181,68 @@ describe('refreshNiche', () => {
     const { channels } = getNiche(nicheId)
     expect(channels[0]?.subscribers).toBe(5_000)
 
-    // Second pass: same uploads, fresher views — updates, never duplicates.
+    // Second pass: same uploads, fresher views — updates, never duplicates,
+    // and each row counts ONCE (the upsert pass and the tracked-rows pass
+    // used to double-count the same video).
     vi.mocked(fetchVideosMeta).mockResolvedValue([
       meta('vid1', { views: 60_000 }),
       meta('vid2', { views: 90_000 })
     ])
     const second = await refreshNiche(nicheId)
     expect(second.videosAdded).toBe(0)
-    expect(second.videosUpdated).toBeGreaterThan(0)
+    expect(second.videosUpdated).toBe(2)
 
     const videos = listNicheVideos(nicheId)
     expect(videos).toHaveLength(2)
     expect(videos.find((v) => v.videoId === 'vid1')?.views).toBe(60_000)
+  })
+
+  it('persists the engagement/SEO fields and serves the velocity lens', async () => {
+    const { nicheId } = await seedNicheWithChannel()
+    vi.mocked(fetchChannelsByIds).mockResolvedValue([CHANNEL])
+    vi.mocked(fetchUploads).mockResolvedValue([{ videoId: 'vid1', publishedAt: null }])
+    vi.mocked(fetchVideosMeta).mockResolvedValue([
+      meta('vid1', {
+        likeCount: 420,
+        commentCount: 33,
+        tags: ['finance', 'money'],
+        categoryId: '27',
+        hasCaptions: true,
+        language: 'en-US'
+      })
+    ])
+    await refreshNiche(nicheId)
+
+    const [video] = listNicheVideos(nicheId)
+    expect(video).toMatchObject({
+      likeCount: 420,
+      commentCount: 33,
+      hasCaptions: true,
+      language: 'en-US'
+    })
+    // One snapshot exists → velocity falls back to the lifetime average.
+    expect(video?.viewsPerDay).toBeGreaterThan(0)
+    expect(getNicheVideoDetail(video?.id ?? '').tags).toEqual(['finance', 'money'])
+  })
+
+  it('computes the channel-median outlier lens once a channel has 3 videos', async () => {
+    const { nicheId } = await seedNicheWithChannel()
+    vi.mocked(fetchChannelsByIds).mockResolvedValue([CHANNEL])
+    vi.mocked(fetchUploads).mockResolvedValue([
+      { videoId: 'vid1', publishedAt: null },
+      { videoId: 'vid2', publishedAt: null },
+      { videoId: 'vid3', publishedAt: null }
+    ])
+    vi.mocked(fetchVideosMeta).mockResolvedValue([
+      meta('vid1', { views: 100 }),
+      meta('vid2', { views: 300 }),
+      meta('vid3', { views: 900 })
+    ])
+    await refreshNiche(nicheId)
+
+    const videos = listNicheVideos(nicheId, { sort: 'views' })
+    expect(videos[0]?.channelRatio).toBe(3) // 900 vs median 300
+    expect(videos[2]?.channelRatio).toBeCloseTo(1 / 3)
   })
 
   it('keeps last known stats when a channel disappeared from the API', async () => {
@@ -241,34 +297,43 @@ describe('keywordSearch', () => {
       url: 'https://www.youtube.com/watch?v=hit1',
       thumbnail: 'https://thumb/hit1.jpg',
       publishedAt: '2026-04-01',
-      views: 120_000
+      views: 120_000,
+      rank: 7
     }
   ]
 
-  it('merges SERP with enrichment and saves into the niche once', async () => {
+  it('merges SERP with enrichment, reports the cost and saves into the niche once', async () => {
     const niche = createNiche({ name: 'N' })
-    vi.mocked(searchYoutubeSerp).mockResolvedValue(SERP)
+    vi.mocked(searchYoutubeSerp).mockResolvedValue({ videos: SERP, costUsd: 0.015 })
     vi.mocked(fetchChannelsByIds).mockResolvedValue([CHANNEL])
-    vi.mocked(fetchVideosMeta).mockResolvedValue([meta('hit1', { views: 130_000 })])
+    vi.mocked(fetchVideosMeta).mockResolvedValue([meta('hit1', { views: 130_000, language: 'en' })])
 
     const result = await keywordSearch({ keyword: 'subprime', nicheId: niche.id, save: true })
     expect(result.videos[0]).toMatchObject({
       videoId: 'hit1',
       views: 120_000,
-      channelSubscribers: 4_000
+      channelSubscribers: 4_000,
+      serpRank: 7
     })
     expect(result.saved).toBe(1)
+    expect(result.costUsd).toBe(0.015)
 
-    // Saved rows carry the source and keyword; a re-save is a no-op.
+    // Saved rows carry the source, keyword, SERP rank and language; a re-save
+    // is a no-op.
     const [video] = listNicheVideos(niche.id)
-    expect(video).toMatchObject({ source: 'search', keyword: 'subprime' })
+    expect(video).toMatchObject({
+      source: 'search',
+      keyword: 'subprime',
+      serpRank: 7,
+      language: 'en'
+    })
     const again = await keywordSearch({ keyword: 'subprime', nicheId: niche.id, save: true })
     expect(again.saved).toBe(0)
   })
 
   it('uses the niche defaults for location and language', async () => {
     const niche = createNiche({ name: 'N', languageCode: 'fr', locationCode: 2250 })
-    vi.mocked(searchYoutubeSerp).mockResolvedValue([])
+    vi.mocked(searchYoutubeSerp).mockResolvedValue({ videos: [], costUsd: null })
     vi.mocked(fetchChannelsByIds).mockResolvedValue([])
     vi.mocked(fetchVideosMeta).mockResolvedValue([])
     await keywordSearch({ keyword: 'bourse', nicheId: niche.id })
@@ -327,6 +392,52 @@ describe('transcripts', () => {
     })
     const third = await fetchTranscripts({ nicheId })
     expect(third).toMatchObject({ fetched: 1, failed: [], remaining: 0 })
+  })
+
+  it('stores the fetched track language and ASR flag', async () => {
+    const { nicheId } = await seedNicheWithChannel()
+    vi.mocked(fetchChannelsByIds).mockResolvedValue([CHANNEL])
+    vi.mocked(fetchUploads).mockResolvedValue([{ videoId: 'vid1', publishedAt: null }])
+    vi.mocked(fetchVideosMeta).mockResolvedValue([meta('vid1')])
+    await refreshNiche(nicheId)
+
+    vi.mocked(fetchTranscript).mockResolvedValue({
+      segments: [{ startMs: 0, text: 'Bonjour' }],
+      languageCode: 'fr',
+      autoGenerated: true
+    })
+    await fetchTranscripts({ nicheId })
+    const [video] = listNicheVideos(nicheId)
+    const detail = getNicheVideoDetail(video?.id ?? '')
+    expect(detail.transcriptLanguage).toBe('fr')
+    expect(detail.transcriptIsAsr).toBe(true)
+  })
+
+  it('never burns a fetch on a video the API says has no captions', async () => {
+    const { nicheId } = await seedNicheWithChannel()
+    vi.mocked(fetchChannelsByIds).mockResolvedValue([CHANNEL])
+    vi.mocked(fetchUploads).mockResolvedValue([
+      { videoId: 'vid1', publishedAt: null },
+      { videoId: 'nocaps00001', publishedAt: null }
+    ])
+    vi.mocked(fetchVideosMeta).mockResolvedValue([
+      meta('vid1', { hasCaptions: true }),
+      meta('nocaps00001', { hasCaptions: false })
+    ])
+    await refreshNiche(nicheId)
+
+    vi.mocked(fetchTranscript).mockResolvedValue({
+      segments: [{ startMs: 0, text: 'Hi' }],
+      languageCode: 'en',
+      autoGenerated: false
+    })
+    const result = await fetchTranscripts({ nicheId })
+    expect(result.fetched).toBe(1)
+    expect(vi.mocked(fetchTranscript).mock.calls.map(([id]) => id)).toEqual(['vid1'])
+
+    // An explicit videoIds request overrides the skip (captions appear late).
+    await fetchTranscripts({ nicheId, videoIds: ['nocaps00001'] })
+    expect(vi.mocked(fetchTranscript).mock.calls.map(([id]) => id)).toContain('nocaps00001')
   })
 
   it('rejects unknown video ids', () => {
@@ -410,20 +521,25 @@ describe('roadmap', () => {
     })
   })
 
-  it('a short item forces 9:16; assigning without a target throws', () => {
+  it('a short item forces 9:16 and gets a vertical thumbnail', () => {
     const niche = createNiche({ name: 'N' })
     const project = createProject('P')
-    const item = addRoadmapItem({ nicheId: niche.id, title: 'Short one', videoType: 'short' })
+    const item = addRoadmapItem({
+      nicheId: niche.id,
+      title: 'Short one',
+      videoType: 'short',
+      thumbnailBrief: 'A shocked face'
+    })
     const result = assignRoadmapItem(item.id, { projectId: project.id })
     expect(getVideo(result.videoId)?.defaultAspectRatio).toBe('9:16')
-    // No thumbnail brief → no thumbnail node.
-    expect(result.thumbnailNodeId).toBeNull()
+    const node = listGraph(result.videoId).nodes.find((n) => n.id === result.thumbnailNodeId)
+    expect((node?.params as Record<string, unknown>)?.aspect_ratio).toBe('9:16')
 
     const orphan = addRoadmapItem({ nicheId: niche.id, title: 'X' })
     expect(() => assignRoadmapItem(orphan.id, {})).toThrow(/projectId/)
   })
 
-  it('links an existing workflow without restyling it', () => {
+  it('links an existing workflow and applies the profile there too', () => {
     const niche = createNiche({ name: 'N' })
     updateNiche(niche.id, { styleId: 'anime' })
     const project = createProject('P')
@@ -431,8 +547,49 @@ describe('roadmap', () => {
     const item = addRoadmapItem({ nicheId: niche.id, title: 'T', thumbnailBrief: 'brief' })
     const result = assignRoadmapItem(item.id, { videoId: video.id })
     expect(result.videoId).toBe(video.id)
-    expect(result.thumbnailNodeId).toBeNull()
-    expect(getVideo(video.id)?.styleId).toBeNull()
+    // Linking is not a downgrade: style + thumbnail node land here as well.
+    expect(result.thumbnailNodeId).toBeTruthy()
+    expect(getVideo(video.id)?.styleId).toBe('anime')
+
+    // Re-assigning never duplicates the thumbnail node.
+    const again = assignRoadmapItem(item.id, { videoId: video.id })
+    expect(again.thumbnailNodeId).toBe(result.thumbnailNodeId)
+  })
+
+  it('stamps the video back-link and exposes the niche context to the assistant', () => {
+    const niche = createNiche({ name: 'N', description: 'US retail investors' })
+    updateNiche(niche.id, { targetSeconds: 480 })
+    const project = createProject('P')
+    const item = addRoadmapItem({
+      nicheId: niche.id,
+      title: 'T',
+      titleVariants: ['Alt 1', 'Alt 2'],
+      angle: 'the angle',
+      evidence: 'video X at 12x'
+    })
+    const result = assignRoadmapItem(item.id, { projectId: project.id })
+    expect(getVideo(result.videoId)?.roadmapItemId).toBe(item.id)
+
+    const context = getRoadmapContextForVideo(result.videoId)
+    expect(context?.niche.name).toBe('N')
+    expect(context?.niche.targetSeconds).toBe(480)
+    expect(context?.item.angle).toBe('the angle')
+    expect(context?.item.titleVariants).toEqual(['Alt 1', 'Alt 2'])
+
+    // Unlinked videos have no context; deleting the item clears the back-link.
+    const loose = createVideo(project.id, 'Loose')
+    expect(getRoadmapContextForVideo(loose.id)).toBeNull()
+    deleteRoadmapItem(item.id)
+    expect(getVideo(result.videoId)?.roadmapItemId).toBeNull()
+    expect(getRoadmapContextForVideo(result.videoId)).toBeNull()
+  })
+
+  it('stores and clears title variants', () => {
+    const niche = createNiche({ name: 'N' })
+    const item = addRoadmapItem({ nicheId: niche.id, title: 'T', titleVariants: ['A', 'B'] })
+    expect(item.titleVariants).toEqual(['A', 'B'])
+    expect(updateRoadmapItem(item.id, { titleVariants: ['C'] }).titleVariants).toEqual(['C'])
+    expect(updateRoadmapItem(item.id, { titleVariants: [] }).titleVariants).toBeNull()
   })
 
   it('marks published and reports live views against the niche median', async () => {

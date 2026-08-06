@@ -153,6 +153,8 @@ export const videoSchema = z.object({
   qcEnabled: z.boolean(),
   /** Scenario (§6.7): the shot list the graph is built from; null until written. */
   scenario: scenarioSchema.nullable(),
+  /** The niche roadmap item this video was created from (§7b), null otherwise. */
+  roadmapItemId: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -332,6 +334,8 @@ export const nicheRoadmapItemSchema = z.object({
   id: z.string(),
   nicheId: z.string(),
   title: z.string(),
+  /** Packaging-first (§7c): candidate YouTube titles written before production. */
+  titleVariants: z.array(z.string()).nullable(),
   angle: z.string().nullable(),
   /** YouTube description draft. */
   description: z.string().nullable(),
@@ -394,6 +398,15 @@ export const nicheVideoSchema = z.object({
   thumbnail: z.string().nullable(),
   publishedAt: z.string().nullable(),
   views: z.number(),
+  /** Engagement stats — null on rows ingested before they were tracked. */
+  likeCount: z.number().nullable(),
+  commentCount: z.number().nullable(),
+  /** BCP-47 audio language when YouTube declares it. */
+  language: z.string().nullable(),
+  /** false = the API says no captions exist (transcript fetch is pointless). */
+  hasCaptions: z.boolean().nullable(),
+  /** SERP position when the video came from a keyword search. */
+  serpRank: z.number().nullable(),
   durationSeconds: z.number(),
   madeForKids: z.boolean(),
   channelSubscribers: z.number(),
@@ -401,6 +414,10 @@ export const nicheVideoSchema = z.object({
   source: z.enum(['channel', 'search']),
   keyword: z.string().nullable(),
   hasTranscript: z.boolean(),
+  /** Second outlier lens: views vs the channel's own median (≥3 tracked videos). */
+  channelRatio: z.number().nullable(),
+  /** Velocity: measured views/day over snapshots, or lifetime average as fallback. */
+  viewsPerDay: z.number().nullable(),
   statsRefreshedAt: z.number().nullable(),
   createdAt: z.number()
 })
@@ -415,8 +432,15 @@ export const nicheScoredVideoSchema = z.object({
   thumbnail: z.string(),
   publishedAt: z.string().nullable(),
   views: z.number(),
+  likeCount: z.number().nullable(),
+  commentCount: z.number().nullable(),
+  tags: z.array(z.string()),
+  categoryId: z.string().nullable(),
   durationSeconds: z.number(),
   madeForKids: z.boolean(),
+  hasCaptions: z.boolean().nullable(),
+  /** SERP position — what the DataForSEO scrape is actually paid for. */
+  serpRank: z.number().nullable(),
   channelId: z.string(),
   channelTitle: z.string(),
   channelUrl: z.string(),
@@ -653,6 +677,8 @@ export const appContextSchema = z.object({
   videoId: z.string().optional(),
   selectedNodeId: z.string().optional(),
   selectedGenerationId: z.string().optional(),
+  /** The niche page the user is on (§7), if any. */
+  nicheId: z.string().optional(),
   /** Last generation error surfaced to the user (toast), if any. */
   lastError: z.string().optional()
 })
@@ -1189,6 +1215,14 @@ export const ipcContracts = {
     input: z.object({ generationId: z.string(), jpegBase64: z.string() }),
     output: z.void()
   },
+  /**
+   * Copies a successful image generation (e.g. the chosen thumbnail) to a
+   * user-picked path — native save dialog in the handler; null = cancelled.
+   */
+  'generations:exportImage': {
+    input: z.object({ generationId: z.string(), defaultFileName: z.string().optional() }),
+    output: z.object({ path: z.string() }).nullable()
+  },
   /** Read-only snapshot of the run queue — pushed fresh via event:queueChanged. */
   'generations:queueState': { input: z.void(), output: queueStateSchema },
   /** OS notification summarizing a finished batch run ("4 succeeded, 1 failed"). */
@@ -1534,6 +1568,7 @@ export const ipcContracts = {
     input: z.object({
       nicheId: z.string(),
       title: z.string().trim().min(1).max(200),
+      titleVariants: z.array(z.string().trim().min(1).max(200)).max(20).nullable().optional(),
       angle: z.string().nullable().optional(),
       description: z.string().nullable().optional(),
       thumbnailBrief: z.string().nullable().optional(),
@@ -1546,6 +1581,7 @@ export const ipcContracts = {
     input: z.object({
       itemId: z.string(),
       title: z.string().trim().min(1).max(200).optional(),
+      titleVariants: z.array(z.string().trim().min(1).max(200)).max(20).nullable().optional(),
       angle: z.string().nullable().optional(),
       description: z.string().nullable().optional(),
       thumbnailBrief: z.string().nullable().optional(),
@@ -1626,7 +1662,9 @@ export const ipcContracts = {
     output: z.object({
       videos: z.array(nicheScoredVideoSchema),
       quotaUsed: z.number(),
-      saved: z.number()
+      saved: z.number(),
+      /** What DataForSEO actually billed for this search (USD) — real money. */
+      costUsd: z.number().nullable()
     })
   },
   /** Fetches missing transcripts, oldest tracked first. */

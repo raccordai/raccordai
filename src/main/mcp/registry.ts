@@ -54,7 +54,13 @@ import * as renderService from '../services/render'
 import { finalizeVideo, planFinalize, startBatch, videoNodeTargets } from '../services/runBatch'
 import * as niches from '../services/niches'
 import { fetchSearchSuggestions } from '../services/youtubeApi'
-import { nicheRatio, ratioSignal, SP_PRESETS } from '@shared/niches'
+import {
+  channelRatioSignal,
+  combineSignals,
+  nicheRatio,
+  ratioSignal,
+  SP_PRESETS
+} from '@shared/niches'
 import { cancelGeneration, queueState, refreshStatus, runNode } from '../services/runEngine'
 import { clampVariants } from '../services/runPlanner'
 import { reviewGeneration } from '../services/qc'
@@ -1963,7 +1969,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'list_niche_videos',
     description:
-      'Tracked videos of a niche with the niche score (ratio = views/subscribers; null ratio = hidden/zero subscribers, treat as very strong). Filters: format long|short|all, max_subscribers, max_channel_age_months, min_views, sort ratio|views|date.',
+      'Tracked videos of a niche, scored through three outlier lenses: ratio = views/subscribers (null = hidden subs, very strong), channel_ratio = views vs the channel’s own median, views_per_day = velocity; `signal` combines the first two. Filters: format, max_subscribers, max_channel_age_months, min_views, sort. Lens semantics: docs "niches".',
     inputSchema: obj(
       {
         nicheId: str(),
@@ -2009,7 +2015,9 @@ export const AGENT_TOOLS: AgentTool[] = [
           return {
             ...v,
             ratio: Number.isFinite(ratio) ? Math.round(ratio * 100) / 100 : null,
-            signal: ratioSignal(ratio)
+            channelRatio: v.channelRatio === null ? null : Math.round(v.channelRatio * 100) / 100,
+            viewsPerDay: v.viewsPerDay === null ? null : Math.round(v.viewsPerDay),
+            signal: combineSignals(ratioSignal(ratio), channelRatioSignal(v.channelRatio))
           }
         })
   },
@@ -2131,11 +2139,17 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'add_roadmap_item',
     description:
-      'Add a video idea to the niche roadmap. ALWAYS ground it: evidence must cite the tracked videos that prove demand (title, ratio, views). Write the YouTube title as `title`, the description draft, and a thumbnail_brief (subject + emotion + 2-4 word overlay) — it seeds the thumbnail node on assignment. Method: docs "niches".',
+      'Add a video idea to the niche roadmap. ALWAYS ground it: evidence must cite the tracked videos proving demand (title, ratio, views). Write the YouTube title AND 5-10 title_variants (packaging-first: the click is decided at ideation), the description draft, and a thumbnail_brief (subject + emotion + 2-4 word overlay) — it seeds the thumbnail node on assignment. Method: docs "niches".',
     inputSchema: obj(
       {
         nicheId: str(),
         title: str('The YouTube title — punchy, curiosity-driven, in the niche’s language.'),
+        title_variants: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Candidate titles (max 20) — different promises/angles, not rewordings. The user promotes one to `title`.'
+        },
         angle: str('One-line pitch: what makes this video different.'),
         description: str('YouTube description draft.'),
         thumbnail_brief: str('Prompt brief for the thumbnail recipe node.'),
@@ -2146,10 +2160,20 @@ export const AGENT_TOOLS: AgentTool[] = [
     ),
     scope: 'global',
     risk: 'write',
-    execute: ({ nicheId, title, angle, description, thumbnail_brief, evidence, video_type }) =>
+    execute: ({
+      nicheId,
+      title,
+      title_variants,
+      angle,
+      description,
+      thumbnail_brief,
+      evidence,
+      video_type
+    }) =>
       niches.addRoadmapItem({
         nicheId: String(nicheId),
         title: String(title),
+        ...(Array.isArray(title_variants) ? { titleVariants: title_variants.map(String) } : {}),
         ...(angle !== undefined ? { angle: String(angle) } : {}),
         ...(description !== undefined ? { description: String(description) } : {}),
         ...(thumbnail_brief !== undefined ? { thumbnailBrief: String(thumbnail_brief) } : {}),
@@ -2160,11 +2184,16 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'update_roadmap_item',
     description:
-      'Rewrite a roadmap item’s title/angle/description/thumbnail brief/evidence, or move its status. Use it to iterate on titles and descriptions when the user asks for variants.',
+      'Rewrite a roadmap item’s title/title_variants/angle/description/thumbnail brief/evidence, or move its status. Use it to iterate on titles and descriptions when the user asks for variants.',
     inputSchema: obj(
       {
         itemId: str(),
         title: str(),
+        title_variants: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Candidate titles (max 20); empty array clears the list.'
+        },
         angle: str(),
         description: str(),
         thumbnail_brief: str(),
@@ -2180,6 +2209,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     execute: ({
       itemId,
       title,
+      title_variants,
       angle,
       description,
       thumbnail_brief,
@@ -2190,6 +2220,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     }) =>
       niches.updateRoadmapItem(String(itemId), {
         ...(title !== undefined ? { title: String(title) } : {}),
+        ...(Array.isArray(title_variants) ? { titleVariants: title_variants.map(String) } : {}),
         ...(angle !== undefined ? { angle: String(angle) } : {}),
         ...(description !== undefined ? { description: String(description) } : {}),
         ...(thumbnail_brief !== undefined ? { thumbnailBrief: String(thumbnail_brief) } : {}),
@@ -2212,7 +2243,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'assign_roadmap_item',
     description:
-      'Idea → workflow: creates the Raccord video (named after the item) in the given project, applies the niche’s production profile (style, aspect ratio — a `short` item forces 9:16) and creates the thumbnail node from the item’s brief. Pass video_id instead to link an existing workflow. Then write_scenario on the new video, using the angle and the evidence videos’ transcripts as the brief.',
+      'Idea → workflow: creates the Raccord video (or links video_id), applies the niche’s production profile (a `short` forces 9:16, vertical thumbnail included), seeds the thumbnail node from the brief and stamps the video↔item back-link — the editor assistant then receives the niche context automatically. Then write_scenario (angle + evidence transcripts as brief, niche target_seconds).',
     inputSchema: obj(
       {
         itemId: str(),

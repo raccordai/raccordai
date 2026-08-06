@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   batchIds,
   channelAgeMonths,
+  channelOutlierRatio,
+  channelRatioSignal,
   clampBlockDepth,
+  combineSignals,
   computeChannelAggregates,
   DEFAULT_NICHE_FILTERS,
   extractCaptionTracks,
@@ -11,6 +14,7 @@ import {
   filterNicheVideos,
   formatTranscriptWithTimestamps,
   HIDDEN_SUBSCRIBERS,
+  lifetimeViewsPerDay,
   matchesLanguageFilter,
   mergeSearchResults,
   nicheRatio,
@@ -25,11 +29,14 @@ import {
   parseYoutubeVideoUrl,
   pickCaptionTrack,
   ratioSignal,
+  serpTaskCost,
   serpTaskError,
   serpTaskItems,
+  shouldSnapshot,
   SP_PRESETS,
   spPresetRaw,
   transcriptToText,
+  viewVelocity,
   type ChannelStats,
   type NicheScoredVideo,
   type VideoMeta
@@ -46,8 +53,14 @@ function video(overrides: Partial<NicheScoredVideo>): NicheScoredVideo {
     thumbnail: '',
     publishedAt: '2026-06-01T00:00:00Z',
     views: 50_000,
+    likeCount: null,
+    commentCount: null,
+    tags: [],
+    categoryId: null,
     durationSeconds: 600,
     madeForKids: false,
+    hasCaptions: null,
+    serpRank: null,
     channelId: 'UCaaaaaaaaaa',
     channelTitle: 'Chan',
     channelUrl: '',
@@ -128,7 +141,9 @@ describe('extractSerpVideos', () => {
         video_id: 'abc12345678',
         channel_id: 'UCabc',
         title: 'T',
-        views_count: '1,234'
+        views_count: '1,234',
+        rank_group: 2,
+        rank_absolute: 3
       },
       {
         type: 'video',
@@ -149,9 +164,17 @@ describe('extractSerpVideos', () => {
       views: 1234,
       url: 'https://www.youtube.com/watch?v=abc12345678',
       thumbnail: 'https://i.ytimg.com/vi/abc12345678/hqdefault.jpg',
-      publishedAt: null
+      publishedAt: null,
+      // rank_absolute wins over rank_group — it is the true SERP position.
+      rank: 3
     })
-    expect(out[1]).toMatchObject({ views: 42, url: 'u', thumbnail: 't', publishedAt: '2026-01-02' })
+    expect(out[1]).toMatchObject({
+      views: 42,
+      url: 'u',
+      thumbnail: 't',
+      publishedAt: '2026-01-02',
+      rank: null
+    })
   })
 
   it('returns [] on non-array input', () => {
@@ -198,6 +221,12 @@ describe('serpTaskError / serpTaskItems', () => {
     const items = [{ type: 'youtube_video' }]
     expect(serpTaskItems({ tasks: [{ result: [{ items }] }] })).toBe(items)
     expect(serpTaskItems({})).toBeUndefined()
+  })
+
+  it('reads what the task actually billed', () => {
+    expect(serpTaskCost({ tasks: [{ cost: 0.0075 }] })).toBe(0.0075)
+    expect(serpTaskCost({ tasks: [{}] })).toBeNull()
+    expect(serpTaskCost({})).toBeNull()
   })
 })
 
@@ -273,9 +302,9 @@ describe('parseVideoListResponse', () => {
             publishedAt: '2026-02-01T00:00:00Z',
             defaultAudioLanguage: 'en-US'
           },
-          contentDetails: { duration: 'PT10M' },
+          contentDetails: { duration: 'PT10M', caption: 'true' },
           status: { madeForKids: false, selfDeclaredMadeForKids: true },
-          statistics: { viewCount: '777', likeCount: '9' }
+          statistics: { viewCount: '777', likeCount: '9', commentCount: '4' }
         }
       ]
     })
@@ -285,9 +314,35 @@ describe('parseVideoListResponse', () => {
       madeForKids: true,
       views: 777,
       likeCount: 9,
+      commentCount: 4,
+      hasCaptions: true,
       thumbnail: 'https://i.ytimg.com/vi/vid00000001/hqdefault.jpg',
       language: 'en-US'
     })
+  })
+
+  it('parses the competitor SEO fields and the caption flag', () => {
+    const out = parseVideoListResponse({
+      items: [
+        {
+          id: 'vid00000002',
+          snippet: { title: 'V', tags: ['seo tag', 42, 'other'], categoryId: '27' },
+          contentDetails: { duration: 'PT5M', caption: 'false' },
+          statistics: {}
+        },
+        { id: 'vid00000003', snippet: { title: 'V' }, contentDetails: { duration: 'PT5M' } }
+      ]
+    })
+    expect(out[0]).toMatchObject({
+      tags: ['seo tag', 'other'],
+      categoryId: '27',
+      hasCaptions: false,
+      commentCount: 0
+    })
+    // No caption field at all → unknown, never false.
+    expect(out[1]!.hasCaptions).toBeNull()
+    expect(out[1]!.tags).toEqual([])
+    expect(out[1]!.categoryId).toBeNull()
   })
 
   it('returns [] on malformed bodies', () => {
@@ -386,6 +441,79 @@ describe('nicheRatio / ratioSignal', () => {
     expect(ratioSignal(5)).toBe('interesting')
     expect(ratioSignal(1)).toBe('neutral')
     expect(ratioSignal(0)).toBe('neutral')
+  })
+})
+
+describe('channelOutlierRatio / channelRatioSignal / combineSignals', () => {
+  it('measures views against the channel median', () => {
+    expect(channelOutlierRatio(50_000, 10_000)).toBe(5)
+    expect(channelOutlierRatio(50_000, 0)).toBeNull()
+    expect(channelOutlierRatio(0, 10_000)).toBe(0)
+  })
+
+  it('maps channel ratios to signals (5x strong, 2x interesting)', () => {
+    expect(channelRatioSignal(7)).toBe('strong')
+    expect(channelRatioSignal(3)).toBe('interesting')
+    expect(channelRatioSignal(1.5)).toBe('neutral')
+    expect(channelRatioSignal(null)).toBe('neutral')
+  })
+
+  it('the strongest lens wins', () => {
+    expect(combineSignals('neutral', 'strong')).toBe('strong')
+    expect(combineSignals('interesting', 'neutral')).toBe('interesting')
+    expect(combineSignals('neutral', 'neutral')).toBe('neutral')
+    expect(combineSignals()).toBe('neutral')
+  })
+})
+
+describe('shouldSnapshot / viewVelocity / lifetimeViewsPerDay', () => {
+  const t0 = Date.parse('2026-08-01T00:00:00Z')
+  const day = 24 * 3600 * 1000
+
+  it('snapshots on first sight, on movement, and on the daily heartbeat', () => {
+    expect(shouldSnapshot(null, 100, t0)).toBe(true)
+    expect(shouldSnapshot({ views: 100, capturedAt: t0 }, 150, t0 + 60_000)).toBe(true)
+    expect(shouldSnapshot({ views: 100, capturedAt: t0 }, 100, t0 + 60_000)).toBe(false)
+    expect(shouldSnapshot({ views: 100, capturedAt: t0 }, 100, t0 + day)).toBe(true)
+  })
+
+  it('measures views/day between the first and last snapshot', () => {
+    const snaps = [
+      { views: 1_000, capturedAt: t0 },
+      { views: 4_000, capturedAt: t0 + day },
+      { views: 7_000, capturedAt: t0 + 2 * day }
+    ]
+    expect(viewVelocity(snaps)).toBe(3_000)
+    // Order-independent.
+    expect(viewVelocity([...snaps].reverse())).toBe(3_000)
+  })
+
+  it('needs two snapshots at least an hour apart', () => {
+    expect(viewVelocity([])).toBeNull()
+    expect(viewVelocity([{ views: 100, capturedAt: t0 }])).toBeNull()
+    expect(
+      viewVelocity([
+        { views: 100, capturedAt: t0 },
+        { views: 200, capturedAt: t0 + 60_000 }
+      ])
+    ).toBeNull()
+  })
+
+  it('clamps downward corrections at 0', () => {
+    expect(
+      viewVelocity([
+        { views: 5_000, capturedAt: t0 },
+        { views: 4_000, capturedAt: t0 + day }
+      ])
+    ).toBe(0)
+  })
+
+  it('falls back to the lifetime average since publication', () => {
+    expect(lifetimeViewsPerDay(10_000, '2026-07-22T00:00:00Z', NOW)).toBe(1_000)
+    expect(lifetimeViewsPerDay(10_000, null, NOW)).toBeNull()
+    expect(lifetimeViewsPerDay(10_000, 'garbage', NOW)).toBeNull()
+    // A video published minutes ago never divides by ~zero.
+    expect(lifetimeViewsPerDay(500, '2026-07-31T23:50:00Z', NOW)).toBe(500)
   })
 })
 
@@ -554,8 +682,12 @@ describe('mergeSearchResults', () => {
     thumbnail: 't.jpg',
     views: 999,
     likeCount: 3,
+    commentCount: 7,
+    tags: ['tag one', 'tag two'],
+    categoryId: '27',
     durationSeconds: 600,
     madeForKids: false,
+    hasCaptions: true,
     language: 'en'
   }
 
@@ -572,7 +704,8 @@ describe('mergeSearchResults', () => {
           url: 'u',
           thumbnail: 'th',
           publishedAt: '2026-01-01',
-          views: 5000
+          views: 5000,
+          rank: 4
         }
       ],
       [channel],
@@ -582,6 +715,12 @@ describe('mergeSearchResults', () => {
       title: 'From API',
       description: 'Full description',
       views: 5000,
+      likeCount: 3,
+      commentCount: 7,
+      tags: ['tag one', 'tag two'],
+      categoryId: '27',
+      hasCaptions: true,
+      serpRank: 4,
       durationSeconds: 600,
       channelSubscribers: 1000,
       channelCreatedAt: '2025-06-01T00:00:00Z',
@@ -602,7 +741,8 @@ describe('mergeSearchResults', () => {
           url: 'u',
           thumbnail: 'th',
           publishedAt: null,
-          views: 100
+          views: 100,
+          rank: null
         }
       ],
       [channel],
@@ -611,6 +751,8 @@ describe('mergeSearchResults', () => {
     expect(out!.channelSubscribers).toBe(0)
     expect(out!.channelCreatedAt).toBeNull()
     expect(out!.durationSeconds).toBe(0)
+    expect(out!.likeCount).toBeNull()
+    expect(out!.hasCaptions).toBeNull()
     expect(out!.title).toBe('T')
   })
 })

@@ -132,6 +132,13 @@ export const videos = sqliteTable(
      * null until the assistant writes one.
      */
     scenario: text('scenario', { mode: 'json' }).$type<Scenario>(),
+    /**
+     * The niche roadmap item this video was created from (§7b) — the back-link
+     * that lets the editor and the assistant see the channel strategy behind
+     * the workflow. Plain text on purpose (an FK would cycle with
+     * niche_roadmap_items.video_id); deleteRoadmapItem clears it.
+     */
+    roadmapItemId: text('roadmap_item_id'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },
@@ -483,6 +490,12 @@ export const nicheRoadmapItems = sqliteTable(
       .references(() => niches.id, { onDelete: 'cascade' }),
     /** Working title — becomes the Raccord video name on assignment. */
     title: text('title').notNull(),
+    /**
+     * Packaging-first (§7c): the candidate YouTube titles written BEFORE
+     * production — the pros write 8-20 title+thumbnail pairs and only script
+     * ideas whose click is already earned. Promoting one moves it to `title`.
+     */
+    titleVariants: text('title_variants', { mode: 'json' }).$type<string[]>(),
     /** One-line pitch. */
     angle: text('angle'),
     /** YouTube description draft (assistant-generated, user-edited). */
@@ -524,11 +537,26 @@ export const nicheVideos = sqliteTable(
     /** Channel stats frozen at ingest time — the niche-score denominator. */
     channelSubscribers: integer('channel_subscribers').notNull(),
     channelCreatedAt: text('channel_created_at'),
+    /** Engagement stats (videos.list `statistics`) — null on rows ingested before they were tracked. */
+    likeCount: integer('like_count'),
+    commentCount: integer('comment_count'),
+    /** The competitor's own SEO: `snippet.tags` + `snippet.categoryId`. */
+    tags: text('tags', { mode: 'json' }).$type<string[]>(),
+    categoryId: text('category_id'),
+    /** BCP-47 from defaultAudioLanguage/defaultLanguage — the reliable language filter. */
+    language: text('language'),
+    /** `contentDetails.caption` — false means a transcript fetch is pointless. */
+    hasCaptions: integer('has_captions', { mode: 'boolean' }),
+    /** SERP position (rank_absolute) when the video came from a keyword search. */
+    serpRank: integer('serp_rank'),
     /** How the video entered the niche: a tracked channel or a keyword search. */
     source: text('source').$type<'channel' | 'search'>().notNull(),
     /** The keyword that surfaced it (search source only). */
     keyword: text('keyword'),
     transcript: text('transcript'),
+    /** Language + ASR flag of the fetched caption track (null = unknown/legacy). */
+    transcriptLanguage: text('transcript_language'),
+    transcriptIsAsr: integer('transcript_is_asr', { mode: 'boolean' }),
     transcriptFetchedAt: integer('transcript_fetched_at'),
     statsRefreshedAt: integer('stats_refreshed_at'),
     createdAt: integer('created_at').notNull()
@@ -538,6 +566,27 @@ export const nicheVideos = sqliteTable(
     index('niche_videos_by_channel').on(table.nicheId, table.channelId),
     uniqueIndex('niche_videos_unique').on(table.nicheId, table.videoId)
   ]
+)
+
+/**
+ * Time series under the niche score (§7): one row per (tracked video, refresh)
+ * whenever the numbers moved — refreshes used to overwrite `views`, which made
+ * velocity, growth and "this video is taking off" structurally impossible.
+ * Cascade-deleted with the tracked video.
+ */
+export const nicheVideoSnapshots = sqliteTable(
+  'niche_video_snapshots',
+  {
+    id: text('id').primaryKey(),
+    nicheVideoId: text('niche_video_id')
+      .notNull()
+      .references(() => nicheVideos.id, { onDelete: 'cascade' }),
+    views: integer('views').notNull(),
+    likeCount: integer('like_count'),
+    channelSubscribers: integer('channel_subscribers').notNull(),
+    capturedAt: integer('captured_at').notNull()
+  },
+  (table) => [index('niche_video_snapshots_by_video').on(table.nicheVideoId, table.capturedAt)]
 )
 
 /**

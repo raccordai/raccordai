@@ -286,7 +286,17 @@
       "publishedUrlPlaceholder": "URL YouTube de la vidéo publiée…",
       "publishedPerf": "{{views}} vues · médiane de la niche : {{median}}",
       "deleteConfirm": "Supprimer l'idée « {{title}} » ? Ses brouillons (description, brief miniature, preuves) partent avec.",
-      "noProjects": "Crée d'abord un projet pour pouvoir assigner un workflow."
+      "noProjects": "Crée d'abord un projet pour pouvoir assigner un workflow.",
+      "titleVariantsLabel": "Variantes de titre",
+      "promoteTitle": "Utiliser ce titre",
+      "feedPreview": "Aperçu dans le feed",
+      "feedPreviewShort": "Feed",
+      "feedPreviewHint": "Votre packaging face aux vraies miniatures de la niche — cliquez sur le titre candidat pour faire défiler les variantes.",
+      "feedYourChannel": "Votre chaîne",
+      "cycleTitles": "Cliquer pour passer à la variante suivante",
+      "noThumbnailYet": "Aucune miniature générée — lancez le nœud miniature du workflow",
+      "exportThumbnail": "Exporter la miniature",
+      "thumbnailExported": "Miniature exportée : {{path}}"
     },
     "keysMissing": "Clés API manquantes — configure YouTube (et DataForSEO pour la recherche) dans Réglages → Intégrations.",
     "channels": "Chaînes suivies",
@@ -359,7 +369,11 @@
       "youngChannels": "Chaînes récentes (≤ 12 mois)"
     },
     "panelHint": "Sélectionne une niche : les boutons « + Suivre » des résultats y ajouteront la chaîne.",
-    "open": "Ouvrir"
+    "open": "Ouvrir",
+    "searchCost": "coût {{cost}} $",
+    "viewsPerDayTitle": "Vélocité : vues par jour (mesurée entre les refreshs, sinon moyenne depuis la publication)",
+    "viewsPerDaySuffix": "/j",
+    "channelRatioTitle": "Vues vs la médiane de la chaîne — un ×5 est un outlier quelle que soit la taille de la chaîne"
   },
   "project": {
     "back": "Retour aux projets",

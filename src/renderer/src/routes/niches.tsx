@@ -349,6 +349,8 @@ function KeywordSearch({
             <div className="flex-1" />
             <span className="text-xs text-neutral-500">
               {t('niches.shown', { shown: filtered.length, total: search.data.videos.length })}
+              {search.data.costUsd !== null &&
+                ` · ${t('niches.searchCost', { cost: search.data.costUsd.toFixed(4) })}`}
             </span>
           </div>
 

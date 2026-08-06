@@ -2,6 +2,7 @@ import {
   clampBlockDepth,
   extractSerpVideos,
   normalizeSearchParam,
+  serpTaskCost,
   serpTaskError,
   serpTaskItems,
   type SerpVideoItem
@@ -38,7 +39,13 @@ export interface SerpSearchInput {
   searchParam?: string | null
 }
 
-export async function searchYoutubeSerp(input: SerpSearchInput): Promise<SerpVideoItem[]> {
+export interface SerpSearchResult {
+  videos: SerpVideoItem[]
+  /** What DataForSEO actually billed for this task (USD) — real money. */
+  costUsd: number | null
+}
+
+export async function searchYoutubeSerp(input: SerpSearchInput): Promise<SerpSearchResult> {
   const blockDepth = clampBlockDepth(input.depth)
   const task: Record<string, unknown> = {
     keyword: input.keyword,
@@ -49,7 +56,6 @@ export async function searchYoutubeSerp(input: SerpSearchInput): Promise<SerpVid
   const sp = normalizeSearchParam(input.searchParam)
   if (sp) task.search_param = sp
 
-  logInfo('dataforseo', `SERP "${input.keyword}" depth=${blockDepth} sp=${sp ?? 'none'}`)
   const response = await fetch(`${BASE}/v3/serp/youtube/organic/live/advanced`, {
     method: 'POST',
     headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
@@ -61,5 +67,10 @@ export async function searchYoutubeSerp(input: SerpSearchInput): Promise<SerpVid
   const body: unknown = await response.json()
   const taskError = serpTaskError(body)
   if (taskError) throw new Error(taskError)
-  return extractSerpVideos(serpTaskItems(body))
+  const costUsd = serpTaskCost(body)
+  logInfo(
+    'dataforseo',
+    `SERP "${input.keyword}" depth=${blockDepth} sp=${sp ?? 'none'} cost=${costUsd === null ? 'unknown' : `$${costUsd}`}`
+  )
+  return { videos: extractSerpVideos(serpTaskItems(body)), costUsd }
 }

@@ -47,6 +47,7 @@ export function createVideo(projectId: string, name: string): Video {
     draftMode: false,
     qcEnabled: false,
     scenario: null,
+    roadmapItemId: null,
     createdAt: now,
     updatedAt: now
   }
