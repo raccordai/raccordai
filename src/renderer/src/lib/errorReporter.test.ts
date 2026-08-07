@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDeduper, normalizeErrorMessage } from './errorReporter'
+import { createDeduper, isBenignResizeObserverError, normalizeErrorMessage } from './errorReporter'
 
 describe('normalizeErrorMessage', () => {
   it('extracts the message of an Error', () => {
@@ -15,6 +15,21 @@ describe('normalizeErrorMessage', () => {
     const cyclic: Record<string, unknown> = {}
     cyclic['self'] = cyclic
     expect(normalizeErrorMessage(cyclic)).toBe('[object Object]')
+  })
+})
+
+describe('isBenignResizeObserverError', () => {
+  it('recognizes both Chromium wordings', () => {
+    expect(
+      isBenignResizeObserverError('ResizeObserver loop completed with undelivered notifications.')
+    ).toBe(true)
+    expect(isBenignResizeObserverError('ResizeObserver loop limit exceeded')).toBe(true)
+  })
+
+  it('lets real errors through', () => {
+    expect(isBenignResizeObserverError('ResizeObserver is not defined')).toBe(false)
+    expect(isBenignResizeObserverError('boom')).toBe(false)
+    expect(isBenignResizeObserverError(undefined)).toBe(false)
   })
 })
 

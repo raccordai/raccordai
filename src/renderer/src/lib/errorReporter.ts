@@ -33,6 +33,16 @@ export function createDeduper(windowMs: number): (key: string, now: number) => b
   }
 }
 
+/**
+ * Chromium fires these as window `error` events when a ResizeObserver cycle
+ * can't deliver every notification in one frame (typically during a window
+ * resize). The spec says they are informational — nothing failed, the pending
+ * notifications are delivered next frame — so they must not reach the toast.
+ */
+export function isBenignResizeObserverError(message: unknown): boolean {
+  return typeof message === 'string' && message.includes('ResizeObserver loop')
+}
+
 type ToastFn = (message: string) => void
 let toastListener: ToastFn | null = null
 
@@ -68,6 +78,7 @@ export function reportRendererError(
 /** Window-level nets: uncaught exceptions and unhandled promise rejections. */
 export function installGlobalErrorHandlers(): void {
   window.addEventListener('error', (event) => {
+    if (isBenignResizeObserverError(event.message)) return
     reportRendererError('window', event.error ?? event.message)
   })
   window.addEventListener('unhandledrejection', (event) => {

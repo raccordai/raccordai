@@ -718,11 +718,20 @@ export function TimelineV2({
   useEffect(() => {
     const el = playerRef.current
     if (!el) return
-    const update = () => setPlayerHeight(el.clientHeight)
-    update()
-    const observer = new ResizeObserver(update)
+    setPlayerHeight(el.clientHeight)
+    // Deferred to the next frame: a synchronous setState here re-lays-out
+    // within the same observation cycle and trips Chromium's
+    // "ResizeObserver loop" warning on every window resize.
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => setPlayerHeight(el.clientHeight))
+    })
     observer.observe(el)
-    return () => observer.disconnect()
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
   }, [collapsed, clipNodes.length])
 
   const clips: EngineClip[] = useMemo(() => {
