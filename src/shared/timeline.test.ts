@@ -9,12 +9,16 @@ import {
   clipResolution,
   clipTransitionAfter,
   clipLook,
+  clipSegments,
   clipSpeed,
   clipTimelineOffset,
   clipTrim,
   clipVolume,
   collectAudioNodes,
   collectTimelineClips,
+  collectTimelineEntries,
+  segmentTransitionAfter,
+  segmentTrim,
   isStillClip,
   shotNumber,
   stillClipSeconds,
@@ -140,6 +144,46 @@ describe('clipSpeed / clipLook / stillMotionOf', () => {
     expect(clipLook(node())).toBeNull()
     expect(stillMotionOf(node({ stillMotion: 'pan-left' }))).toBe('pan-left')
     expect(stillMotionOf(node({ stillMotion: 'spin' }))).toBeNull()
+  })
+})
+
+describe('split clips (segments & entries)', () => {
+  it('a never-split node normalizes to ONE implicit segment from its columns', () => {
+    const n = node({ trimStartSec: 1, trimEndSec: 5, transitionAfter: 'crossfade' })
+    expect(clipSegments(n)).toEqual([
+      {
+        trimStartSec: 1,
+        trimEndSec: 5,
+        transitionAfter: 'crossfade',
+        transitionDurationSec: null
+      }
+    ])
+    expect(clipSegments(node({ segments: [] }))).toHaveLength(1)
+  })
+
+  it('collectTimelineEntries expands split nodes into adjacent entries', () => {
+    const plain = node({ label: 'Shot 1' })
+    const split = node({
+      label: 'Shot 2',
+      segments: [
+        { trimStartSec: 0, trimEndSec: 3 },
+        { trimStartSec: 3, trimEndSec: 6, transitionAfter: 'crossfade' }
+      ]
+    })
+    const entries = collectTimelineEntries([split, plain])
+    expect(entries.map((e) => e.entryId)).toEqual([
+      `${plain.id}#0`,
+      `${split.id}#0`,
+      `${split.id}#1`
+    ])
+    expect(segmentTransitionAfter(entries[1]!.segment)).toBeNull()
+    expect(segmentTransitionAfter(entries[2]!.segment)).toBe('crossfade')
+  })
+
+  it('segmentTrim clamps like clipTrim (inverted windows fall back whole)', () => {
+    expect(segmentTrim({ trimStartSec: 1, trimEndSec: 4 }, 10)).toEqual({ start: 1, end: 4 })
+    expect(segmentTrim({ trimStartSec: 2, trimEndSec: 99 }, 10)).toEqual({ start: 2, end: 10 })
+    expect(segmentTrim({ trimStartSec: 5, trimEndSec: 2 }, 10)).toEqual({ start: 0, end: 10 })
   })
 })
 

@@ -235,6 +235,10 @@
       "pop": "Pop",
       "slide-up": "Slide up"
     },
+    "split": "Split",
+    "splitHint": "Split this clip at the playhead (S). Move the playhead inside the clip first.",
+    "removeSegment": "Delete this part",
+    "segmentBadge": "part {{n}}/{{count}}",
     "addSticker": "Add a sticker (image overlay)",
     "sticker": "Sticker",
     "stickerSize": "Width ({{pct}}%)",

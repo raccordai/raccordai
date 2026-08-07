@@ -179,11 +179,15 @@ export function registerIpcHandlers(): void {
   handle('nodes:setTimelineOrder', ({ videoId, nodeIds }) =>
     graph.setTimelineOrder(videoId, nodeIds)
   )
-  handle('nodes:setTrim', ({ nodeId, trimStartSec, trimEndSec }) =>
-    graph.setClipTrim(nodeId, { trimStartSec, trimEndSec })
+  handle('nodes:splitClip', ({ nodeId, atMediaSec }) => graph.splitClip(nodeId, atMediaSec))
+  handle('nodes:removeSegment', ({ nodeId, segmentIndex }) =>
+    graph.removeClipSegment(nodeId, segmentIndex)
   )
-  handle('nodes:setTransition', ({ nodeId, transition, durationSec }) =>
-    graph.setClipTransition(nodeId, transition, durationSec)
+  handle('nodes:setTrim', ({ nodeId, trimStartSec, trimEndSec, segmentIndex }) =>
+    graph.setClipTrim(nodeId, { trimStartSec, trimEndSec }, segmentIndex)
+  )
+  handle('nodes:setTransition', ({ nodeId, transition, durationSec, segmentIndex }) =>
+    graph.setClipTransition(nodeId, transition, durationSec, segmentIndex)
   )
   handle('nodes:setOverlay', ({ nodeId, overlay }) => graph.setClipOverlay(nodeId, overlay))
   handle('nodes:setVolume', ({ nodeId, volume }) => graph.setClipVolume(nodeId, volume))

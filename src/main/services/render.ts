@@ -12,15 +12,17 @@ import {
   clipLook,
   clipSpeed,
   clipTimelineOffset,
-  clipTransitionAfter,
-  clipTransitionSeconds,
   clipTrim,
   clipVolume,
   collectAudioNodes,
-  collectTimelineClips,
+  collectTimelineEntries,
   isStillClip,
+  segmentTransitionAfter,
+  segmentTransitionSeconds,
+  segmentTrim,
   stillClipSeconds,
-  stillMotionOf
+  stillMotionOf,
+  type TimelineEntry
 } from '@shared/timeline'
 import { xfadeNameFor } from '@shared/transitions'
 import type { SpeechTranscript } from '@shared/speech'
@@ -64,6 +66,7 @@ import {
   sequenceDurationSeconds,
   speechActivityWindows,
   type CaptionTrackInput,
+  type ClipProbe,
   type MusicTrack,
   type PlannedOverlay,
   type PlannedClip,
@@ -247,8 +250,10 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
 
   try {
     const graph = graphService.listGraph(videoId)
-    const timelineNodes = collectTimelineClips(graph.nodes)
-    if (timelineNodes.length === 0) throw new Error('The timeline has no video clip to render')
+    // Split clips (§6.12e): the timeline is ENTRIES — one per (node, segment).
+    // A never-split node is exactly one entry, so nothing changes without one.
+    const timelineEntries = collectTimelineEntries(graph.nodes)
+    if (timelineEntries.length === 0) throw new Error('The timeline has no video clip to render')
 
     // Still fallbacks — same policy as the FCPXML export: a failed shot is
     // replaced by its input image for the clip's declared duration.
@@ -256,9 +261,12 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
 
     const skipped: string[] = []
     const clips: PlannedClip[] = []
-    const clipNodes: GraphNode[] = []
+    const clipEntries: TimelineEntry[] = []
+    // Segments of one node share its media — resolve/download it once.
+    const mediaByNode = new Map<string, string | null>()
     let index = 0
-    for (const node of timelineNodes) {
+    for (const entry of timelineEntries) {
+      const node = entry.node
       index += 1
       const name = `src-${String(index).padStart(2, '0')}`
       // User-placed still (image node or asset): held for its trim-window length.
@@ -275,7 +283,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
               stillDurationSeconds: stillClipSeconds(node),
               probe: null
             })
-            clipNodes.push(node)
+            clipEntries.push(entry)
             continue
           }
         } catch {
@@ -284,10 +292,16 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         skipped.push(label(node))
         continue
       }
-      const media = await resolveNodeMedia(workDir, node, name)
-      if (media) {
-        clips.push({ path: media.path, isStill: false, stillDurationSeconds: 0, probe: null })
-        clipNodes.push(node)
+      let videoPath: string | null
+      if (mediaByNode.has(node.id)) {
+        videoPath = mediaByNode.get(node.id) ?? null
+      } else {
+        videoPath = (await resolveNodeMedia(workDir, node, name))?.path ?? null
+        mediaByNode.set(node.id, videoPath)
+      }
+      if (videoPath) {
+        clips.push({ path: videoPath, isStill: false, stillDurationSeconds: 0, probe: null })
+        clipEntries.push(entry)
         continue
       }
       const fallbackUrl = fallbacks[node.id]
@@ -301,7 +315,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
             stillDurationSeconds: clipDuration(node) ?? DEFAULT_STILL_SECONDS,
             probe: null
           })
-          clipNodes.push(node)
+          clipEntries.push(entry)
           continue
         } catch {
           // Unfetchable still → skip the slot like any other missing media.
@@ -379,19 +393,29 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     // ── Probe ────────────────────────────────────────────────────────────
     const probeSpansGuess = computeStageSpans(true, hasAudioLane)
     progress(probeSpansGuess, 'probe', 0)
+    // Split halves share one file — probe each path once.
+    const probeByPath = new Map<string, ClipProbe>()
     for (const [i, clip] of clips.entries()) {
-      if (!clip.isStill) clip.probe = await probeFile(active, clip.path)
+      if (!clip.isStill) {
+        let probe = probeByPath.get(clip.path)
+        if (!probe) {
+          probe = await probeFile(active, clip.path)
+          probeByPath.set(clip.path, probe)
+        }
+        clip.probe = probe
+      }
       progress(probeSpansGuess, 'probe', (i + 1) / clips.length)
     }
 
     // Timeline editing state: trim windows (clamped against the probed
-    // duration), transitions, speed, look and still motion travel from the
-    // nodes onto the planned clips. Effects are only stamped when set, so an
-    // untouched timeline keeps the historical argv byte-identical.
+    // duration), transitions, speed, look and still motion travel from each
+    // ENTRY's segment onto the planned clips. Effects are only stamped when
+    // set, so an untouched timeline keeps the historical argv byte-identical.
     for (const [i, clip] of clips.entries()) {
-      const node = clipNodes[i]!
+      const entry = clipEntries[i]!
+      const node = entry.node
       if (!clip.isStill) {
-        const { start, end } = clipTrim(node, clip.probe?.durationSeconds ?? undefined)
+        const { start, end } = segmentTrim(entry.segment, clip.probe?.durationSeconds ?? undefined)
         if (start > 0) clip.trimStartSec = start
         if (end !== undefined) clip.trimEndSec = end
         const speed = clipSpeed(node)
@@ -402,8 +426,8 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       }
       const look = clipLook(node)
       if (look) clip.look = look
-      clip.transitionAfter = clipTransitionAfter(node)
-      clip.transitionDurationSec = clipTransitionSeconds(node)
+      clip.transitionAfter = segmentTransitionAfter(entry.segment)
+      clip.transitionDurationSec = segmentTransitionSeconds(entry.segment)
     }
 
     // The scenario's dialogue, resolved per clip BEFORE rendering: subtitles
@@ -460,7 +484,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     {
       let at = 0
       for (const [i, clip] of clips.entries()) {
-        const node = clipNodes[i]!
+        const node = clipEntries[i]!.node
         const dur = clipEffectiveDuration(clip)
         if (dur > 0) {
           if (wantSubtitles) {

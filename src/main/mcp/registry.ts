@@ -476,6 +476,9 @@ export const AGENT_TOOLS: AgentTool[] = [
           trimEndSec: n.trimEndSec ?? null,
           transitionAfter: n.transitionAfter ?? null,
           transitionDurationSec: n.transitionDurationSec ?? null,
+          // Split clip (§6.12e): non-null once split_clip ran — each segment
+          // has its own trim/transition, addressed by segmentIndex.
+          segments: n.segments ?? null,
           overlay: n.overlay ?? null,
           hasSuccessfulOutput: gens.some((g) => g.nodeId === n.id && g.status === 'success')
         })),
@@ -779,17 +782,61 @@ export const AGENT_TOOLS: AgentTool[] = [
       {
         nodeId: str(),
         trimStartSec: { type: ['number', 'null'], description: 'In-point (≥ 0), null = start' },
-        trimEndSec: { type: ['number', 'null'], description: 'Out-point (> in), null = end' }
+        trimEndSec: { type: ['number', 'null'], description: 'Out-point (> in), null = end' },
+        segmentIndex: {
+          type: 'number',
+          description: 'On a SPLIT clip: which segment to trim (see get_workflow segments)'
+        }
       },
       ['nodeId']
     ),
     scope: 'global',
     risk: 'write',
-    execute: ({ nodeId, trimStartSec, trimEndSec }) => {
-      graph.setClipTrim(String(nodeId), {
-        trimStartSec: trimStartSec == null ? null : Number(trimStartSec),
-        trimEndSec: trimEndSec == null ? null : Number(trimEndSec)
-      })
+    execute: ({ nodeId, trimStartSec, trimEndSec, segmentIndex }) => {
+      graph.setClipTrim(
+        String(nodeId),
+        {
+          trimStartSec: trimStartSec == null ? null : Number(trimStartSec),
+          trimEndSec: trimEndSec == null ? null : Number(trimEndSec)
+        },
+        segmentIndex == null ? undefined : Number(segmentIndex)
+      )
+      return { ok: true }
+    }
+  },
+  {
+    name: 'split_clip',
+    description:
+      'Razor: cut a video clip in two at a MEDIA-time point (seconds inside the clip’s media, ≥0.2 s from each edge). The halves stay adjacent, each with its own trim/transition (see get_workflow segments; edit them via set_clip_trim/set_clip_transition with segmentIndex). One undo step.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        atMediaSec: { type: 'number', description: 'Cut point in MEDIA seconds' }
+      },
+      ['nodeId', 'atMediaSec']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, atMediaSec }) => {
+      graph.splitClip(String(nodeId), Number(atMediaSec))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'remove_clip_segment',
+    description:
+      'Remove ONE segment of a split clip (e.g. cut out the middle after two split_clip calls). The last two segments collapse back into a plain clip. The node and its generations are untouched.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        segmentIndex: { type: 'number', description: '0-based segment to remove' }
+      },
+      ['nodeId', 'segmentIndex']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, segmentIndex }) => {
+      graph.removeClipSegment(String(nodeId), Number(segmentIndex))
       return { ok: true }
     }
   },
@@ -801,17 +848,22 @@ export const AGENT_TOOLS: AgentTool[] = [
       {
         nodeId: str(),
         transition: { type: ['string', 'null'], enum: [...CLIP_TRANSITION_IDS, null] },
-        durationSec: { type: 'number', description: 'Overlap length, 0.1–2 s (default 0.5)' }
+        durationSec: { type: 'number', description: 'Overlap length, 0.1–2 s (default 0.5)' },
+        segmentIndex: {
+          type: 'number',
+          description: 'On a SPLIT clip: which segment’s outgoing cut (default: the last)'
+        }
       },
       ['nodeId']
     ),
     scope: 'global',
     risk: 'write',
-    execute: ({ nodeId, transition, durationSec }) => {
+    execute: ({ nodeId, transition, durationSec, segmentIndex }) => {
       graph.setClipTransition(
         String(nodeId),
         transition == null ? null : String(transition),
-        durationSec == null ? null : Number(durationSec)
+        durationSec == null ? null : Number(durationSec),
+        segmentIndex == null ? undefined : Number(segmentIndex)
       )
       return { ok: true }
     }

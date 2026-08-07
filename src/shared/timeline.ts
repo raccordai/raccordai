@@ -1,4 +1,4 @@
-import type { GraphNode } from './ipc/contracts'
+import type { GraphNode, TimelineSegment } from './ipc/contracts'
 import { SPEED_MAX, SPEED_MIN, VOLUME_MAX, VOLUME_MIN } from './config'
 import { isClipLookId } from './looks'
 import { getModel } from './models'
@@ -171,21 +171,89 @@ export function clipDuration(node: GraphNode): number | undefined {
 }
 
 /**
- * The clip's trim window inside its media, clamped so bad data can never
+ * A segment's trim window inside its media, clamped so bad data can never
  * produce a negative or inverted range: in-point ≥ 0, out-point > in-point and
  * (when the raw duration is known) ≤ raw. All three consumers derive playback
- * and export bounds from this — never read trimStartSec/trimEndSec directly.
+ * and export bounds from this — never read the raw trim values directly.
  */
+export function segmentTrim(
+  segment: TimelineSegment,
+  rawDurationSec?: number
+): { start: number; end: number | undefined } {
+  const raw = rawDurationSec
+  const start = Math.max(0, segment.trimStartSec ?? 0)
+  let end = segment.trimEndSec ?? raw
+  if (end !== undefined && raw !== undefined) end = Math.min(end, raw)
+  if (end !== undefined && end <= start) return { start: 0, end: raw }
+  return { start, end }
+}
+
+/** The clip's trim window (single-clip view — the implicit segment). */
 export function clipTrim(
   node: GraphNode,
   rawDurationSec?: number
 ): { start: number; end: number | undefined } {
-  const raw = rawDurationSec ?? clipDuration(node)
-  const start = Math.max(0, node.trimStartSec ?? 0)
-  let end = node.trimEndSec ?? raw
-  if (end !== undefined && raw !== undefined) end = Math.min(end, raw)
-  if (end !== undefined && end <= start) return { start: 0, end: raw }
-  return { start, end }
+  return segmentTrim(
+    { trimStartSec: node.trimStartSec, trimEndSec: node.trimEndSec },
+    rawDurationSec ?? clipDuration(node)
+  )
+}
+
+// ── Split clips (§6.12e) — segments & timeline entries ──────────────────────
+
+/**
+ * The node's timeline segments, normalized: the materialized `segments` array
+ * when the clip was split, else ONE implicit segment read from the historical
+ * trim/transition columns. Every consumer resolves through this — reading the
+ * columns directly on a split clip would replay the pre-split window.
+ */
+export function clipSegments(node: GraphNode): TimelineSegment[] {
+  const segs = node.segments
+  if (Array.isArray(segs) && segs.length > 0) return segs
+  return [
+    {
+      trimStartSec: node.trimStartSec ?? null,
+      trimEndSec: node.trimEndSec ?? null,
+      transitionAfter: node.transitionAfter ?? null,
+      transitionDurationSec: node.transitionDurationSec ?? null
+    }
+  ]
+}
+
+/** One playable timeline slot: a node + one of its segments. */
+export interface TimelineEntry {
+  node: GraphNode
+  segment: TimelineSegment
+  /** Index into clipSegments(node) — the mutation surface's addressing. */
+  segmentIndex: number
+  /** Stable identity for lists/players ("nodeId#segmentIndex"). */
+  entryId: string
+}
+
+/**
+ * The ordered timeline as ENTRIES: collectTimelineClips' node order, each node
+ * expanded into its segments (adjacent — a split never reorders). With no
+ * split anywhere this is exactly one entry per clip.
+ */
+export function collectTimelineEntries(nodes: GraphNode[]): TimelineEntry[] {
+  return collectTimelineClips(nodes).flatMap((node) =>
+    clipSegments(node).map((segment, segmentIndex) => ({
+      node,
+      segment,
+      segmentIndex,
+      entryId: `${node.id}#${segmentIndex}`
+    }))
+  )
+}
+
+/** Transition of a SEGMENT into the next entry (a CLIP_TRANSITIONS id) or null. */
+export function segmentTransitionAfter(segment: TimelineSegment): string | null {
+  return isClipTransitionId(segment.transitionAfter) ? segment.transitionAfter : null
+}
+
+/** The segment transition's length in seconds (clamped; default when unset). */
+export function segmentTransitionSeconds(segment: TimelineSegment): number {
+  return clampTransitionSeconds(segment.transitionDurationSec ?? undefined)
 }
 
 /** The clip's effective duration once trimmed (undefined when unknowable). */

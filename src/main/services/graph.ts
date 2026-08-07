@@ -13,6 +13,7 @@ import { SPEED_MAX, SPEED_MIN, VOLUME_MAX, VOLUME_MIN } from '@shared/config'
 import { isClipLookId } from '@shared/looks'
 import { isStillMotionId } from '@shared/stillMotion'
 import { clampTransitionSeconds, isClipTransitionId } from '@shared/transitions'
+import { clipSegments } from '@shared/timeline'
 import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes } from '../db/schema'
@@ -144,6 +145,7 @@ export function createNode(args: {
     look: null,
     stillMotion: null,
     timelineOffsetSec: null,
+    segments: null,
     createdAt: now,
     updatedAt: now
   }
@@ -273,21 +275,70 @@ export function setTimelineOrder(videoId: string, nodeIds: string[]): void {
   touchVideo(videoId)
 }
 
+type TimelineSegmentRow = NonNullable<NodeRow['segments']>[number]
+
+/** Shortest playable side a split may leave (media seconds). */
+const MIN_SEGMENT_SECONDS = 0.2
+
+/** The node's segments column, or null when it was never split. */
+function nodeSegments(nodeId: string): TimelineSegmentRow[] | null {
+  const row = getDb()
+    .select({ segments: nodes.segments })
+    .from(nodes)
+    .where(eq(nodes.id, nodeId))
+    .get()
+  if (!row) throw new Error(`Unknown node "${nodeId}".`)
+  return Array.isArray(row.segments) && row.segments.length > 0 ? row.segments : null
+}
+
+/**
+ * A segments write, with the LEGACY trim/transition columns synced to the
+ * envelope (first in-point, last out-point, last transition) so column-only
+ * readers (FCPXML today) degrade to the overall window instead of replaying a
+ * stale pre-split state.
+ */
+function segmentsPatch(segments: TimelineSegmentRow[]): Partial<NodeRow> {
+  const first = segments[0]!
+  const last = segments[segments.length - 1]!
+  return {
+    segments,
+    trimStartSec: first.trimStartSec ?? null,
+    trimEndSec: last.trimEndSec ?? null,
+    transitionAfter: last.transitionAfter ?? null,
+    transitionDurationSec: last.transitionDurationSec ?? null
+  }
+}
+
 /**
  * Trim window of a clip (null clears a bound). Validated here so every surface
  * (IPC, MCP, chat) gets the same refusal: in-point ≥ 0, out-point > in-point.
  * The out-point may exceed the media's real length — clipTrim clamps at read
- * time, since the probed duration is only known to the players.
+ * time, since the probed duration is only known to the players. On a SPLIT
+ * clip, `segmentIndex` addresses one segment (defaults to the first).
  */
 export function setClipTrim(
   nodeId: string,
-  trim: { trimStartSec: number | null; trimEndSec: number | null }
+  trim: { trimStartSec: number | null; trimEndSec: number | null },
+  segmentIndex?: number
 ): void {
   const start = trim.trimStartSec
   const end = trim.trimEndSec
   if (start !== null && start < 0) throw new Error('Trim in-point must be ≥ 0.')
   if (end !== null && end <= (start ?? 0)) {
     throw new Error('Trim out-point must be after the in-point.')
+  }
+  const segments = nodeSegments(nodeId)
+  if (segments) {
+    const idx = segmentIndex ?? 0
+    if (idx < 0 || idx >= segments.length) throw new Error(`No segment ${idx} on this clip.`)
+    const next = segments.map((s, i) =>
+      i === idx ? { ...s, trimStartSec: start, trimEndSec: end } : s
+    )
+    patchNodeWithHistory(nodeId, segmentsPatch(next))
+    return
+  }
+  if (segmentIndex !== undefined && segmentIndex > 0) {
+    throw new Error(`No segment ${segmentIndex} on this clip (it was never split).`)
   }
   patchNodeWithHistory(nodeId, { trimStartSec: start, trimEndSec: end })
 }
@@ -296,20 +347,98 @@ export function setClipTrim(
  * Transition into the NEXT clip: a CLIP_TRANSITIONS id or null (plain cut).
  * The optional duration travels with it; clearing the transition clears the
  * duration too (a dangling duration would silently apply to the next choice).
+ * On a SPLIT clip, `segmentIndex` sets the transition of ONE segment — inner
+ * cuts of a split clip take transitions exactly like real cuts.
  */
 export function setClipTransition(
   nodeId: string,
   transition: string | null,
-  durationSec?: number | null
+  durationSec?: number | null,
+  segmentIndex?: number
 ): void {
   if (transition !== null && !isClipTransitionId(transition)) {
     throw new Error(`Unknown transition "${transition}".`)
   }
+  const duration =
+    transition === null ? null : durationSec == null ? null : clampTransitionSeconds(durationSec)
+  const segments = nodeSegments(nodeId)
+  if (segments) {
+    const idx = segmentIndex ?? segments.length - 1
+    if (idx < 0 || idx >= segments.length) throw new Error(`No segment ${idx} on this clip.`)
+    const next = segments.map((s, i) =>
+      i === idx ? { ...s, transitionAfter: transition, transitionDurationSec: duration } : s
+    )
+    patchNodeWithHistory(nodeId, segmentsPatch(next))
+    return
+  }
+  if (segmentIndex !== undefined && segmentIndex > 0) {
+    throw new Error(`No segment ${segmentIndex} on this clip (it was never split).`)
+  }
   patchNodeWithHistory(nodeId, {
     transitionAfter: transition,
-    transitionDurationSec:
-      transition === null ? null : durationSec == null ? null : clampTransitionSeconds(durationSec)
+    transitionDurationSec: duration
   })
+}
+
+/**
+ * Split (§6.12e): cut a clip in two at a MEDIA-time point. The first half ends
+ * (and CUTS — the doctrine's default) where the second begins; the original
+ * segment's transition stays on the second half, which still leads into the
+ * next clip. One journaled step; splitting a split clip subdivides further.
+ */
+export function splitClip(nodeId: string, atMediaSec: number): void {
+  const row = getDb().select().from(nodes).where(eq(nodes.id, nodeId)).get()
+  if (!row) throw new Error(`Unknown node "${nodeId}".`)
+  if (row.modelId === 'studio/asset' || getModel(row.modelId)?.kind !== 'video') {
+    throw new Error('Only video clips can be split (a still just gets two identical holds).')
+  }
+  const segments = clipSegments(toGraphNode(row))
+  const idx = segments.findIndex((s) => {
+    const start = Math.max(0, s.trimStartSec ?? 0)
+    const end = s.trimEndSec ?? null
+    if (atMediaSec < start + MIN_SEGMENT_SECONDS) return false
+    return end === null || atMediaSec <= end - MIN_SEGMENT_SECONDS
+  })
+  if (idx === -1) {
+    throw new Error(
+      `The split point must fall inside the clip, at least ${MIN_SEGMENT_SECONDS}s from each edge.`
+    )
+  }
+  const seg = segments[idx]!
+  const first: TimelineSegmentRow = {
+    ...seg,
+    trimEndSec: atMediaSec,
+    transitionAfter: null,
+    transitionDurationSec: null
+  }
+  const second: TimelineSegmentRow = { ...seg, trimStartSec: atMediaSec }
+  const next = [...segments.slice(0, idx), first, second, ...segments.slice(idx + 1)]
+  patchNodeWithHistory(nodeId, segmentsPatch(next))
+}
+
+/**
+ * Remove ONE segment of a split clip. Two segments collapse back to the plain
+ * single-clip representation (segments = null, columns = the survivor).
+ */
+export function removeClipSegment(nodeId: string, segmentIndex: number): void {
+  const segments = nodeSegments(nodeId)
+  if (!segments) throw new Error('This clip is not split.')
+  if (segmentIndex < 0 || segmentIndex >= segments.length) {
+    throw new Error(`No segment ${segmentIndex} on this clip.`)
+  }
+  const remaining = segments.filter((_, i) => i !== segmentIndex)
+  if (remaining.length === 1) {
+    const s = remaining[0]!
+    patchNodeWithHistory(nodeId, {
+      segments: null,
+      trimStartSec: s.trimStartSec ?? null,
+      trimEndSec: s.trimEndSec ?? null,
+      transitionAfter: s.transitionAfter ?? null,
+      transitionDurationSec: s.transitionDurationSec ?? null
+    })
+    return
+  }
+  patchNodeWithHistory(nodeId, segmentsPatch(remaining))
 }
 
 /**

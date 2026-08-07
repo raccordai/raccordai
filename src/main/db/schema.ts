@@ -192,6 +192,18 @@ export const nodes = sqliteTable(
      * Null = the historical layout: chained after the previous lane track.
      */
     timelineOffsetSec: real('timeline_offset_sec'),
+    /**
+     * Split clip (§6.12e): materialized timeline segments, each with its own
+     * trim window + transition. Null = one implicit segment read from the
+     * trim/transition columns above (which stay synced to the segments'
+     * envelope for legacy readers).
+     */
+    segments: text('segments', { mode: 'json' }).$type<Array<{
+      trimStartSec?: number | null
+      trimEndSec?: number | null
+      transitionAfter?: string | null
+      transitionDurationSec?: number | null
+    }> | null>(),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },

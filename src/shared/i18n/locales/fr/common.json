@@ -235,6 +235,10 @@
       "pop": "Pop",
       "slide-up": "Glissé vers le haut"
     },
+    "split": "Couper",
+    "splitHint": "Couper ce clip au playhead (S). Placez d'abord le playhead dans le clip.",
+    "removeSegment": "Supprimer cette partie",
+    "segmentBadge": "partie {{n}}/{{count}}",
     "addSticker": "Ajouter un sticker (image incrustée)",
     "sticker": "Sticker",
     "stickerSize": "Largeur ({{pct}} %)",

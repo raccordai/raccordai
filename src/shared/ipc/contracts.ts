@@ -501,6 +501,21 @@ export const positionSchema = z.object({ x: z.number(), y: z.number() })
 export const clipTransitionSchema = z.enum(CLIP_TRANSITION_IDS)
 export type ClipTransition = z.infer<typeof clipTransitionSchema>
 
+/**
+ * One timeline SEGMENT of a clip (§6.12e — split/razor): its own trim window
+ * inside the node's media and its own transition into whatever follows. A node
+ * without `segments` plays as ONE implicit segment read from the historical
+ * trim/transition columns; splitting materializes the array. Segments of one
+ * node are always adjacent on the timeline (reordering stays node-grained).
+ */
+export const timelineSegmentSchema = z.object({
+  trimStartSec: z.number().nullable().optional(),
+  trimEndSec: z.number().nullable().optional(),
+  transitionAfter: z.string().nullable().optional(),
+  transitionDurationSec: z.number().nullable().optional()
+})
+export type TimelineSegment = z.infer<typeof timelineSegmentSchema>
+
 /** Text layer burned over a clip: ASS numpad alignment (1–9) + size preset. */
 export const clipOverlaySchema = z.object({
   text: z.string().trim().min(1).max(200),
@@ -601,6 +616,8 @@ export const graphNodeSchema = z.object({
   stillMotion: z.string().nullable().optional(),
   /** Absolute start of an AUDIO track (final-timeline s) — shared clipTimelineOffset. */
   timelineOffsetSec: z.number().nullable().optional(),
+  /** Split clip (§6.12e): materialized segments, null = one implicit segment. */
+  segments: z.array(timelineSegmentSchema).nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -1112,12 +1129,14 @@ export const ipcContracts = {
     input: z.object({ videoId: z.string(), nodeIds: z.array(z.string()).min(1) }),
     output: z.void()
   },
-  /** Trim window inside the clip's media; null clears a bound. */
+  /** Trim window inside the clip's media; null clears a bound. On a SPLIT clip,
+   *  segmentIndex targets one segment (omitted = the historical single clip). */
   'nodes:setTrim': {
     input: z.object({
       nodeId: z.string(),
       trimStartSec: z.number().min(0).nullable(),
-      trimEndSec: z.number().positive().nullable()
+      trimEndSec: z.number().positive().nullable(),
+      segmentIndex: z.number().int().min(0).optional()
     }),
     output: z.void()
   },
@@ -1131,8 +1150,19 @@ export const ipcContracts = {
         .min(TRANSITION_MIN_SECONDS)
         .max(TRANSITION_MAX_SECONDS)
         .nullable()
-        .optional()
+        .optional(),
+      segmentIndex: z.number().int().min(0).optional()
     }),
+    output: z.void()
+  },
+  /** Split (§6.12e): cut a clip in two at a MEDIA-time point (razor). */
+  'nodes:splitClip': {
+    input: z.object({ nodeId: z.string(), atMediaSec: z.number().min(0) }),
+    output: z.void()
+  },
+  /** Remove ONE segment of a split clip (the last two collapse back to one). */
+  'nodes:removeSegment': {
+    input: z.object({ nodeId: z.string(), segmentIndex: z.number().int().min(0) }),
     output: z.void()
   },
   /** Text layer burned over a clip at render time (null clears it). */

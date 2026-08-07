@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { graphNodeSchema } from '@shared/ipc/contracts'
+import { collectTimelineEntries } from '@shared/timeline'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
 import type { Db } from '../db/client'
 import { inArray } from 'drizzle-orm'
@@ -17,11 +18,13 @@ import {
   exportWorkflow,
   importWorkflow,
   listGraph,
+  removeClipSegment,
   removeNode,
   replaceNodeModel,
   setClipTransition,
   setClipTrim,
   setTimelineOrder,
+  splitClip,
   updateNodeIntent,
   updateNodeParams
 } from './graph'
@@ -574,6 +577,99 @@ describe('video defaults & style-at-payload markers (§4.5)', () => {
     replaceNodeModel(node.id, 'bytedance/seedance-2')
     const swapped = listGraph(videoId).nodes.find((n) => n.id === node.id)!
     expect((swapped.params as Record<string, unknown>).applyVideoStyle).toBe(true)
+  })
+})
+
+describe('split clips (§6.12e)', () => {
+  it('splitClip materializes two segments; the transition stays on the second half', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE })
+    setClipTrim(node.id, { trimStartSec: 1, trimEndSec: 9 })
+    setClipTransition(node.id, 'crossfade')
+    splitClip(node.id, 4)
+
+    const row = listGraph(videoId).nodes.find((n) => n.id === node.id)!
+    expect(row.segments).toEqual([
+      { trimStartSec: 1, trimEndSec: 4, transitionAfter: null, transitionDurationSec: null },
+      { trimStartSec: 4, trimEndSec: 9, transitionAfter: 'crossfade', transitionDurationSec: null }
+    ])
+    // Legacy columns stay synced to the envelope for column-only readers.
+    expect(row.trimStartSec).toBe(1)
+    expect(row.trimEndSec).toBe(9)
+    expect(row.transitionAfter).toBe('crossfade')
+
+    // ONE journaled step — undo restores the un-split clip.
+    undoGraph(videoId)
+    const restored = listGraph(videoId).nodes.find((n) => n.id === node.id)!
+    expect(restored.segments).toBeNull()
+    expect(restored.trimEndSec).toBe(9)
+  })
+
+  it('resolves as adjacent timeline entries sharing the node', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE })
+    splitClip(node.id, 3)
+    const entries = collectTimelineEntries(listGraph(videoId).nodes)
+    expect(entries.map((e) => e.entryId)).toEqual([`${node.id}#0`, `${node.id}#1`])
+    expect(entries[0]!.segment.trimEndSec).toBe(3)
+    expect(entries[1]!.segment.trimStartSec).toBe(3)
+  })
+
+  it('refuses stills, out-of-window points, and splitting too close to an edge', () => {
+    const still = createNode({ videoId, modelId: 'gpt-image-2-text-to-image' })
+    expect(() => splitClip(still.id, 2)).toThrow(/Only video clips/)
+
+    const node = createNode({ videoId, modelId: SEEDANCE })
+    setClipTrim(node.id, { trimStartSec: 2, trimEndSec: 8 })
+    expect(() => splitClip(node.id, 2.05)).toThrow(/inside the clip/)
+    expect(() => splitClip(node.id, 7.95)).toThrow(/inside the clip/)
+    expect(() => splitClip(node.id, 11)).toThrow(/inside the clip/)
+  })
+
+  it('segment-addressed trim/transition edit ONE segment and re-sync the envelope', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE })
+    setClipTrim(node.id, { trimStartSec: 0, trimEndSec: 10 })
+    splitClip(node.id, 5)
+
+    setClipTrim(node.id, { trimStartSec: 1, trimEndSec: 4 }, 0)
+    setClipTransition(node.id, 'wipeleft', 0.3, 0)
+    const row = listGraph(videoId).nodes.find((n) => n.id === node.id)!
+    expect(row.segments?.[0]).toMatchObject({
+      trimStartSec: 1,
+      trimEndSec: 4,
+      transitionAfter: 'wipeleft',
+      transitionDurationSec: 0.3
+    })
+    expect(row.segments?.[1]).toMatchObject({ trimStartSec: 5, trimEndSec: 10 })
+    // Envelope: first in-point, last out-point.
+    expect(row.trimStartSec).toBe(1)
+    expect(row.trimEndSec).toBe(10)
+
+    // Without segments, a segmentIndex > 0 is a refusal, not a silent no-op.
+    const plain = createNode({ videoId, modelId: SEEDANCE })
+    expect(() => setClipTrim(plain.id, { trimStartSec: 0, trimEndSec: 2 }, 1)).toThrow(
+      /never split/
+    )
+  })
+
+  it('removeClipSegment drops one part; the last two collapse back to a plain clip', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE })
+    setClipTrim(node.id, { trimStartSec: 0, trimEndSec: 12 })
+    splitClip(node.id, 4)
+    splitClip(node.id, 8)
+    expect(listGraph(videoId).nodes.find((n) => n.id === node.id)!.segments).toHaveLength(3)
+
+    // Cut out the middle: [0,4) [8,12] remain.
+    removeClipSegment(node.id, 1)
+    const row = listGraph(videoId).nodes.find((n) => n.id === node.id)!
+    expect(row.segments).toHaveLength(2)
+    expect(row.segments?.[1]).toMatchObject({ trimStartSec: 8, trimEndSec: 12 })
+
+    removeClipSegment(node.id, 0)
+    const collapsed = listGraph(videoId).nodes.find((n) => n.id === node.id)!
+    expect(collapsed.segments).toBeNull()
+    expect(collapsed.trimStartSec).toBe(8)
+    expect(collapsed.trimEndSec).toBe(12)
+
+    expect(() => removeClipSegment(collapsed.id, 0)).toThrow(/not split/)
   })
 })
 

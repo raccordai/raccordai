@@ -28,7 +28,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { GraphNode, ImageLayer, TextLayer } from '@shared/ipc/contracts'
+import type { GraphNode, ImageLayer, TextLayer, TimelineSegment } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
 import {
   useAssetNodeMedia,
@@ -43,15 +43,17 @@ import {
   bestGeneration,
   clipDuration,
   clipLook,
+  clipSegments,
   clipSpeed,
   clipTimelineOffset,
-  clipTransitionAfter,
-  clipTransitionSeconds,
-  clipTrim,
   clipVolume,
   collectAudioNodes,
   collectTimelineClips,
+  collectTimelineEntries,
   isStillClip,
+  segmentTransitionAfter,
+  segmentTransitionSeconds,
+  segmentTrim,
   stillClipSeconds,
   stillMotionOf
 } from '@shared/timeline'
@@ -107,6 +109,11 @@ function Timecode({ seconds, dimAll = false }: { seconds: number; dimAll?: boole
 
 interface EngineClip {
   node: GraphNode
+  /** The entry's SEGMENT (§6.12e): its own trim + transition. */
+  segment: TimelineSegment
+  segmentIndex: number
+  /** Stable identity ("nodeId#segmentIndex") for lists and live-resize state. */
+  entryId: string
   url: string | null
   /** Declared duration (params), replaced by real media duration once probed. */
   declared: number
@@ -167,9 +174,9 @@ function usePlaybackEngine(
   /** Real media durations, keyed by node id (probed from metadata). */
   const [mediaDurations, setMediaDurations] = useState<Record<string, number>>({})
 
-  /** The clip's trim window against its real (probed) or declared duration. */
+  /** The entry's trim window against its real (probed) or declared duration. */
   const trimOf = useCallback(
-    (clip: EngineClip) => clipTrim(clip.node, mediaDurations[clip.node.id] ?? clip.declared),
+    (clip: EngineClip) => segmentTrim(clip.segment, mediaDurations[clip.node.id] ?? clip.declared),
     [mediaDurations]
   )
 
@@ -184,7 +191,7 @@ function usePlaybackEngine(
       // A still has no media: its declared length IS its trim window already.
       if (clip.still) return clip.declared
       const raw = mediaDurations[clip.node.id] ?? clip.declared
-      const { start, end } = clipTrim(clip.node, raw)
+      const { start, end } = segmentTrim(clip.segment, raw)
       // Timeline seconds: the media window divided by the playback speed —
       // the same division the render's clipEffectiveDuration applies.
       return Math.max(0, (end ?? raw) - start) / clipSpeed(clip.node)
@@ -192,13 +199,13 @@ function usePlaybackEngine(
     [mediaDurations]
   )
 
-  /** Transition overlap taken out of clip i's slot (0 on the last clip / a cut). */
+  /** Transition overlap taken out of entry i's slot (0 on the last entry / a cut). */
   const overlapAfter = useCallback(
     (i: number) => {
       if (i < 0 || i >= clips.length - 1) return 0
-      const node = clips[i]?.node
-      if (!node || clipTransitionAfter(node) === null) return 0
-      return clipTransitionSeconds(node)
+      const segment = clips[i]?.segment
+      if (!segment || segmentTransitionAfter(segment) === null) return 0
+      return segmentTransitionSeconds(segment)
     },
     [clips]
   )
@@ -425,15 +432,28 @@ function usePlaybackEngine(
       setActiveIdx(nextIdx)
       return
     }
+    // Split halves (§6.12e): same media, contiguous trim — the media clock is
+    // already at the next entry's in-point, so just keep playing. Gapless by
+    // construction, no swap needed.
+    const current = clips[activeIdx]
+    if (next && current && !current.still && next.node.id === current.node.id) {
+      const curEnd = trimOf(current).end
+      const nextStart = trimOf(next).start
+      if (curEnd !== undefined && Math.abs(nextStart - curEnd) < 0.05) {
+        setActiveIdx(nextIdx)
+        const video = activeVideo()
+        if (video) void video.play().catch(() => undefined)
+        return
+      }
+    }
     const standby = standbyVideo()
     const expected = next?.url
     const nextStart = next ? trimOf(next).start : 0
     if (standby && expected && standby.src.endsWith(expected)) {
       // The standby already holds the next clip: swap slots and play instantly.
-      const current = clips[activeIdx]
-      const transition = current && !current.still ? clipTransitionAfter(current.node) : null
+      const transition = current && !current.still ? segmentTransitionAfter(current.segment) : null
       if (transition !== null && current) {
-        const ms = Math.round(clipTransitionSeconds(current.node) * 1000)
+        const ms = Math.round(segmentTransitionSeconds(current.segment) * 1000)
         setFadeMs(ms)
         if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current)
         fadeTimer.current = window.setTimeout(() => setFadeMs(null), ms + 80)
@@ -704,19 +724,23 @@ export function TimelineV2({
   }, [collapsed, clipNodes.length])
 
   const clips: EngineClip[] = useMemo(() => {
-    return clipNodes.map((node) => {
+    return collectTimelineEntries(graph.nodes).map((entry) => {
+      const node = entry.node
       const still = isStillClip(node)
       const gens = (generations ?? []).filter((g) => g.nodeId === node.id)
       const best = bestGeneration(node, gens)
       const genUrl = best?.status === 'success' ? (best.url ?? null) : null
       return {
         node,
+        segment: entry.segment,
+        segmentIndex: entry.segmentIndex,
+        entryId: entry.entryId,
         url: node.modelId === 'studio/asset' ? (assetMedia?.[node.id]?.url ?? null) : genUrl,
         declared: still ? stillClipSeconds(node) : (clipDuration(node) ?? DEFAULT_CLIP_SECONDS),
         still
       }
     })
-  }, [clipNodes, generations, assetMedia])
+  }, [graph.nodes, generations, assetMedia])
 
   const toAudioClip = useCallback(
     (node: GraphNode): EngineClip => {
@@ -724,6 +748,9 @@ export function TimelineV2({
       const best = bestGeneration(node, gens)
       return {
         node,
+        segment: clipSegments(node)[0]!,
+        segmentIndex: 0,
+        entryId: `${node.id}#0`,
         url: best?.status === 'success' ? (best.url ?? null) : null,
         declared: clipDuration(node) ?? DEFAULT_CLIP_SECONDS
       }
@@ -792,20 +819,20 @@ export function TimelineV2({
     [engine.total]
   )
 
-  /** Track-display duration of a clip, honouring an in-flight edge resize. */
+  /** Track-display duration of an entry, honouring an in-flight edge resize. */
   const displayDur = useCallback(
     (clip: EngineClip) =>
-      clipResize?.id === clip.node.id ? clipResize.duration : engine.durationOf(clip),
+      clipResize?.id === clip.entryId ? clipResize.duration : engine.durationOf(clip),
     [clipResize, engine]
   )
-  /** Block width on the track: the clip's SLOT (transition overlap subtracted),
+  /** Block width on the track: the entry's SLOT (transition overlap subtracted),
    *  so block edges line up with the playhead/ruler final-timeline scale. */
   const displaySlot = useCallback(
     (clip: EngineClip, i: number) => {
-      if (i >= clips.length - 1 || clipTransitionAfter(clip.node) === null) {
+      if (i >= clips.length - 1 || segmentTransitionAfter(clip.segment) === null) {
         return displayDur(clip)
       }
-      return Math.max(0, displayDur(clip) - clipTransitionSeconds(clip.node))
+      return Math.max(0, displayDur(clip) - segmentTransitionSeconds(clip.segment))
     },
     [clips.length, displayDur]
   )
@@ -839,10 +866,8 @@ export function TimelineV2({
 
   const addImageToTimeline = (nodeId: string) => {
     setImagePicker(null)
-    void invoke('nodes:setTimelineOrder', {
-      videoId,
-      nodeIds: [...clips.map((c) => c.node.id), nodeId]
-    })
+    const uniq = clips.map((c) => c.node.id).filter((id, i, arr) => arr.indexOf(id) === i)
+    void invoke('nodes:setTimelineOrder', { videoId, nodeIds: [...uniq, nodeId] })
   }
 
   /** Preview URL of a sticker's image (node output, or the asset's media). */
@@ -932,7 +957,7 @@ export function TimelineV2({
         const durAt = (d: number) =>
           clamp(side === 'right' ? orig + d : orig - d, MIN_STILL_SECONDS, MAX_STILL_SECONDS)
         startResize(e, {
-          onDelta: (d) => setClipResize({ id: node.id, duration: durAt(d) }),
+          onDelta: (d) => setClipResize({ id: clip.entryId, duration: durAt(d) }),
           onCommit: (d) => {
             setClipResize(null)
             const dur = Math.round(durAt(d) * 10) / 10
@@ -943,7 +968,7 @@ export function TimelineV2({
         return
       }
       const raw = engine.rawDurationOf(clip)
-      const { start: origStart, end } = clipTrim(node, raw)
+      const { start: origStart, end } = segmentTrim(clip.segment, raw)
       const origEnd = end ?? raw
       const speed = clipSpeed(node)
       // Drag deltas arrive in TIMELINE seconds; the trim window is MEDIA time.
@@ -952,7 +977,7 @@ export function TimelineV2({
       startResize(e, {
         onDelta: (d) =>
           setClipResize({
-            id: node.id,
+            id: clip.entryId,
             // The live width preview is timeline seconds — media window ÷ speed.
             duration: (side === 'left' ? origEnd - startAt(d) : endAt(d) - origStart) / speed
           }),
@@ -964,16 +989,18 @@ export function TimelineV2({
             void invoke('nodes:setTrim', {
               nodeId: node.id,
               trimStartSec: s > 0 ? s : null,
-              trimEndSec: node.trimEndSec ?? null
+              trimEndSec: clip.segment.trimEndSec ?? null,
+              segmentIndex: clip.segmentIndex
             })
           } else {
             const out = Math.round(endAt(d) * 100) / 100
             if (Math.abs(out - origEnd) < 0.02) return
             void invoke('nodes:setTrim', {
               nodeId: node.id,
-              trimStartSec: node.trimStartSec ?? null,
+              trimStartSec: clip.segment.trimStartSec ?? null,
               // Back at the media's end = no out-point at all.
-              trimEndSec: out >= raw - 0.01 ? null : out
+              trimEndSec: out >= raw - 0.01 ? null : out,
+              segmentIndex: clip.segmentIndex
             })
           }
         }
@@ -1039,6 +1066,32 @@ export function TimelineV2({
     if ((event.target as HTMLElement | null)?.tagName === 'VIDEO') return
     if (playing) pause()
     else play()
+  })
+
+  /** Split point (MEDIA seconds) of entry idx at the playhead, or null when
+   *  the playhead sits outside it / too close to an edge / it's a still. */
+  const splitPointOf = useCallback(
+    (idx: number): number | null => {
+      const clip = clips[idx]
+      if (!clip || clip.still || !clip.url) return null
+      const start = engine.starts[idx] ?? 0
+      const slot = displaySlot(clip, idx)
+      if (engine.globalTime <= start + 0.05 || engine.globalTime >= start + slot - 0.05) return null
+      const raw = engine.rawDurationOf(clip)
+      const at =
+        segmentTrim(clip.segment, raw).start + (engine.globalTime - start) * clipSpeed(clip.node)
+      return Math.round(at * 100) / 100
+    },
+    [clips, displaySlot, engine]
+  )
+
+  // S = razor: split the clip under the playhead (CapCut/FCP habit).
+  useShortcut('splitClip', (event) => {
+    if (event.repeat) return
+    const at = splitPointOf(engine.activeIdx)
+    const clip = clips[engine.activeIdx]
+    if (at === null || !clip) return
+    void invoke('nodes:splitClip', { nodeId: clip.node.id, atMediaSec: at })
   })
 
   if (collapsed) {
@@ -1504,7 +1557,7 @@ export function TimelineV2({
                     const still = fallbackImages?.[clip.node.id]
                     return (
                       <div
-                        key={clip.node.id}
+                        key={clip.entryId}
                         className={`group relative mr-px min-w-0 overflow-hidden rounded-md border ${
                           isActive ? 'border-accent' : 'border-neutral-800'
                         } ${clip.url ? 'bg-neutral-900' : 'bg-neutral-900/40'}`}
@@ -1528,9 +1581,18 @@ export function TimelineV2({
                           const from = dragFrom.current
                           dragFrom.current = null
                           if (from === null || from === i) return
-                          const ids = clips.map((c) => c.node.id)
-                          const [moved] = ids.splice(from, 1)
-                          ids.splice(i, 0, moved!)
+                          // Reordering stays NODE-grained: dragging any segment
+                          // of a split clip moves the whole clip.
+                          const uniq = clips
+                            .map((c) => c.node.id)
+                            .filter((id, idx, arr) => arr.indexOf(id) === idx)
+                          const fromId = clips[from]!.node.id
+                          const toId = clips[i]!.node.id
+                          if (fromId === toId) return
+                          const ids = uniq.filter((id) => id !== fromId)
+                          const insertAt =
+                            ids.indexOf(toId) + (uniq.indexOf(fromId) < uniq.indexOf(toId) ? 1 : 0)
+                          ids.splice(insertAt, 0, fromId)
                           void invoke('nodes:setTimelineOrder', { videoId, nodeIds: ids })
                         }}
                         onDoubleClick={(e) =>
@@ -1569,6 +1631,11 @@ export function TimelineV2({
                             <ImagePlus className="mr-1 inline h-2.5 w-2.5 text-accent-soft" />
                           )}
                           {clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key}
+                          {clipSegments(clip.node).length > 1 && (
+                            <span className="ml-1 text-warning">
+                              {clip.segmentIndex + 1}/{clipSegments(clip.node).length}
+                            </span>
+                          )}
                           <span className="ml-1 text-neutral-400">{fmt(displayDur(clip))}</span>
                           {!clip.still && clipSpeed(clip.node) !== 1 && (
                             <span className="ml-1 text-accent-soft">×{clipSpeed(clip.node)}</span>
@@ -1591,11 +1658,11 @@ export function TimelineV2({
                         >
                           <Scissors className="h-3 w-3" />
                         </button>
-                        {clipTransitionAfter(clip.node) !== null && i < clips.length - 1 && (
+                        {segmentTransitionAfter(clip.segment) !== null && i < clips.length - 1 && (
                           <div
                             className="absolute top-6 right-0 bottom-0 w-1 bg-highlight-soft/60"
                             title={t(
-                              `timeline.transitions.${clipTransitionAfter(clip.node)}` as never
+                              `timeline.transitions.${segmentTransitionAfter(clip.segment)}` as never
                             )}
                           />
                         )}
@@ -1915,25 +1982,34 @@ export function TimelineV2({
           </div>
         </div>
       </div>
-      {editClip && clips[editClip.idx] && (
-        <ClipSettingsPopover
-          node={clips[editClip.idx]!.node}
-          isLast={editClip.idx === clips.length - 1}
-          anchor={editClip}
-          onClose={() => setEditClip(null)}
-          onRemoveStill={
-            clips[editClip.idx]!.still
-              ? () => {
-                  setEditClip(null)
-                  void invoke('nodes:setTimelineOrder', {
-                    videoId,
-                    nodeIds: clips.filter((_, j) => j !== editClip.idx).map((c) => c.node.id)
-                  })
-                }
-              : undefined
-          }
-        />
-      )}
+      {editClip &&
+        clips[editClip.idx] &&
+        (() => {
+          const clip = clips[editClip.idx]!
+          return (
+            <ClipSettingsPopover
+              clip={clip}
+              isLast={editClip.idx === clips.length - 1}
+              anchor={editClip}
+              splitAtMediaSec={splitPointOf(editClip.idx)}
+              onClose={() => setEditClip(null)}
+              onRemoveStill={
+                clip.still
+                  ? () => {
+                      setEditClip(null)
+                      void invoke('nodes:setTimelineOrder', {
+                        videoId,
+                        nodeIds: clips
+                          .filter((c) => c.node.id !== clip.node.id)
+                          .map((c) => c.node.id)
+                          .filter((id, j, arr) => arr.indexOf(id) === j)
+                      })
+                    }
+                  : undefined
+              }
+            />
+          )
+        })()}
       {imagePicker && (
         <ImagePickerPopover
           candidates={imageCandidates}
@@ -2178,30 +2254,40 @@ export function overlayPlacement(align: number): {
  * undoes any of it.
  */
 function ClipSettingsPopover({
-  node,
+  clip,
   isLast,
   anchor,
+  splitAtMediaSec,
   onClose,
   onRemoveStill
 }: {
-  node: GraphNode
+  clip: EngineClip
   isLast: boolean
   anchor: { x: number; y: number }
+  /** Razor point under the playhead (media seconds), null = playhead outside. */
+  splitAtMediaSec: number | null
   onClose: () => void
   /** Set on still slots only: removes the image from the timeline (not the graph). */
   onRemoveStill?: () => void
 }) {
+  const node = clip.node
+  const segment = clip.segment
+  const segmentCount = clipSegments(node).length
   const { t } = useTranslation()
   const ref = useRef<HTMLDivElement | null>(null)
   useDismissable(true, onClose, ref)
-  const [inPoint, setInPoint] = useState(node.trimStartSec != null ? String(node.trimStartSec) : '')
-  const [outPoint, setOutPoint] = useState(node.trimEndSec != null ? String(node.trimEndSec) : '')
+  const [inPoint, setInPoint] = useState(
+    segment.trimStartSec != null ? String(segment.trimStartSec) : ''
+  )
+  const [outPoint, setOutPoint] = useState(
+    segment.trimEndSec != null ? String(segment.trimEndSec) : ''
+  )
   const [ovText, setOvText] = useState(node.overlay?.text ?? '')
   const [ovAlign, setOvAlign] = useState(node.overlay?.align ?? 2)
   const [ovSize, setOvSize] = useState<'sm' | 'md' | 'lg'>(node.overlay?.size ?? 'md')
-  const [transDur, setTransDur] = useState(String(clipTransitionSeconds(node)))
+  const [transDur, setTransDur] = useState(String(segmentTransitionSeconds(segment)))
 
-  const transition = clipTransitionAfter(node)
+  const transition = segmentTransitionAfter(segment)
 
   const apply = () => {
     const parse = (raw: string): number | null => {
@@ -2213,7 +2299,8 @@ function ClipSettingsPopover({
       invoke('nodes:setTrim', {
         nodeId: node.id,
         trimStartSec: parse(inPoint),
-        trimEndSec: parse(outPoint)
+        trimEndSec: parse(outPoint),
+        segmentIndex: clip.segmentIndex
       }),
       invoke('nodes:setOverlay', {
         nodeId: node.id,
@@ -2227,7 +2314,8 @@ function ClipSettingsPopover({
     void invoke('nodes:setTransition', {
       nodeId: node.id,
       transition: id,
-      durationSec: id && Number.isFinite(dur) ? Math.min(2, Math.max(0.1, dur)) : null
+      durationSec: id && Number.isFinite(dur) ? Math.min(2, Math.max(0.1, dur)) : null,
+      segmentIndex: clip.segmentIndex
     })
   }
 
@@ -2275,6 +2363,44 @@ function ClipSettingsPopover({
           />
         </label>
       </div>
+
+      {/* Razor (§6.12e): split at the playhead; a split part can be removed. */}
+      {!isStillClip(node) && (
+        <div className="mt-2.5 flex items-center gap-2 border-t border-neutral-800 pt-2">
+          <button
+            disabled={splitAtMediaSec === null}
+            onClick={() => {
+              if (splitAtMediaSec === null) return
+              void invoke('nodes:splitClip', {
+                nodeId: node.id,
+                atMediaSec: splitAtMediaSec
+              }).then(onClose)
+            }}
+            className="flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 font-semibold text-neutral-200 hover:bg-neutral-700 disabled:opacity-40"
+            title={t('timeline.splitHint')}
+          >
+            <Scissors className="h-3 w-3" /> {t('timeline.split')}
+          </button>
+          {segmentCount > 1 && (
+            <button
+              onClick={() =>
+                void invoke('nodes:removeSegment', {
+                  nodeId: node.id,
+                  segmentIndex: clip.segmentIndex
+                }).then(onClose)
+              }
+              className="rounded-md bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700 hover:text-danger"
+            >
+              {t('timeline.removeSegment')}
+            </button>
+          )}
+          {segmentCount > 1 && (
+            <span className="ml-auto text-neutral-500">
+              {t('timeline.segmentBadge', { n: clip.segmentIndex + 1, count: segmentCount })}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Speed & look (video clips) / Ken Burns motion (stills) — discrete
           choices, written immediately like the transition. */}

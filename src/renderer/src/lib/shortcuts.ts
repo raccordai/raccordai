@@ -42,7 +42,9 @@ export const SHORTCUTS = {
   tidy: { key: 'l', mod: true },
   toggleHistory: { key: 'y', mod: true },
   toggleTimeline: { key: 't', mod: true },
-  playPause: { key: ' ' }
+  playPause: { key: ' ' },
+  /** Razor: split the timeline clip under the playhead (§6.12e). */
+  splitClip: { key: 's' }
 } as const satisfies Record<string, Shortcut>
 
 export type ShortcutId = keyof typeof SHORTCUTS

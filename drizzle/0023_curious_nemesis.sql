@@ -1,0 +1,1 @@
+ALTER TABLE `nodes` ADD `segments` text;
