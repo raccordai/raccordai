@@ -62,7 +62,9 @@ import { STILL_MOTION_IDS } from '@shared/stillMotion'
 import { TEXT_ANIMATION_IDS } from '@shared/textAnimations'
 import { CLIP_TRANSITION_IDS } from '@shared/transitions'
 import { useResizableHeight } from './timelineHooks'
+import { Waveform } from './Waveform'
 import { formatSeconds } from '../../lib/formatSeconds'
+import { snapSpan, snapTolerance } from '../../lib/timelineSnap'
 import { invoke } from '../../lib/ipc'
 import { useDismissable } from '../../components/ui/useDismissable'
 import { useShortcut } from '../../components/ui/useShortcut'
@@ -1094,6 +1096,43 @@ export function TimelineV2({
     void invoke('nodes:splitClip', { nodeId: clip.node.id, atMediaSec: at })
   })
 
+  // , / . = one timecode frame back/forward; I / O = set the in/out of the
+  // clip under the playhead AT the playhead (the NLE three-point habit).
+  useShortcut('stepBack', () => engine.seek(engine.globalTime - 1 / TIMECODE_FPS))
+  useShortcut('stepForward', () => engine.seek(engine.globalTime + 1 / TIMECODE_FPS))
+  useShortcut('trimIn', () => {
+    const clip = clips[engine.activeIdx]
+    const at = splitPointOf(engine.activeIdx)
+    if (!clip || at === null) return
+    void invoke('nodes:setTrim', {
+      nodeId: clip.node.id,
+      trimStartSec: at,
+      trimEndSec: clip.segment.trimEndSec ?? null,
+      segmentIndex: clip.segmentIndex
+    })
+  })
+  useShortcut('trimOut', () => {
+    const clip = clips[engine.activeIdx]
+    const at = splitPointOf(engine.activeIdx)
+    if (!clip || at === null) return
+    void invoke('nodes:setTrim', {
+      nodeId: clip.node.id,
+      trimStartSec: clip.segment.trimStartSec ?? null,
+      trimEndSec: at,
+      segmentIndex: clip.segmentIndex
+    })
+  })
+
+  /** Magnetic drag targets: every entry boundary (the playhead joins at drag time). */
+  const snapTargets = useMemo(() => {
+    const out = [0]
+    clips.forEach((c, i) => {
+      const s = engine.starts[i] ?? 0
+      out.push(s, s + displaySlot(c, i))
+    })
+    return out
+  }, [clips, engine.starts, displaySlot])
+
   if (collapsed) {
     return (
       <div className="island flex items-center gap-3 overflow-hidden px-3 py-1.5 text-[11px]">
@@ -1718,10 +1757,16 @@ export function TimelineV2({
                             const origStart = layer.startSec
                             let moved = false
                             let lastStart = origStart
+                            const tol = snapTolerance(engine.total, rect.width)
                             const move = (ev: PointerEvent) => {
                               const delta = ((ev.clientX - originX) / rect.width) * engine.total
                               if (Math.abs(ev.clientX - originX) > 3) moved = true
-                              lastStart = Math.max(0, origStart + delta)
+                              lastStart = snapSpan(
+                                Math.max(0, origStart + delta),
+                                dur,
+                                [...snapTargets, engine.globalTime],
+                                tol
+                              )
                               setStickerDrag({ id: layer.id, startSec: lastStart })
                             }
                             const up = (ev: PointerEvent) => {
@@ -1803,10 +1848,16 @@ export function TimelineV2({
                             const origStart = layer.startSec
                             let moved = false
                             let lastStart = origStart
+                            const tol = snapTolerance(engine.total, rect.width)
                             const move = (ev: PointerEvent) => {
                               const delta = ((ev.clientX - originX) / rect.width) * engine.total
                               if (Math.abs(ev.clientX - originX) > 3) moved = true
-                              lastStart = Math.max(0, origStart + delta)
+                              lastStart = snapSpan(
+                                Math.max(0, origStart + delta),
+                                dur,
+                                [...snapTargets, engine.globalTime],
+                                tol
+                              )
                               setLaneDrag({ id: layer.id, startSec: lastStart })
                             }
                             const up = (ev: PointerEvent) => {
@@ -1907,10 +1958,16 @@ export function TimelineV2({
                               const origStart = start
                               let moved = false
                               let lastStart = origStart
+                              const tol = snapTolerance(displayTotal, rect.width)
                               const move = (ev: PointerEvent) => {
                                 const delta = ((ev.clientX - originX) / rect.width) * displayTotal
                                 if (Math.abs(ev.clientX - originX) > 3) moved = true
-                                lastStart = Math.max(0, origStart + delta)
+                                lastStart = snapSpan(
+                                  Math.max(0, origStart + delta),
+                                  displayDur(clip),
+                                  [...snapTargets, engine.globalTime],
+                                  tol
+                                )
                                 setAudioDrag({ id: clip.node.id, startSec: lastStart })
                               }
                               const up = () => {
@@ -1932,6 +1989,19 @@ export function TimelineV2({
                             }
                             title={`${clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key} — ${t('timeline.volumeHintOpen')}`}
                           >
+                            {clip.url &&
+                              (() => {
+                                const raw = engine.rawDurationOf(clip)
+                                const trim = segmentTrim(clip.segment, raw)
+                                return (
+                                  <Waveform
+                                    url={clip.url}
+                                    startFrac={raw > 0 ? trim.start / raw : 0}
+                                    endFrac={raw > 0 ? (trim.end ?? raw) / raw : 1}
+                                    className="pointer-events-none absolute inset-0 h-full w-full"
+                                  />
+                                )
+                              })()}
                             <Icon className="h-3 w-3 flex-shrink-0" />
                             <span className="truncate">
                               {clip.node.label ??

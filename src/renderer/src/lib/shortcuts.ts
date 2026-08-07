@@ -44,7 +44,13 @@ export const SHORTCUTS = {
   toggleTimeline: { key: 't', mod: true },
   playPause: { key: ' ' },
   /** Razor: split the timeline clip under the playhead (§6.12e). */
-  splitClip: { key: 's' }
+  splitClip: { key: 's' },
+  /** One timecode frame back/forward (Premiere/FCP habit). */
+  stepBack: { key: ',' },
+  stepForward: { key: '.' },
+  /** Set the in/out of the clip under the playhead AT the playhead. */
+  trimIn: { key: 'i' },
+  trimOut: { key: 'o' }
 } as const satisfies Record<string, Shortcut>
 
 export type ShortcutId = keyof typeof SHORTCUTS

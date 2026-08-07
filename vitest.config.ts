@@ -53,6 +53,8 @@ export default defineConfig({
         'src/renderer/src/lib/errorReporter.ts',
         'src/renderer/src/lib/relativeTime.ts',
         'src/renderer/src/lib/shortcuts.ts',
+        'src/renderer/src/lib/timelineSnap.ts',
+        'src/renderer/src/lib/waveform.ts',
         'src/renderer/src/lib/formatSeconds.ts',
         'src/renderer/src/lib/mentionToken.ts'
       ],
