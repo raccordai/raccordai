@@ -12,6 +12,7 @@ import {
   Pause,
   Play,
   Scissors,
+  Sticker as StickerIcon,
   Trash2,
   Type,
   Volume2,
@@ -27,18 +28,23 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { GraphNode, TextLayer } from '@shared/ipc/contracts'
+import type { GraphNode, ImageLayer, TextLayer } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
 import {
   useAssetNodeMedia,
+  useImageLayers,
   useTextLayers,
   useTimelineFallbackImages,
   useVideoGenerations
 } from './data'
 import type { WorkflowGraph } from './workflowContext'
 import {
+  audioLaneStarts,
   bestGeneration,
   clipDuration,
+  clipLook,
+  clipSpeed,
+  clipTimelineOffset,
   clipTransitionAfter,
   clipTransitionSeconds,
   clipTrim,
@@ -46,8 +52,12 @@ import {
   collectAudioNodes,
   collectTimelineClips,
   isStillClip,
-  stillClipSeconds
+  stillClipSeconds,
+  stillMotionOf
 } from '@shared/timeline'
+import { CLIP_LOOK_IDS, lookCssFilter } from '@shared/looks'
+import { STILL_MOTION_IDS } from '@shared/stillMotion'
+import { TEXT_ANIMATION_IDS } from '@shared/textAnimations'
 import { CLIP_TRANSITION_IDS } from '@shared/transitions'
 import { useResizableHeight } from './timelineHooks'
 import { formatSeconds } from '../../lib/formatSeconds'
@@ -175,7 +185,9 @@ function usePlaybackEngine(
       if (clip.still) return clip.declared
       const raw = mediaDurations[clip.node.id] ?? clip.declared
       const { start, end } = clipTrim(clip.node, raw)
-      return Math.max(0, (end ?? raw) - start)
+      // Timeline seconds: the media window divided by the playback speed —
+      // the same division the render's clipEffectiveDuration applies.
+      return Math.max(0, (end ?? raw) - start) / clipSpeed(clip.node)
     },
     [mediaDurations]
   )
@@ -217,27 +229,30 @@ function usePlaybackEngine(
     [clips, slotDurationOf]
   )
 
-  // Audio lanes (music bed + speech): independent sequential layouts, both
-  // slaved to the global clock — the same two-lane mix the MP4 render produces.
-  const audioStarts = useMemo(() => {
-    const out: number[] = []
-    let acc = 0
-    for (const clip of audioClips) {
-      out.push(acc)
-      acc += durationOf(clip)
-    }
-    return out
-  }, [audioClips, durationOf])
+  // Audio lanes (music bed + speech): the SAME shared layout the MP4 render
+  // uses (audioLaneStarts) — explicit offsets place a track absolutely,
+  // offset-less tracks chain after the previous one.
+  const audioStarts = useMemo(
+    () =>
+      audioLaneStarts(
+        audioClips.map((c) => ({
+          offsetSec: clipTimelineOffset(c.node),
+          durationSeconds: durationOf(c)
+        }))
+      ),
+    [audioClips, durationOf]
+  )
 
-  const speechStarts = useMemo(() => {
-    const out: number[] = []
-    let acc = 0
-    for (const clip of speechClips) {
-      out.push(acc)
-      acc += durationOf(clip)
-    }
-    return out
-  }, [speechClips, durationOf])
+  const speechStarts = useMemo(
+    () =>
+      audioLaneStarts(
+        speechClips.map((c) => ({
+          offsetSec: clipTimelineOffset(c.node),
+          durationSeconds: durationOf(c)
+        }))
+      ),
+    [speechClips, durationOf]
+  )
 
   const lastAudioSeekRef = useRef(0)
   const lastSpeechSeekRef = useRef(0)
@@ -254,10 +269,10 @@ function usePlaybackEngine(
       let idx = -1
       for (let i = 0; i < laneClips.length; i++) {
         const start = laneStarts[i] ?? 0
-        if (t >= start && t < start + durationOf(laneClips[i] as EngineClip)) {
-          idx = i
-          break
-        }
+        // Keep the LAST matching track: offset-positioned tracks may overlap,
+        // and the later one wins in the single-element preview (the render
+        // mixes both).
+        if (t >= start && t < start + durationOf(laneClips[i] as EngineClip)) idx = i
       }
       const clip = idx >= 0 ? laneClips[idx] : undefined
       if (!clip?.url) {
@@ -359,6 +374,8 @@ function usePlaybackEngine(
       active.src = clip.url
       active.load()
     }
+    // Preview parity with the render's setpts/atempo retime.
+    if (active && clip && !clip.still) active.playbackRate = clipSpeed(clip.node)
     const nextIdx = nextVideoFrom(activeIdx + 1)
     const standby = standbyVideo()
     const nextUrl = nextIdx >= 0 ? clips[nextIdx]?.url : null
@@ -380,6 +397,15 @@ function usePlaybackEngine(
   useEffect(() => {
     globalTimeRef.current = globalTime
   }, [globalTime])
+
+  /**
+   * Transition preview: opacity crossfade between the two stacked videos at
+   * the swap (duration = the cut's overlap). The outgoing clip freezes on its
+   * cut frame and fades out — an approximation of the render's xfade, without
+   * the double-`ended` hazard of letting it play on.
+   */
+  const [fadeMs, setFadeMs] = useState<number | null>(null)
+  const fadeTimer = useRef<number | null>(null)
 
   /** Gapless hop to the next playable clip; stops at the end of the edit. */
   const advance = useCallback(() => {
@@ -404,7 +430,16 @@ function usePlaybackEngine(
     const nextStart = next ? trimOf(next).start : 0
     if (standby && expected && standby.src.endsWith(expected)) {
       // The standby already holds the next clip: swap slots and play instantly.
+      const current = clips[activeIdx]
+      const transition = current && !current.still ? clipTransitionAfter(current.node) : null
+      if (transition !== null && current) {
+        const ms = Math.round(clipTransitionSeconds(current.node) * 1000)
+        setFadeMs(ms)
+        if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current)
+        fadeTimer.current = window.setTimeout(() => setFadeMs(null), ms + 80)
+      }
       standby.currentTime = nextStart
+      if (next) standby.playbackRate = clipSpeed(next.node)
       setActiveSlot((s) => (s === 'A' ? 'B' : 'A'))
       setActiveIdx(nextIdx)
       void standby.play()
@@ -415,6 +450,7 @@ function usePlaybackEngine(
       if (active && expected) {
         active.src = expected
         active.currentTime = nextStart
+        if (next) active.playbackRate = clipSpeed(next.node)
         void active.play()
       }
     }
@@ -452,12 +488,14 @@ function usePlaybackEngine(
       if (video && clip) {
         const trim = trimOf(clip)
         const slot = slotDurationOf(clip, activeIdx)
-        setGlobalTime(base + Math.min(slot, Math.max(0, video.currentTime - trim.start)))
+        const speed = clipSpeed(clip.node)
+        setGlobalTime(base + Math.min(slot, Math.max(0, (video.currentTime - trim.start) / speed)))
         // A transition-joined clip cuts early: its overlap belongs to the next
         // clip on the final timeline (the render fades the two together there).
+        // The cut point is MEDIA time — the overlap scales by the speed.
         if (
           trim.end !== undefined &&
-          video.currentTime >= trim.end - overlapAfter(activeIdx) - 0.03
+          video.currentTime >= trim.end - overlapAfter(activeIdx) * speed - 0.03
         ) {
           advance()
           return
@@ -531,8 +569,10 @@ function usePlaybackEngine(
       }
       const offset = clamped - (starts[idx] ?? 0)
       setGlobalTime(clamped)
-      // Any jump invalidates the still clock's anchor — the tick re-anchors.
+      // Any jump invalidates the still clock's anchor — the tick re-anchors —
+      // and cancels an in-flight transition crossfade (seeks are instant).
       stillAnchorRef.current = null
+      setFadeMs(null)
       const clip = clips[idx]
       if (!clip) return
       if (idx !== activeIdx) setActiveIdx(idx)
@@ -543,8 +583,10 @@ function usePlaybackEngine(
             video.src = clip.url
             video.load()
           }
-          // The timeline offset is inside the TRIMMED clip — shift into media time.
-          video.currentTime = offset + trimOf(clip).start
+          // The timeline offset is inside the TRIMMED clip — shift into media
+          // time (timeline seconds × speed).
+          video.currentTime = offset * clipSpeed(clip.node) + trimOf(clip).start
+          video.playbackRate = clipSpeed(clip.node)
           if (playing) void video.play().catch(() => setPlaying(false))
         }
         syncAudio(clamped, playing)
@@ -573,7 +615,8 @@ function usePlaybackEngine(
     starts,
     total,
     durationOf,
-    rawDurationOf
+    rawDurationOf,
+    fadeMs
   }
 }
 
@@ -597,6 +640,19 @@ export function TimelineV2({
   const [editClip, setEditClip] = useState<{ idx: number; x: number; y: number } | null>(null)
   // Audio track inspector (volume): anchored to the double-clicked lane block.
   const [editAudio, setEditAudio] = useState<{ nodeId: string; x: number; y: number } | null>(null)
+  // Live drag of an audio block along the timeline (absolute offset).
+  const [audioDrag, setAudioDrag] = useState<{ id: string; startSec: number } | null>(null)
+  // Sticker track (§6.12d): picker anchor, live lane drag, inspector.
+  const [stickerPicker, setStickerPicker] = useState<{ x: number; y: number } | null>(null)
+  const [stickerDrag, setStickerDrag] = useState<{ id: string; startSec: number } | null>(null)
+  const [editSticker, setEditSticker] = useState<{ id: string; x: number; y: number } | null>(null)
+  /** Live position of a sticker dragged on the player (ref: no render lag). */
+  const stickerPlayerDragRef = useRef<{ id: string; x: number; y: number } | null>(null)
+  const [stickerPlayerDrag, setStickerPlayerDrag] = useState<{
+    id: string
+    x: number
+    y: number
+  } | null>(null)
   // Drag-to-reorder: index the drag started from.
   const dragFrom = useRef<number | null>(null)
   // Horizontal zoom of the track (1 = fit; the track scrolls beyond that).
@@ -620,6 +676,7 @@ export function TimelineV2({
   const generations = useVideoGenerations(videoId).data
   const fallbackImages = useTimelineFallbackImages(videoId).data
   const textLayers = useTextLayers(videoId).data ?? []
+  const imageLayers = useImageLayers(videoId).data ?? []
   // Asset-node media (url + mime): what an asset still displays, and how the
   // add-image picker knows an asset is an image at all.
   const assetMedia = useAssetNodeMedia(videoId, graph.nodes).data
@@ -788,6 +845,80 @@ export function TimelineV2({
     })
   }
 
+  /** Preview URL of a sticker's image (node output, or the asset's media). */
+  const stickerUrl = useCallback(
+    (layer: ImageLayer): string | null => {
+      if (layer.nodeId) {
+        const node = graph.nodes.find((n) => n.id === layer.nodeId)
+        if (!node) return null
+        if (node.modelId === 'studio/asset') return assetMedia?.[node.id]?.url ?? null
+        const best = bestGeneration(
+          node,
+          (generations ?? []).filter((g) => g.nodeId === layer.nodeId)
+        )
+        return best?.status === 'success' ? (best.url ?? null) : null
+      }
+      if (layer.assetId) {
+        const holder = graph.nodes.find(
+          (n) =>
+            n.modelId === 'studio/asset' &&
+            (n.params as { assetId?: string } | undefined)?.assetId === layer.assetId
+        )
+        return holder ? (assetMedia?.[holder.id]?.url ?? null) : null
+      }
+      return null
+    },
+    [graph.nodes, generations, assetMedia]
+  )
+
+  /** Sticker creation from the picker: an asset NODE stores its assetId (asset
+   *  nodes have no generations — the render reads the asset's stored file). */
+  const addSticker = (nodeId: string) => {
+    const anchor = stickerPicker
+    setStickerPicker(null)
+    const node = graph.nodes.find((n) => n.id === nodeId)
+    if (!node) return
+    const start = Math.max(0, Math.round(engine.globalTime * 10) / 10)
+    const assetId =
+      node.modelId === 'studio/asset'
+        ? ((node.params as { assetId?: string } | undefined)?.assetId ?? null)
+        : null
+    if (node.modelId === 'studio/asset' && !assetId) return
+    void invoke('imageLayers:create', {
+      videoId,
+      startSec: start,
+      endSec: start + 3,
+      ...(assetId ? { assetId } : { nodeId })
+    }).then((layer) => {
+      if (anchor) setEditSticker({ id: layer.id, x: anchor.x, y: anchor.y })
+    })
+  }
+
+  /** Edge resize of a sticker block: its in/out on the final timeline. */
+  const beginStickerResize = useCallback(
+    (layer: ImageLayer, side: 'left' | 'right') => (e: ReactPointerEvent) => {
+      const origStart = layer.startSec
+      const origEnd = layer.endSec
+      const startAt = (d: number) => clamp(origStart + d, 0, origEnd - MIN_RESIZE_SECONDS)
+      const endAt = (d: number) => Math.max(origStart + MIN_RESIZE_SECONDS, origEnd + d)
+      startResize(e, {
+        onDelta: () => undefined,
+        onCommit: (d) => {
+          if (side === 'left') {
+            const s = Math.round(startAt(d) * 10) / 10
+            if (Math.abs(s - origStart) < 0.05) return
+            void invoke('imageLayers:update', { id: layer.id, patch: { startSec: s } })
+          } else {
+            const out = Math.round(endAt(d) * 10) / 10
+            if (Math.abs(out - origEnd) < 0.05) return
+            void invoke('imageLayers:update', { id: layer.id, patch: { endSec: out } })
+          }
+        }
+      })
+    },
+    [startResize]
+  )
+
   /**
    * Edge resize of a clip block. A video/audio clip trims its media (same
    * journaled nodes:setTrim as the scissors popover — ⌘Z undoes it); a still
@@ -814,13 +945,16 @@ export function TimelineV2({
       const raw = engine.rawDurationOf(clip)
       const { start: origStart, end } = clipTrim(node, raw)
       const origEnd = end ?? raw
-      const startAt = (d: number) => clamp(origStart + d, 0, origEnd - MIN_RESIZE_SECONDS)
-      const endAt = (d: number) => clamp(origEnd + d, origStart + MIN_RESIZE_SECONDS, raw)
+      const speed = clipSpeed(node)
+      // Drag deltas arrive in TIMELINE seconds; the trim window is MEDIA time.
+      const startAt = (d: number) => clamp(origStart + d * speed, 0, origEnd - MIN_RESIZE_SECONDS)
+      const endAt = (d: number) => clamp(origEnd + d * speed, origStart + MIN_RESIZE_SECONDS, raw)
       startResize(e, {
         onDelta: (d) =>
           setClipResize({
             id: node.id,
-            duration: side === 'left' ? origEnd - startAt(d) : endAt(d) - origStart
+            // The live width preview is timeline seconds — media window ÷ speed.
+            duration: (side === 'left' ? origEnd - startAt(d) : endAt(d) - origStart) / speed
           }),
         onCommit: (d) => {
           setClipResize(null)
@@ -963,6 +1097,13 @@ export function TimelineV2({
   }
 
   const activeClip = clips[engine.activeIdx]
+  // Live approximation of the clip's baked colour look (render parity: the
+  // registry declares both the ffmpeg fragment and this CSS equivalent).
+  const lookFilter = activeClip ? lookCssFilter(clipLook(activeClip.node)) : 'none'
+  // Opacity crossfade during a previewed transition (see usePlaybackEngine).
+  const videoFadeStyle = engine.fadeMs
+    ? { transition: `opacity ${engine.fadeMs}ms ease-in-out` }
+    : undefined
 
   return (
     <div className="relative shrink-0" style={{ height }}>
@@ -1064,6 +1205,16 @@ export function TimelineV2({
             <ImagePlus className="h-3.5 w-3.5" />
           </button>
           <button
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setStickerPicker((v) => (v ? null : { x: r.left + r.width / 2, y: r.top - 6 }))
+            }}
+            className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            title={t('timeline.addSticker')}
+          >
+            <StickerIcon className="h-3.5 w-3.5" />
+          </button>
+          <button
             onClick={() => setZoom((z) => Math.max(1, z / 1.5))}
             disabled={zoom <= 1}
             className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-40"
@@ -1102,6 +1253,7 @@ export function TimelineV2({
               ref={engine.videoARef}
               onEnded={engine.advance}
               playsInline
+              style={{ filter: lookFilter, ...videoFadeStyle }}
               className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'A' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
             />
             <video
@@ -1109,6 +1261,7 @@ export function TimelineV2({
               onEnded={engine.advance}
               playsInline
               muted={engine.activeSlot === 'A'}
+              style={{ filter: lookFilter, ...videoFadeStyle }}
               className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
             />
             <audio ref={engine.audioRef} className="hidden" />
@@ -1118,6 +1271,7 @@ export function TimelineV2({
               <img
                 src={activeClip.url}
                 alt=""
+                style={{ filter: lookFilter }}
                 className="absolute inset-0 z-[5] h-full w-full bg-black object-contain"
               />
             )}
@@ -1210,6 +1364,72 @@ export function TimelineV2({
                   )
                 })}
             </div>
+            {/* Sticker preview: composited at render, positioned here — x/y
+                being normalized centers, the preview position IS the render
+                position. Drag with pointer capture, like the text layers. */}
+            <div className="pointer-events-none absolute inset-0 z-[15]">
+              {imageLayers
+                .filter((l) => engine.globalTime >= l.startSec && engine.globalTime < l.endSec)
+                .map((layer) => {
+                  const url = stickerUrl(layer)
+                  if (!url) return null
+                  const pos =
+                    stickerPlayerDrag?.id === layer.id
+                      ? stickerPlayerDrag
+                      : { x: layer.x, y: layer.y }
+                  return (
+                    <img
+                      key={layer.id}
+                      src={url}
+                      alt=""
+                      draggable={false}
+                      className="pointer-events-auto absolute cursor-move select-none"
+                      style={{
+                        left: `${pos.x * 100}%`,
+                        top: `${pos.y * 100}%`,
+                        width: `${layer.widthPct}%`,
+                        transform: 'translate(-50%, -50%)',
+                        touchAction: 'none'
+                      }}
+                      title={t('timeline.stickerDragHint')}
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        e.currentTarget.setPointerCapture(e.pointerId)
+                        stickerPlayerDragRef.current = { id: layer.id, x: layer.x, y: layer.y }
+                        setStickerPlayerDrag(stickerPlayerDragRef.current)
+                      }}
+                      onPointerMove={(e) => {
+                        const drag = stickerPlayerDragRef.current
+                        const rect = playerRef.current?.getBoundingClientRect()
+                        if (!drag || drag.id !== layer.id || !rect) return
+                        drag.x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+                        drag.y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height))
+                        setStickerPlayerDrag({ ...drag })
+                      }}
+                      onPointerUp={(e) => {
+                        const drag = stickerPlayerDragRef.current
+                        if (!drag || drag.id !== layer.id) return
+                        e.currentTarget.releasePointerCapture(e.pointerId)
+                        stickerPlayerDragRef.current = null
+                        setStickerPlayerDrag(null)
+                        void invoke('imageLayers:update', {
+                          id: layer.id,
+                          patch: {
+                            x: Math.round(drag.x * 1000) / 1000,
+                            y: Math.round(drag.y * 1000) / 1000
+                          }
+                        })
+                      }}
+                      onPointerCancel={() => {
+                        stickerPlayerDragRef.current = null
+                        setStickerPlayerDrag(null)
+                      }}
+                    />
+                  )
+                })}
+            </div>
             {/* Text-layer preview: what the render will burn (approximate). */}
             {activeClip?.node.overlay && (
               <div
@@ -1274,7 +1494,8 @@ export function TimelineV2({
                     bottom:
                       (audioClips.length > 0 ? 38 : 0) +
                       (speechClips.length > 0 ? 38 : 0) +
-                      (textLayers.length > 0 ? 26 : 0)
+                      (textLayers.length > 0 ? 26 : 0) +
+                      (imageLayers.length > 0 ? 26 : 0)
                   }}
                 >
                   {clips.map((clip, i) => {
@@ -1349,6 +1570,9 @@ export function TimelineV2({
                           )}
                           {clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key}
                           <span className="ml-1 text-neutral-400">{fmt(displayDur(clip))}</span>
+                          {!clip.still && clipSpeed(clip.node) !== 1 && (
+                            <span className="ml-1 text-accent-soft">×{clipSpeed(clip.node)}</span>
+                          )}
                         </div>
                         {!clip.url && (
                           <div className="absolute inset-0 flex items-center justify-center text-[9px] text-neutral-600">
@@ -1393,6 +1617,89 @@ export function TimelineV2({
                     )
                   })}
                 </div>
+
+                {/* Sticker track: one block per image overlay, same gestures as
+                    the title track (drag in time, click to inspect, edge trim). */}
+                {imageLayers.length > 0 && engine.total > 0 && (
+                  <div
+                    className="absolute inset-x-0 h-6"
+                    style={{
+                      bottom:
+                        (audioClips.length > 0 ? 38 : 0) +
+                        (speechClips.length > 0 ? 38 : 0) +
+                        (textLayers.length > 0 ? 26 : 0)
+                    }}
+                  >
+                    {imageLayers.map((layer) => {
+                      const start =
+                        stickerDrag?.id === layer.id ? stickerDrag.startSec : layer.startSec
+                      const dur = layer.endSec - layer.startSec
+                      const left = Math.min(100, (start / engine.total) * 100)
+                      const width = Math.max(1.5, Math.min(100 - left, (dur / engine.total) * 100))
+                      const url = stickerUrl(layer)
+                      return (
+                        <div
+                          key={layer.id}
+                          className="group absolute flex h-full items-center gap-1 overflow-hidden rounded-md border border-warning/50 bg-warning/15 px-1.5 text-[10px] text-warning"
+                          style={{ left: `${left}%`, width: `${width}%`, cursor: 'grab' }}
+                          title={t('timeline.sticker')}
+                          onPointerDown={(e) => {
+                            e.stopPropagation()
+                            const rect = trackRef.current?.getBoundingClientRect()
+                            if (!rect) return
+                            const originX = e.clientX
+                            const origStart = layer.startSec
+                            let moved = false
+                            let lastStart = origStart
+                            const move = (ev: PointerEvent) => {
+                              const delta = ((ev.clientX - originX) / rect.width) * engine.total
+                              if (Math.abs(ev.clientX - originX) > 3) moved = true
+                              lastStart = Math.max(0, origStart + delta)
+                              setStickerDrag({ id: layer.id, startSec: lastStart })
+                            }
+                            const up = (ev: PointerEvent) => {
+                              window.removeEventListener('pointermove', move)
+                              window.removeEventListener('pointerup', up)
+                              setStickerDrag(null)
+                              if (moved) {
+                                const startSec = Math.round(lastStart * 10) / 10
+                                void invoke('imageLayers:update', {
+                                  id: layer.id,
+                                  patch: { startSec, endSec: startSec + dur }
+                                })
+                              } else {
+                                setEditSticker({ id: layer.id, x: ev.clientX, y: ev.clientY - 8 })
+                              }
+                            }
+                            window.addEventListener('pointermove', move)
+                            window.addEventListener('pointerup', up)
+                          }}
+                        >
+                          {url ? (
+                            <img
+                              src={url}
+                              alt=""
+                              className="h-4 w-4 flex-shrink-0 rounded-sm object-cover"
+                            />
+                          ) : (
+                            <StickerIcon className="h-3 w-3 flex-shrink-0" />
+                          )}
+                          <span className="truncate">{Math.round(layer.widthPct)}%</span>
+                          <EdgeHandle
+                            side="left"
+                            title={t('timeline.layerStart')}
+                            onPointerDown={beginStickerResize(layer, 'left')}
+                          />
+                          <EdgeHandle
+                            side="right"
+                            title={t('timeline.layerEnd')}
+                            onPointerDown={beginStickerResize(layer, 'right')}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
 
                 {/* Title track: one block per text layer, drag to move in time,
                     click to open its inspector. */}
@@ -1472,7 +1779,9 @@ export function TimelineV2({
                 )}
 
                 {/* Audio tracks: speech lane (voice-over) above the music lane —
-                    the same two lanes the MP4 render mixes. */}
+                    the same two lanes the MP4 render mixes. Blocks sit at their
+                    ABSOLUTE lane start (shared audioLaneStarts); dragging a
+                    block writes its explicit timeline offset. */}
                 {(
                   [
                     {
@@ -1491,35 +1800,65 @@ export function TimelineV2({
                   ] as const
                 ).map(({ laneClips, bottom, Icon, activeClass }, laneIdx) => {
                   if (laneClips.length === 0) return null
-                  // Sequential lane starts, honouring an in-flight edge resize.
-                  const laneStarts: number[] = []
-                  let acc = 0
-                  for (const c of laneClips) {
-                    laneStarts.push(acc)
-                    acc += displayDur(c)
-                  }
+                  const laneStarts = audioLaneStarts(
+                    laneClips.map((c) => ({
+                      offsetSec:
+                        audioDrag?.id === c.node.id
+                          ? audioDrag.startSec
+                          : clipTimelineOffset(c.node),
+                      durationSeconds: displayDur(c)
+                    }))
+                  )
                   return (
-                    <div key={laneIdx} className="absolute inset-x-0 flex h-8" style={{ bottom }}>
+                    <div key={laneIdx} className="absolute inset-x-0 h-8" style={{ bottom }}>
                       {laneClips.map((clip, i) => {
+                        const start = laneStarts[i] ?? 0
+                        const left =
+                          displayTotal > 0 ? Math.min(100, (start / displayTotal) * 100) : 0
                         const width =
                           displayTotal > 0
-                            ? Math.min(
-                                (displayDur(clip) / displayTotal) * 100,
-                                100 - ((laneStarts[i] ?? 0) / displayTotal) * 100
+                            ? Math.max(
+                                1,
+                                Math.min(100 - left, (displayDur(clip) / displayTotal) * 100)
                               )
                             : 0
                         return (
                           <div
                             key={clip.node.id}
-                            className={`group relative mr-px flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[10px] ${
+                            className={`group absolute flex h-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[10px] ${
                               clip.url
                                 ? activeClass
                                 : 'border-neutral-800 bg-neutral-900/40 text-neutral-600'
                             }`}
-                            style={{ width: `${Math.max(width, 0)}%` }}
+                            style={{ left: `${left}%`, width: `${width}%`, cursor: 'grab' }}
                             onPointerDown={(e) => {
                               e.stopPropagation()
                               onFocusNode?.(clip.node.id)
+                              const rect = trackRef.current?.getBoundingClientRect()
+                              if (!rect || displayTotal <= 0) return
+                              const originX = e.clientX
+                              const origStart = start
+                              let moved = false
+                              let lastStart = origStart
+                              const move = (ev: PointerEvent) => {
+                                const delta = ((ev.clientX - originX) / rect.width) * displayTotal
+                                if (Math.abs(ev.clientX - originX) > 3) moved = true
+                                lastStart = Math.max(0, origStart + delta)
+                                setAudioDrag({ id: clip.node.id, startSec: lastStart })
+                              }
+                              const up = () => {
+                                window.removeEventListener('pointermove', move)
+                                window.removeEventListener('pointerup', up)
+                                setAudioDrag(null)
+                                if (moved) {
+                                  void invoke('nodes:setTimelineOffset', {
+                                    nodeId: clip.node.id,
+                                    offsetSec: Math.round(lastStart * 10) / 10
+                                  })
+                                }
+                              }
+                              window.addEventListener('pointermove', move)
+                              window.addEventListener('pointerup', up)
                             }}
                             onDoubleClick={(e) =>
                               setEditAudio({ nodeId: clip.node.id, x: e.clientX, y: e.clientY - 8 })
@@ -1625,6 +1964,125 @@ export function TimelineV2({
             />
           ) : null
         })()}
+      {stickerPicker && (
+        <ImagePickerPopover
+          candidates={imageCandidates}
+          anchor={stickerPicker}
+          onPick={addSticker}
+          onClose={() => setStickerPicker(null)}
+        />
+      )}
+      {editSticker &&
+        (() => {
+          const layer = imageLayers.find((l) => l.id === editSticker.id)
+          return layer ? (
+            <StickerSettingsPopover
+              layer={layer}
+              anchor={editSticker}
+              onClose={() => setEditSticker(null)}
+            />
+          ) : null
+        })()}
+    </div>
+  )
+}
+
+/**
+ * Inspector for one sticker: timing, size (as % of the output width) and
+ * deletion. Position is set by dragging the sticker ON THE PLAYER (x/y are
+ * normalized centers — the preview is the render).
+ */
+function StickerSettingsPopover({
+  layer,
+  anchor,
+  onClose
+}: {
+  layer: ImageLayer
+  anchor: { x: number; y: number }
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const ref = useRef<HTMLDivElement | null>(null)
+  useDismissable(true, onClose, ref)
+  const [start, setStart] = useState(String(layer.startSec))
+  const [end, setEnd] = useState(String(layer.endSec))
+  const [width, setWidth] = useState(Math.round(layer.widthPct))
+
+  const apply = () => {
+    const num = (raw: string, fallback: number) => {
+      const n = Number(raw.replace(',', '.'))
+      return Number.isFinite(n) ? n : fallback
+    }
+    void invoke('imageLayers:update', {
+      id: layer.id,
+      patch: {
+        startSec: Math.max(0, num(start, layer.startSec)),
+        endSec: num(end, layer.endSec),
+        widthPct: Math.min(100, Math.max(1, width))
+      }
+    }).then(onClose)
+  }
+
+  const field =
+    'rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none'
+  return (
+    <div
+      ref={ref}
+      className="island fixed z-50 w-64 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
+      style={{ left: anchor.x, top: anchor.y }}
+    >
+      <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
+        <StickerIcon className="h-3 w-3 text-accent" /> {t('timeline.sticker')}
+      </div>
+      <div className="flex items-end gap-2">
+        <label className="flex flex-col gap-0.5 text-neutral-400">
+          {t('timeline.layerStart')}
+          <input
+            className={`${field} w-14`}
+            inputMode="decimal"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-0.5 text-neutral-400">
+          {t('timeline.layerEnd')}
+          <input
+            className={`${field} w-14`}
+            inputMode="decimal"
+            value={end}
+            onChange={(e) => setEnd(e.target.value)}
+          />
+        </label>
+        <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
+          {t('timeline.stickerSize', { pct: width })}
+          <input
+            type="range"
+            min={5}
+            max={100}
+            step={1}
+            value={width}
+            onChange={(e) => setWidth(Number(e.target.value))}
+          />
+        </label>
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          onClick={() => {
+            void invoke('imageLayers:delete', { id: layer.id }).then(onClose)
+          }}
+          className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-danger"
+          title={t('timeline.stickerDelete')}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+        <button
+          onClick={apply}
+          className="ml-auto rounded-md bg-accent px-2 py-1 font-semibold text-neutral-900 hover:bg-accent-hover"
+        >
+          {t('timeline.apply')}
+        </button>
+      </div>
+      <p className="mt-1.5 text-[10px] text-neutral-500">{t('timeline.stickerDragHint')}</p>
     </div>
   )
 }
@@ -1818,6 +2276,69 @@ function ClipSettingsPopover({
         </label>
       </div>
 
+      {/* Speed & look (video clips) / Ken Burns motion (stills) — discrete
+          choices, written immediately like the transition. */}
+      <div className="mt-2.5 flex items-end gap-2 border-t border-neutral-800 pt-2">
+        {!isStillClip(node) && (
+          <label className="flex flex-col gap-0.5 text-neutral-400">
+            {t('timeline.speed')}
+            <select
+              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
+              value={String(clipSpeed(node))}
+              onChange={(e) => {
+                const v = Number(e.target.value)
+                void invoke('nodes:setSpeed', { nodeId: node.id, speed: v === 1 ? null : v })
+              }}
+            >
+              {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].map((v) => (
+                <option key={v} value={String(v)}>
+                  ×{v}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {isStillClip(node) && (
+          <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
+            {t('timeline.motion')}
+            <select
+              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
+              value={stillMotionOf(node) ?? ''}
+              onChange={(e) =>
+                void invoke('nodes:setStillMotion', {
+                  nodeId: node.id,
+                  motion: e.target.value || null
+                })
+              }
+            >
+              <option value="">{t('timeline.motionNone')}</option>
+              {STILL_MOTION_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {t(`timeline.motions.${id}` as never)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
+          {t('timeline.look')}
+          <select
+            className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
+            value={clipLook(node) ?? ''}
+            onChange={(e) =>
+              void invoke('nodes:setLook', { nodeId: node.id, look: e.target.value || null })
+            }
+          >
+            <option value="">{t('timeline.lookNone')}</option>
+            {CLIP_LOOK_IDS.map((id) => (
+              <option key={id} value={id}>
+                {t(`timeline.looks.${id}` as never)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       {/* Transition into the next clip */}
       {!isLast && (
         <div className="mt-2.5 flex items-end gap-2 border-t border-neutral-800 pt-2">
@@ -1947,6 +2468,7 @@ function LayerSettingsPopover({
   const [bold, setBold] = useState(layer.bold)
   const [italic, setItalic] = useState(layer.italic)
   const [color, setColor] = useState(layer.colorHex)
+  const [animation, setAnimation] = useState(layer.animation ?? '')
 
   const apply = () => {
     const num = (raw: string, fallback: number) => {
@@ -1963,7 +2485,8 @@ function LayerSettingsPopover({
         sizePct: Math.min(30, Math.max(1, num(size, layer.sizePct))),
         bold,
         italic,
-        colorHex: color
+        colorHex: color,
+        animation: animation === '' ? null : animation
       }
     }).then(onClose)
   }
@@ -2018,6 +2541,23 @@ function LayerSettingsPopover({
               <option key={f} value={f} />
             ))}
           </datalist>
+        </label>
+      </div>
+      <div className="mt-1.5 flex items-end gap-2">
+        <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
+          {t('timeline.layerAnimation')}
+          <select
+            className={`${field} w-full`}
+            value={animation}
+            onChange={(e) => setAnimation(e.target.value)}
+          >
+            <option value="">{t('timeline.layerAnimationNone')}</option>
+            {TEXT_ANIMATION_IDS.map((id) => (
+              <option key={id} value={id}>
+                {t(`timeline.layerAnimations.${id}` as never)}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
       <div className="mt-1.5 flex items-end gap-2">

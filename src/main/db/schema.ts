@@ -181,6 +181,17 @@ export const nodes = sqliteTable(
     } | null>(),
     /** Audio-lane volume gain (0–2, null = 1). Read through the shared clipVolume. */
     volume: real('volume'),
+    /** Clip playback speed (0.25–4, null = 1). Read through the shared clipSpeed. */
+    speed: real('speed'),
+    /** Colour look baked at render time (a CLIP_LOOKS id, null = untouched). */
+    look: text('look'),
+    /** Ken Burns preset of a STILL slot (a STILL_MOTIONS id, null = frozen frame). */
+    stillMotion: text('still_motion'),
+    /**
+     * Absolute start of an AUDIO track on the final timeline (seconds).
+     * Null = the historical layout: chained after the previous lane track.
+     */
+    timelineOffsetSec: real('timeline_offset_sec'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },
@@ -240,9 +251,41 @@ export const textLayers = sqliteTable(
     italic: integer('italic', { mode: 'boolean' }).notNull(),
     /** #RRGGBB fill color (outline stays automatic for readability). */
     colorHex: text('color_hex').notNull(),
+    /** Entrance animation preset (a TEXT_ANIMATIONS id, null = static). */
+    animation: text('animation'),
     createdAt: integer('created_at').notNull()
   },
   (table) => [index('text_layers_by_video').on(table.videoId)]
+)
+
+/**
+ * Sticker track (§6.12d): image overlays composited over the film at render
+ * time, in absolute FINAL-timeline seconds like text_layers. The image comes
+ * from an image NODE's output or a project ASSET (exactly one of the two; no
+ * FK, like nodes.selected_generation_id — a deleted source just skips the
+ * sticker at render). Same doctrine as text_layers: not in the graph journal.
+ */
+export const imageLayers = sqliteTable(
+  'image_layers',
+  {
+    id: text('id').primaryKey(),
+    videoId: text('video_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    /** Image node whose best generation is composited (null when assetId set). */
+    nodeId: text('node_id'),
+    /** Project asset composited as-is (null when nodeId set). */
+    assetId: text('asset_id'),
+    startSec: real('start_sec').notNull(),
+    endSec: real('end_sec').notNull(),
+    /** Normalized CENTER position on the frame (0–1). */
+    x: real('x').notNull(),
+    y: real('y').notNull(),
+    /** Sticker width as a percentage of the output width (height follows). */
+    widthPct: real('width_pct').notNull(),
+    createdAt: integer('created_at').notNull()
+  },
+  (table) => [index('image_layers_by_video').on(table.videoId)]
 )
 
 export const generations = sqliteTable(

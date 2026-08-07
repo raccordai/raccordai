@@ -5,6 +5,8 @@
  * this module owns every decision (and is unit-tested for it).
  */
 
+import { lookFfmpegFilter } from '@shared/looks'
+
 export interface ClipProbe {
   /** Container format name(s) as reported by ffprobe (e.g. "mov,mp4,m4a,3gp,3g2,mj2"). */
   formatName: string | null
@@ -35,6 +37,12 @@ export interface PlannedClip {
   transitionAfter?: string | null
   /** That transition's length (clamped upstream; default CROSSFADE_DURATION). */
   transitionDurationSec?: number
+  /** Playback speed (clamped upstream; undefined or 1 = untouched). */
+  speed?: number
+  /** Colour look (a CLIP_LOOKS id) baked into the normalize pass. */
+  look?: string | null
+  /** Ken Burns preset of a still slot (a STILL_MOTIONS id). */
+  stillMotion?: string | null
 }
 
 /** Default transition length — mirrors TRANSITION_DEFAULT_SECONDS in @shared/transitions. */
@@ -53,12 +61,19 @@ export function clipIsTrimmed(clip: PlannedClip): boolean {
   return clip.trimEndSec !== undefined && (raw === null || clip.trimEndSec < raw - 0.01)
 }
 
-/** The clip's rendered duration: still hold, or trimmed media length. */
-export function clipEffectiveDuration(clip: PlannedClip): number {
+/** The trimmed window inside the MEDIA (what -ss/-t read), speed-agnostic. */
+export function clipMediaWindow(clip: PlannedClip): number {
   if (clip.isStill) return clip.stillDurationSeconds
   const start = clip.trimStartSec ?? 0
   const end = clip.trimEndSec ?? clip.probe?.durationSeconds ?? 0
   return Math.max(0, end - start)
+}
+
+/** The clip's rendered duration: still hold, or trimmed media length ÷ speed. */
+export function clipEffectiveDuration(clip: PlannedClip): number {
+  if (clip.isStill) return clip.stillDurationSeconds
+  const speed = clip.speed && clip.speed > 0 ? clip.speed : 1
+  return clipMediaWindow(clip) / speed
 }
 
 /** True when at least one cut of the sequence is a transition (last clip ignored). */
@@ -182,6 +197,9 @@ export function canConcatLosslessly(clips: PlannedClip[], spec: SequenceSpec): b
   if (clips.length === 0) return false
   // Trims and crossfades both require re-encoding, whatever the codecs are.
   if (clips.some(clipIsTrimmed) || hasCrossfades(clips)) return false
+  // Any baked per-clip effect (speed retime, colour look) does too — without
+  // this guard the stream-copy path would silently drop it.
+  if (clips.some((c) => (!c.isStill && (c.speed ?? 1) !== 1) || !!c.look)) return false
   const first = clips[0]!.probe
   if (!first) return false
   for (const clip of clips) {
@@ -214,17 +232,97 @@ export function renderedDurationSeconds(clips: PlannedClip[]): number {
 
 const fpsArg = (fps: number) => (Number.isInteger(fps) ? String(fps) : fps.toFixed(3))
 
-/** scale to fit + pad to the exact sequence frame, letterboxing instead of stretching. */
-function videoFilter(spec: SequenceSpec): string {
+/**
+ * Ken Burns on a still slot: ONE input frame, zoompan generates the whole hold
+ * (`on` = output frame index, d = total frames). Runs AFTER scale+pad, so the
+ * drift covers the letterboxed frame — and it owns the output rate, so the
+ * chain skips the fps filter.
+ */
+export function stillMotionFilter(
+  motion: string,
+  durationSeconds: number,
+  spec: SequenceSpec
+): string {
+  const frames = Math.max(1, Math.round(durationSeconds * spec.fps))
+  const out = `d=${frames}:s=${spec.width}x${spec.height}:fps=${fpsArg(spec.fps)}`
+  const zMax = 1.15
+  const rate = ((zMax - 1) / frames).toFixed(6)
+  const center = `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'`
+  const midY = `y='(ih-ih/zoom)/2'`
+  switch (motion) {
+    case 'zoom-out':
+      return `zoompan=z='max(${zMax}-${rate}*on,1)':${center}:${out}`
+    case 'pan-left':
+      return `zoompan=z=1.1:x='(iw-iw/zoom)*(1-on/${frames})':${midY}:${out}`
+    case 'pan-right':
+      return `zoompan=z=1.1:x='(iw-iw/zoom)*on/${frames}':${midY}:${out}`
+    default:
+      return `zoompan=z='min(1+${rate}*on,${zMax})':${center}:${out}`
+  }
+}
+
+/**
+ * The audio side of a speed change: atempo only accepts 0.5–2 per stage, so
+ * out-of-range factors chain stages (4 → 2×2, 0.25 → 0.5×0.5).
+ */
+export function atempoChain(speed: number): string {
+  const stages: number[] = []
+  let s = speed
+  while (s > 2) {
+    stages.push(2)
+    s /= 2
+  }
+  while (s < 0.5) {
+    stages.push(0.5)
+    s *= 2
+  }
+  stages.push(s)
+  return stages.map((v) => `atempo=${Number(v.toFixed(4))}`).join(',')
+}
+
+/**
+ * scale to fit + pad to the exact sequence frame (letterboxing, never
+ * stretching), then the clip's baked effects: colour look, speed retime
+ * (setpts BEFORE fps so the retimed stream is resampled), or a still's
+ * Ken Burns. Byte-identical to the historical chain when the clip has none.
+ */
+function videoFilter(spec: SequenceSpec, clip?: PlannedClip): string {
   const { width: w, height: h } = spec
-  return (
-    `scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
-    `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,` +
-    `fps=${fpsArg(spec.fps)},format=yuv420p`
-  )
+  const parts = [
+    `scale=${w}:${h}:force_original_aspect_ratio=decrease`,
+    `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black`
+  ]
+  const look = lookFfmpegFilter(clip?.look)
+  if (look) parts.push(look)
+  if (clip?.isStill && clip.stillMotion) {
+    parts.push(stillMotionFilter(clip.stillMotion, clip.stillDurationSeconds, spec))
+    parts.push('format=yuv420p')
+    return parts.join(',')
+  }
+  const speed = clip && !clip.isStill ? (clip.speed ?? 1) : 1
+  if (speed !== 1) parts.push(`setpts=PTS/${speed}`)
+  parts.push(`fps=${fpsArg(spec.fps)}`, 'format=yuv420p')
+  return parts.join(',')
 }
 
 const ENCODE_ARGS = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18']
+
+/**
+ * Encoder args for an export quality/codec choice. 'standard' h264 IS the
+ * historical ENCODE_ARGS byte for byte; hevc gets the `hvc1` tag QuickTime
+ * requires to recognise the track.
+ */
+export function encodeArgsFor(quality?: string, codec?: string): string[] {
+  const q = quality === 'draft' || quality === 'high' ? quality : 'standard'
+  if (codec === 'hevc') {
+    const crf = q === 'draft' ? '28' : q === 'high' ? '20' : '24'
+    const preset = q === 'high' ? 'medium' : 'fast'
+    return ['-c:v', 'libx265', '-preset', preset, '-crf', crf, '-tag:v', 'hvc1']
+  }
+  if (q === 'draft') return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23']
+  if (q === 'high') return ['-c:v', 'libx264', '-preset', 'medium', '-crf', '16']
+  return [...ENCODE_ARGS]
+}
 const AUDIO_ENCODE_ARGS = ['-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2']
 const SILENCE_INPUT = 'anullsrc=channel_layout=stereo:sample_rate=48000'
 
@@ -236,28 +334,41 @@ const SILENCE_INPUT = 'anullsrc=channel_layout=stereo:sample_rate=48000'
 export function buildNormalizeArgs(
   clip: PlannedClip,
   spec: SequenceSpec,
-  outPath: string
+  outPath: string,
+  encodeArgs: string[] = ENCODE_ARGS
 ): string[] {
   const args = ['-y', '-hide_banner', '-nostdin']
+  const speed = !clip.isStill && clip.speed && clip.speed > 0 ? clip.speed : 1
   if (clip.isStill) {
     const t = String(clip.stillDurationSeconds)
-    args.push('-loop', '1', '-t', t, '-i', clip.path, '-f', 'lavfi', '-t', t, '-i', SILENCE_INPUT)
+    if (clip.stillMotion) {
+      // Ken Burns: ONE input frame — zoompan generates the whole hold itself.
+      args.push('-i', clip.path, '-f', 'lavfi', '-t', t, '-i', SILENCE_INPUT)
+    } else {
+      args.push('-loop', '1', '-t', t, '-i', clip.path, '-f', 'lavfi', '-t', t, '-i', SILENCE_INPUT)
+    }
   } else {
     // Trim as input options: -ss before -i is frame-accurate when re-encoding
     // (ffmpeg decodes from the previous keyframe and discards), -t bounds the
-    // read so the out-point never depends on stream metadata.
+    // read so the out-point never depends on stream metadata. Both are MEDIA
+    // time — a speed change retimes later, in the filter chain.
     const start = clip.trimStartSec ?? 0
     if (start > 0) args.push('-ss', start.toFixed(3))
-    const effective = clipEffectiveDuration(clip)
-    if (clipIsTrimmed(clip) && effective > 0) args.push('-t', effective.toFixed(3))
+    const window = clipMediaWindow(clip)
+    if (clipIsTrimmed(clip) && window > 0) args.push('-t', window.toFixed(3))
     args.push('-i', clip.path)
     if (!clip.probe?.hasAudio) args.push('-f', 'lavfi', '-i', SILENCE_INPUT)
   }
 
   const needsSilence = clip.isStill || !clip.probe?.hasAudio
-  args.push('-filter_complex', `[0:v]${videoFilter(spec)}[v]`)
-  args.push('-map', '[v]', '-map', needsSilence ? '1:a' : '0:a')
-  args.push(...ENCODE_ARGS, ...AUDIO_ENCODE_ARGS)
+  const filters = [`[0:v]${videoFilter(spec, clip)}[v]`]
+  // Real audio follows the retime through atempo; injected silence never needs
+  // to (it is infinite, -shortest bounds it to the retimed video).
+  const retimeAudio = !needsSilence && speed !== 1
+  if (retimeAudio) filters.push(`[0:a]${atempoChain(speed)}[a]`)
+  args.push('-filter_complex', filters.join(';'))
+  args.push('-map', '[v]', '-map', retimeAudio ? '[a]' : needsSilence ? '1:a' : '0:a')
+  args.push(...encodeArgs, ...AUDIO_ENCODE_ARGS)
   // anullsrc is infinite for non-still clips — stop at the video's end.
   if (!clip.isStill && needsSilence) args.push('-shortest')
   args.push('-movflags', '+faststart', outPath)
@@ -300,7 +411,8 @@ export function buildConcatArgs(listPath: string, outPath: string): string[] {
 export function buildCrossfadeArgs(
   segments: Array<{ path: string; durationSeconds: number }>,
   fades: Array<{ xfade: string; durationSec: number }>,
-  outPath: string
+  outPath: string,
+  encodeArgs: string[] = ENCODE_ARGS
 ): string[] {
   if (segments.length < 2) throw new Error('A transition group needs at least two segments')
   if (fades.length !== segments.length - 1) {
@@ -331,7 +443,7 @@ export function buildCrossfadeArgs(
 
   args.push('-filter_complex', chains.join(';'))
   args.push('-map', '[vout]', '-map', '[aout]')
-  args.push(...ENCODE_ARGS, ...AUDIO_ENCODE_ARGS)
+  args.push(...encodeArgs, ...AUDIO_ENCODE_ARGS)
   args.push('-movflags', '+faststart', outPath)
   return args
 }
@@ -363,6 +475,8 @@ export interface AssEvent {
   bold?: boolean
   italic?: boolean
   colorHex?: string
+  /** Free layers: entrance animation preset (a TEXT_ANIMATIONS id). */
+  animation?: string | null
   /** Dynamic captions: preset id + karaoke word timings (centiseconds). */
   captionPreset?: string
   words?: Array<{ text: string; durationCs: number }>
@@ -631,7 +745,17 @@ export function buildAssContent(
     if (e.kind === 'layer') {
       const x = Math.round((e.x ?? 0.5) * spec.width)
       const y = Math.round((e.y ?? 0.5) * spec.height)
-      overrides.push(`\\pos(${x},${y})`)
+      // Entrance animations ride the same override block (\move replaces \pos).
+      if (e.animation === 'slide-up') {
+        const fromY = Math.min(spec.height, y + Math.round(spec.height * 0.05))
+        overrides.push(`\\move(${x},${fromY},${x},${y},0,250)`, '\\fad(150,0)')
+      } else {
+        overrides.push(`\\pos(${x},${y})`)
+        if (e.animation === 'fade') overrides.push('\\fad(200,200)')
+        if (e.animation === 'pop') {
+          overrides.push('\\fad(120,0)\\fscx70\\fscy70\\t(0,150,\\fscx100\\fscy100)')
+        }
+      }
       if (e.fontFamily) overrides.push(`\\fn${e.fontFamily.replace(/[{}\\]/g, '')}`)
       overrides.push(`\\fs${Math.max(1, Math.round(spec.height * ((e.sizePct ?? 6) / 100)))}`)
       if (e.bold) overrides.push('\\b1')
@@ -661,7 +785,8 @@ export function escapeSubtitlesFilterPath(path: string): string {
 export function buildSubtitleBurnArgs(
   inputPath: string,
   assPath: string,
-  outPath: string
+  outPath: string,
+  encodeArgs: string[] = ENCODE_ARGS
 ): string[] {
   return [
     '-y',
@@ -671,13 +796,64 @@ export function buildSubtitleBurnArgs(
     inputPath,
     '-vf',
     `subtitles=filename='${escapeSubtitlesFilterPath(assPath)}'`,
-    ...ENCODE_ARGS,
+    ...encodeArgs,
     '-c:a',
     'copy',
     '-movflags',
     '+faststart',
     outPath
   ]
+}
+
+// ── Sticker track (image overlays composited over the film) ─────────────────
+
+/** One sticker resolved to a file, timed on the FINAL timeline. */
+export interface PlannedOverlay {
+  path: string
+  startSec: number
+  endSec: number
+  /** Normalized CENTER position (0–1). */
+  x: number
+  y: number
+  /** Width as a fraction of the output width, 0–1 (height keeps aspect). */
+  widthFraction: number
+}
+
+/**
+ * Composite the sticker track over the film in ONE pass: each image scaled to
+ * its width fraction, overlaid at its normalized center, enabled only inside
+ * its time window. Audio copied untouched.
+ */
+export function buildOverlayArgs(
+  inputPath: string,
+  overlays: PlannedOverlay[],
+  spec: SequenceSpec,
+  outPath: string,
+  encodeArgs: string[] = ENCODE_ARGS
+): string[] {
+  if (overlays.length === 0) throw new Error('The overlay pass needs at least one sticker')
+  const args = ['-y', '-hide_banner', '-nostdin', '-i', inputPath]
+  for (const o of overlays) args.push('-i', o.path)
+
+  const chains: string[] = []
+  let base = '[0:v]'
+  overlays.forEach((o, i) => {
+    const width = Math.max(2, 2 * Math.round((spec.width * o.widthFraction) / 2))
+    chains.push(`[${i + 1}:v]scale=${width}:-2[s${i + 1}]`)
+    const out = i === overlays.length - 1 ? '[vout]' : `[b${i + 1}]`
+    const x = `(main_w*${o.x.toFixed(4)})-(overlay_w/2)`
+    const y = `(main_h*${o.y.toFixed(4)})-(overlay_h/2)`
+    chains.push(
+      `${base}[s${i + 1}]overlay=x='${x}':y='${y}':enable='between(t,${o.startSec.toFixed(3)},${o.endSec.toFixed(3)})'${out}`
+    )
+    base = out
+  })
+
+  args.push('-filter_complex', chains.join(';'))
+  args.push('-map', '[vout]', '-map', '0:a?')
+  args.push(...encodeArgs, '-c:a', 'copy')
+  args.push('-movflags', '+faststart', outPath)
+  return args
 }
 
 /**
@@ -713,6 +889,12 @@ export interface MusicTrack {
   trimEndSec?: number
   /** Volume gain (0–2; undefined or 1 = untouched, keeps the argv historical). */
   volume?: number
+  /**
+   * Absolute start on the final timeline (audioLaneStarts). When ANY track of
+   * a lane carries one, the lane switches from concatenation to absolute
+   * placement: adelay per track, amix duration=longest (overlaps just mix).
+   */
+  startSec?: number
 }
 
 /**
@@ -753,6 +935,9 @@ export function buildMuxArgs(
     laneFilter?: string | null
   ): string | null => {
     if (tracks.length === 0) return null
+    // Absolute placement (any explicit startSec) replaces the historical
+    // concatenation: each track is delayed to its start, overlaps just mix.
+    const absolute = tracks.some((m) => m.startSec !== undefined)
     const labels = tracks.map((m, i) => {
       const idx = firstInput + i
       const src = `[${idx}:a]`
@@ -764,13 +949,20 @@ export function buildMuxArgs(
         filters.push(`atrim=${parts.join(':')}`, 'asetpts=PTS-STARTPTS')
       }
       if (m.volume !== undefined && m.volume !== 1) filters.push(`volume=${m.volume}`)
+      if (absolute && (m.startSec ?? 0) > 0) {
+        filters.push(`adelay=${Math.round((m.startSec ?? 0) * 1000)}:all=1`)
+      }
       if (filters.length === 0) return src
       chains.push(`${src}${filters.join(',')}[t${idx}]`)
       return `[t${idx}]`
     })
     let label: string
     if (labels.length > 1) {
-      chains.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[${catLabel}]`)
+      chains.push(
+        absolute
+          ? `${labels.join('')}amix=inputs=${labels.length}:duration=longest:normalize=0[${catLabel}]`
+          : `${labels.join('')}concat=n=${labels.length}:v=0:a=1[${catLabel}]`
+      )
       label = `[${catLabel}]`
     } else {
       label = labels[0] as string
@@ -821,7 +1013,8 @@ export function parseProgressLine(line: string): number | null {
   return null
 }
 
-export type RenderStep = 'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'mux'
+export type RenderStep =
+  'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
 
 export interface StageSpan {
   step: RenderStep
@@ -836,7 +1029,7 @@ export interface StageSpan {
 export function computeStageSpans(
   needsNormalize: boolean,
   hasMusic: boolean,
-  extras: { hasTransitions?: boolean; hasSubtitles?: boolean } = {}
+  extras: { hasTransitions?: boolean; hasSubtitles?: boolean; hasOverlays?: boolean } = {}
 ): StageSpan[] {
   const weights: Array<[RenderStep, number]> = needsNormalize
     ? [
@@ -845,12 +1038,14 @@ export function computeStageSpans(
         ['transition', extras.hasTransitions ? 12 : 0],
         ['concat', 15],
         ['subtitles', extras.hasSubtitles ? 12 : 0],
+        ['overlay', extras.hasOverlays ? 12 : 0],
         ['mux', hasMusic ? 15 : 0]
       ]
     : [
         ['probe', 10],
         ['concat', 60],
         ['subtitles', extras.hasSubtitles ? 15 : 0],
+        ['overlay', extras.hasOverlays ? 15 : 0],
         ['mux', hasMusic ? 30 : 0]
       ]
   const total = weights.reduce((acc, [, w]) => acc + w, 0)

@@ -4,6 +4,7 @@ import type {
   Generation,
   GraphEdge,
   GraphNode,
+  ImageLayer,
   IpcChannel,
   IpcInput,
   IpcOutput,
@@ -79,6 +80,14 @@ export function useTextLayers(videoId: string): UseQueryResult<TextLayer[]> {
   return useQuery({
     queryKey: ['textLayers', videoId],
     queryFn: () => invoke('textLayers:list', { videoId })
+  })
+}
+
+/** The sticker track (§6.12d) — same refresh contract as the title track. */
+export function useImageLayers(videoId: string): UseQueryResult<ImageLayer[]> {
+  return useQuery({
+    queryKey: ['imageLayers', videoId],
+    queryFn: () => invoke('imageLayers:list', { videoId })
   })
 }
 

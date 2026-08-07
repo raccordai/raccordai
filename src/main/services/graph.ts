@@ -9,7 +9,9 @@ import {
   type LayoutNode
 } from '@shared/graphLayout'
 import { APPLY_VIDEO_STYLE_PARAM } from '@shared/styles/registry'
-import { VOLUME_MAX, VOLUME_MIN } from '@shared/config'
+import { SPEED_MAX, SPEED_MIN, VOLUME_MAX, VOLUME_MIN } from '@shared/config'
+import { isClipLookId } from '@shared/looks'
+import { isStillMotionId } from '@shared/stillMotion'
 import { clampTransitionSeconds, isClipTransitionId } from '@shared/transitions'
 import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
@@ -138,6 +140,10 @@ export function createNode(args: {
     transitionDurationSec: null,
     overlay: null,
     volume: null,
+    speed: null,
+    look: null,
+    stillMotion: null,
+    timelineOffsetSec: null,
     createdAt: now,
     updatedAt: now
   }
@@ -315,6 +321,39 @@ export function setClipVolume(nodeId: string, volume: number | null): void {
     throw new Error(`Volume must be between ${VOLUME_MIN} and ${VOLUME_MAX}.`)
   }
   patchNodeWithHistory(nodeId, { volume })
+}
+
+/** Clip playback speed (0.25–4, null = original). Same refusal on every surface. */
+export function setClipSpeed(nodeId: string, speed: number | null): void {
+  if (speed !== null && (!Number.isFinite(speed) || speed < SPEED_MIN || speed > SPEED_MAX)) {
+    throw new Error(`Speed must be between ${SPEED_MIN} and ${SPEED_MAX}.`)
+  }
+  patchNodeWithHistory(nodeId, { speed })
+}
+
+/** Colour look baked at render time (a CLIP_LOOKS id, null = untouched). */
+export function setClipLook(nodeId: string, look: string | null): void {
+  if (look !== null && !isClipLookId(look)) throw new Error(`Unknown look "${look}".`)
+  patchNodeWithHistory(nodeId, { look })
+}
+
+/** Ken Burns preset of a STILL slot (a STILL_MOTIONS id, null = frozen frame). */
+export function setStillMotion(nodeId: string, motion: string | null): void {
+  if (motion !== null && !isStillMotionId(motion)) {
+    throw new Error(`Unknown still motion "${motion}".`)
+  }
+  patchNodeWithHistory(nodeId, { stillMotion: motion })
+}
+
+/**
+ * Absolute start of an AUDIO track on the final timeline (null = chain after
+ * the previous lane track — the historical layout).
+ */
+export function setTimelineOffset(nodeId: string, offsetSec: number | null): void {
+  if (offsetSec !== null && (!Number.isFinite(offsetSec) || offsetSec < 0)) {
+    throw new Error('The timeline offset must be ≥ 0.')
+  }
+  patchNodeWithHistory(nodeId, { timelineOffsetSec: offsetSec })
 }
 
 /** Text layer burned over the clip at render time (null clears it). */

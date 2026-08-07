@@ -6,8 +6,12 @@ import { app } from 'electron'
 import { ffmpegPath, ffprobePath } from '../media/ffbin'
 import type { GraphNode } from '@shared/ipc/contracts'
 import {
+  audioLaneStarts,
   bestGeneration,
   clipDuration,
+  clipLook,
+  clipSpeed,
+  clipTimelineOffset,
   clipTransitionAfter,
   clipTransitionSeconds,
   clipTrim,
@@ -15,7 +19,8 @@ import {
   collectAudioNodes,
   collectTimelineClips,
   isStillClip,
-  stillClipSeconds
+  stillClipSeconds,
+  stillMotionOf
 } from '@shared/timeline'
 import { xfadeNameFor } from '@shared/transitions'
 import type { SpeechTranscript } from '@shared/speech'
@@ -28,6 +33,8 @@ import {
   type GenerationRow
 } from './generations'
 import { listTextLayers } from './textLayers'
+import { listImageLayers } from './imageLayers'
+import { getAsset } from './assets'
 import * as graphService from './graph'
 import * as videosService from './videos'
 import {
@@ -38,10 +45,12 @@ import {
   buildCrossfadeArgs,
   buildMuxArgs,
   buildNormalizeArgs,
+  buildOverlayArgs,
   buildSubtitleBurnArgs,
   canConcatLosslessly,
   clipEffectiveDuration,
   computeStageSpans,
+  encodeArgsFor,
   crossfadeGroups,
   CROSSFADE_DURATION,
   decideSequenceSpec,
@@ -56,6 +65,7 @@ import {
   speechActivityWindows,
   type CaptionTrackInput,
   type MusicTrack,
+  type PlannedOverlay,
   type PlannedClip,
   type RenderStep,
   type StageSpan,
@@ -209,6 +219,10 @@ export interface RenderOptions {
   captionsPreset?: string
   /** Duck the music bed under the voice-over (transcript-timed windows). */
   duckMusic?: boolean
+  /** Encoder quality ('standard' default = the historical args). */
+  quality?: string
+  /** Output codec ('h264' default; 'hevc' forces the normalize path). */
+  codec?: string
   /** Translucent corner text over the whole film (per-render, never persisted). */
   watermark?: {
     text: string
@@ -301,10 +315,14 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     // timeline order, each carrying its journaled trim window (the preview
     // honours the same bounds). Nodes without output are reported as skipped
     // rather than silently dropped.
-    const collectLane = async (
-      role: 'music' | 'speech'
-    ): Promise<Array<{ track: MusicTrack; transcript: SpeechTranscript | null }>> => {
-      const lane: Array<{ track: MusicTrack; transcript: SpeechTranscript | null }> = []
+    interface LaneEntry {
+      track: MusicTrack
+      transcript: SpeechTranscript | null
+      /** Explicit absolute start (clipTimelineOffset), null = chain. */
+      offsetSec: number | null
+    }
+    const collectLane = async (role: 'music' | 'speech'): Promise<LaneEntry[]> => {
+      const lane: LaneEntry[] = []
       for (const [i, node] of collectAudioNodes(graph.nodes, role).entries()) {
         const media = await resolveNodeMedia(workDir, node, `${role}-${i + 1}`)
         if (media) {
@@ -315,6 +333,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           const volume = clipVolume(node)
           lane.push({
             transcript: (media.row.transcript ?? null) as SpeechTranscript | null,
+            offsetSec: clipTimelineOffset(node),
             track: {
               path: media.path,
               ...(start > 0 ? { trimStartSec: start } : {}),
@@ -326,8 +345,33 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       }
       return lane
     }
+    // Free audio placement: a lane where any track carries an explicit offset
+    // switches to absolute starts (shared audioLaneStarts — the same layout the
+    // preview shows). That needs measured durations, so the lane gets probed;
+    // an offset-less lane keeps the historical probe-free concatenation.
+    const layoutLane = async (lane: LaneEntry[]): Promise<void> => {
+      if (!lane.some((t) => t.offsetSec !== null)) return
+      const durations: number[] = []
+      for (const t of lane) {
+        const probe = await probeFile(active, t.track.path)
+        const trimStart = t.track.trimStartSec ?? 0
+        const mediaEnd =
+          t.track.trimEndSec !== undefined
+            ? Math.min(t.track.trimEndSec, probe.durationSeconds ?? t.track.trimEndSec)
+            : (probe.durationSeconds ?? trimStart)
+        durations.push(Math.max(0, mediaEnd - trimStart))
+      }
+      const starts = audioLaneStarts(
+        lane.map((t, i) => ({ offsetSec: t.offsetSec, durationSeconds: durations[i]! }))
+      )
+      lane.forEach((t, i) => {
+        t.track.startSec = starts[i]!
+      })
+    }
     const musicLane = await collectLane('music')
     const speechLane = await collectLane('speech')
+    await layoutLane(musicLane)
+    await layoutLane(speechLane)
     const musicTracks = musicLane.map((t) => t.track)
     const speechTracks = speechLane.map((t) => t.track)
     const hasAudioLane = musicTracks.length > 0 || speechTracks.length > 0
@@ -341,14 +385,23 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     }
 
     // Timeline editing state: trim windows (clamped against the probed
-    // duration) and transitions travel from the nodes onto the planned clips.
+    // duration), transitions, speed, look and still motion travel from the
+    // nodes onto the planned clips. Effects are only stamped when set, so an
+    // untouched timeline keeps the historical argv byte-identical.
     for (const [i, clip] of clips.entries()) {
       const node = clipNodes[i]!
       if (!clip.isStill) {
         const { start, end } = clipTrim(node, clip.probe?.durationSeconds ?? undefined)
         if (start > 0) clip.trimStartSec = start
         if (end !== undefined) clip.trimEndSec = end
+        const speed = clipSpeed(node)
+        if (speed !== 1) clip.speed = speed
+      } else {
+        const motion = stillMotionOf(node)
+        if (motion) clip.stillMotion = motion
       }
+      const look = clipLook(node)
+      if (look) clip.look = look
       clip.transitionAfter = clipTransitionAfter(node)
       clip.transitionDurationSec = clipTransitionSeconds(node)
     }
@@ -376,14 +429,16 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           track.trimEndSec !== undefined
             ? Math.min(track.trimEndSec, probe.durationSeconds ?? track.trimEndSec)
             : (probe.durationSeconds ?? undefined)
+        // An offset-positioned lane already computed each track's start.
+        const start = track.startSec ?? at
         captionTracks.push({
-          startSec: at,
+          startSec: start,
           ...(track.trimStartSec !== undefined ? { trimStartSec: track.trimStartSec } : {}),
           ...(track.trimEndSec !== undefined ? { trimEndSec: track.trimEndSec } : {}),
           ...(probe.durationSeconds != null ? { durationSeconds: probe.durationSeconds } : {}),
           segments: transcript?.segments ?? []
         })
-        at += Math.max(0, (mediaEnd ?? trimStart) - trimStart)
+        at = start + Math.max(0, (mediaEnd ?? trimStart) - trimStart)
       }
     }
 
@@ -392,7 +447,10 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       resolution: options.resolution
     })
     // spec already reflects the overrides, so this stays correct with them.
-    const lossless = canConcatLosslessly(clips, spec)
+    // An explicit hevc request forces the normalize path (copy can't transcode);
+    // a quality choice alone keeps lossless — stream copy beats any re-encode.
+    const lossless = canConcatLosslessly(clips, spec) && options.codec !== 'hevc'
+    const encodeArgs = encodeArgsFor(options.quality, options.codec)
     const totalDuration = sequenceDurationSeconds(clips)
     const finalDuration = renderedDurationSeconds(clips)
 
@@ -465,14 +523,51 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           sizePct: layer.sizePct,
           bold: layer.bold,
           italic: layer.italic,
-          colorHex: layer.colorHex
+          colorHex: layer.colorHex,
+          animation: layer.animation
         })
       }
     }
+    // Sticker track (§6.12d): resolve each layer's image — a node's best
+    // generation, or a project asset's stored file. Unresolvable stickers are
+    // reported in `skipped` like any other missing media.
+    const overlays: PlannedOverlay[] = []
+    for (const [i, row] of listImageLayers(videoId).entries()) {
+      if (row.startSec >= finalDuration) continue
+      let path: string | null = null
+      let sourceLabel = `Sticker ${i + 1}`
+      if (row.nodeId) {
+        const node = graph.nodes.find((n) => n.id === row.nodeId)
+        if (node) {
+          sourceLabel = label(node)
+          path = (await resolveNodeMedia(workDir, node, `sticker-${i + 1}`))?.path ?? null
+        }
+      } else if (row.assetId) {
+        const asset = getAsset(row.assetId)
+        if (asset) {
+          sourceLabel = asset.name
+          path = asset.filePath
+        }
+      }
+      if (!path) {
+        skipped.push(sourceLabel)
+        continue
+      }
+      overlays.push({
+        path,
+        startSec: row.startSec,
+        endSec: Math.min(row.endSec, finalDuration),
+        x: row.x,
+        y: row.y,
+        widthFraction: row.widthPct / 100
+      })
+    }
+
     const hasBurnPass = assEvents.length > 0
     const spans = computeStageSpans(!lossless, hasAudioLane, {
       hasTransitions: hasCrossfades(clips),
-      hasSubtitles: hasBurnPass
+      hasSubtitles: hasBurnPass,
+      hasOverlays: overlays.length > 0
     })
 
     // ── Normalize (heterogeneous clips only) ─────────────────────────────
@@ -489,7 +584,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         await run(
           active,
           ffmpegPath(),
-          [...buildNormalizeArgs(clip, spec, segment), '-progress', 'pipe:1'],
+          [...buildNormalizeArgs(clip, spec, segment, encodeArgs), '-progress', 'pipe:1'],
           (line) => {
             const seconds = parseProgressLine(line)
             if (seconds !== null && totalDuration > 0) {
@@ -532,7 +627,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         await run(
           active,
           ffmpegPath(),
-          [...buildCrossfadeArgs(segments, fades, groupOut), '-progress', 'pipe:1'],
+          [...buildCrossfadeArgs(segments, fades, groupOut, encodeArgs), '-progress', 'pipe:1'],
           (line) => {
             const seconds = parseProgressLine(line)
             if (seconds !== null && groupDuration > 0) {
@@ -576,7 +671,11 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       await run(
         active,
         ffmpegPath(),
-        [...buildSubtitleBurnArgs(stagePath, assPath, subbedOut), '-progress', 'pipe:1'],
+        [
+          ...buildSubtitleBurnArgs(stagePath, assPath, subbedOut, encodeArgs),
+          '-progress',
+          'pipe:1'
+        ],
         (line) => {
           const seconds = parseProgressLine(line)
           if (seconds !== null && finalDuration > 0) {
@@ -586,6 +685,28 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       )
       stagePath = subbedOut
       progress(spans, 'subtitles', 1)
+    }
+
+    // ── Sticker track (image overlays, one compositing pass) ─────────────
+    if (overlays.length > 0) {
+      const overlayOut = join(workDir, 'stickers.mp4')
+      await run(
+        active,
+        ffmpegPath(),
+        [
+          ...buildOverlayArgs(stagePath, overlays, spec, overlayOut, encodeArgs),
+          '-progress',
+          'pipe:1'
+        ],
+        (line) => {
+          const seconds = parseProgressLine(line)
+          if (seconds !== null && finalDuration > 0) {
+            progress(spans, 'overlay', seconds / finalDuration)
+          }
+        }
+      )
+      stagePath = overlayOut
+      progress(spans, 'overlay', 1)
     }
 
     // ── Mux the audio lanes (music bed + speech) ─────────────────────────

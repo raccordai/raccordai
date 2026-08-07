@@ -76,6 +76,10 @@ export interface WorkflowIO {
       captionsPreset?: string
       /** Duck the music bed under the voice-over. */
       duckMusic?: boolean
+      /** Encoder quality (default 'standard'). */
+      quality?: 'draft' | 'standard' | 'high'
+      /** Output codec (default h264). */
+      codec?: 'h264' | 'hevc'
       watermark?: {
         text: string
         position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
@@ -346,6 +350,10 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
             ? { captionsPreset: options.captionsPreset }
             : {}),
           ...(options?.duckMusic ? { duckMusic: true } : {}),
+          ...(options?.quality && options.quality !== 'standard'
+            ? { quality: options.quality }
+            : {}),
+          ...(options?.codec && options.codec !== 'h264' ? { codec: options.codec } : {}),
           ...(options?.watermark?.text.trim() ? { watermark: options.watermark } : {})
         })
         if (result) {

@@ -4,7 +4,17 @@ import { SCENARIO_VERSION, SCREEN_DIRECTIONS, type Scenario } from '../scenario'
 import { type SpeechTranscript } from '../speech'
 import { CLIP_TRANSITION_IDS, TRANSITION_MAX_SECONDS, TRANSITION_MIN_SECONDS } from '../transitions'
 import { CAPTION_PRESET_IDS } from '../captions'
-import { VOLUME_MAX, VOLUME_MIN } from '../config'
+import {
+  RENDER_CODECS,
+  RENDER_QUALITIES,
+  SPEED_MAX,
+  SPEED_MIN,
+  VOLUME_MAX,
+  VOLUME_MIN
+} from '../config'
+import { CLIP_LOOK_IDS } from '../looks'
+import { STILL_MOTION_IDS } from '../stillMotion'
+import { TEXT_ANIMATION_IDS } from '../textAnimations'
 
 /**
  * Single source of truth for the renderer <-> main boundary.
@@ -500,6 +510,31 @@ export const clipOverlaySchema = z.object({
 export type ClipOverlay = z.infer<typeof clipOverlaySchema>
 
 /**
+ * A sticker on the timeline (§6.12d): an image overlay in absolute
+ * final-timeline seconds, normalized CENTER position, width as % of the output
+ * width. The image comes from an image node's output OR a project asset
+ * (exactly one of nodeId/assetId). Composited at render (overlay pass).
+ */
+export const imageLayerSchema = z.object({
+  id: z.string(),
+  videoId: z.string(),
+  nodeId: z.string().nullable(),
+  assetId: z.string().nullable(),
+  startSec: z.number().min(0),
+  endSec: z.number().positive(),
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  widthPct: z.number().min(1).max(100),
+  createdAt: z.number()
+})
+export type ImageLayer = z.infer<typeof imageLayerSchema>
+
+/** Creation payload: one of nodeId/assetId required (service-enforced). */
+export const imageLayerInputSchema = imageLayerSchema
+  .omit({ id: true, createdAt: true })
+  .partial({ nodeId: true, assetId: true, x: true, y: true, widthPct: true })
+
+/**
  * A free text layer on the timeline (§6.12b): absolute final-timeline seconds,
  * normalized frame position + ASS numpad anchor, own typography. Burned at
  * render through the libass pass; previewed (and dragged) on the player.
@@ -518,6 +553,8 @@ export const textLayerSchema = z.object({
   bold: z.boolean(),
   italic: z.boolean(),
   colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  /** Entrance animation preset (a TEXT_ANIMATIONS id, null = static). */
+  animation: z.enum(TEXT_ANIMATION_IDS).nullable(),
   createdAt: z.number()
 })
 export type TextLayer = z.infer<typeof textLayerSchema>
@@ -531,7 +568,8 @@ export const textLayerInputSchema = textLayerSchema.omit({ id: true, createdAt: 
   sizePct: true,
   bold: true,
   italic: true,
-  colorHex: true
+  colorHex: true,
+  animation: true
 })
 
 export const graphNodeSchema = z.object({
@@ -555,6 +593,14 @@ export const graphNodeSchema = z.object({
   overlay: clipOverlaySchema.nullable().optional(),
   /** Audio-lane volume gain (0–2, null = 1) — read through the shared clipVolume. */
   volume: z.number().nullable().optional(),
+  /** Clip playback speed (0.25–4, null = 1) — read through the shared clipSpeed. */
+  speed: z.number().nullable().optional(),
+  /** Colour look baked at render (a CLIP_LOOKS id) — read through the shared clipLook. */
+  look: z.string().nullable().optional(),
+  /** Ken Burns preset of a STILL slot (a STILL_MOTIONS id) — shared stillMotionOf. */
+  stillMotion: z.string().nullable().optional(),
+  /** Absolute start of an AUDIO track (final-timeline s) — shared clipTimelineOffset. */
+  timelineOffsetSec: z.number().nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -1102,6 +1148,29 @@ export const ipcContracts = {
     }),
     output: z.void()
   },
+  /** Clip playback speed: 0.25–4, null = original (1). */
+  'nodes:setSpeed': {
+    input: z.object({
+      nodeId: z.string(),
+      speed: z.number().min(SPEED_MIN).max(SPEED_MAX).nullable()
+    }),
+    output: z.void()
+  },
+  /** Colour look baked at render time (a CLIP_LOOKS id, null = untouched). */
+  'nodes:setLook': {
+    input: z.object({ nodeId: z.string(), look: z.enum(CLIP_LOOK_IDS).nullable() }),
+    output: z.void()
+  },
+  /** Ken Burns preset of a STILL slot (a STILL_MOTIONS id, null = frozen frame). */
+  'nodes:setStillMotion': {
+    input: z.object({ nodeId: z.string(), motion: z.enum(STILL_MOTION_IDS).nullable() }),
+    output: z.void()
+  },
+  /** Absolute start of an AUDIO track (null = chain after the previous track). */
+  'nodes:setTimelineOffset': {
+    input: z.object({ nodeId: z.string(), offsetSec: z.number().min(0).nullable() }),
+    output: z.void()
+  },
 
   // Free text layers of the timeline (§6.12b) — the title track.
   'textLayers:list': {
@@ -1117,6 +1186,23 @@ export const ipcContracts = {
     output: textLayerSchema
   },
   'textLayers:delete': { input: z.object({ id: z.string() }), output: z.void() },
+
+  // Sticker track (§6.12d) — image overlays, same shape as the title track.
+  'imageLayers:list': {
+    input: z.object({ videoId: z.string() }),
+    output: z.array(imageLayerSchema)
+  },
+  'imageLayers:create': { input: imageLayerInputSchema, output: imageLayerSchema },
+  'imageLayers:update': {
+    input: z.object({
+      id: z.string(),
+      patch: imageLayerSchema
+        .omit({ id: true, videoId: true, nodeId: true, assetId: true, createdAt: true })
+        .partial()
+    }),
+    output: imageLayerSchema
+  },
+  'imageLayers:delete': { input: z.object({ id: z.string() }), output: z.void() },
   'nodes:replaceModel': {
     input: z.object({ nodeId: z.string(), modelId: z.string() }),
     output: z.void()
@@ -1474,6 +1560,10 @@ export const ipcContracts = {
       captionsPreset: z.enum(CAPTION_PRESET_IDS).optional(),
       /** Duck the music bed under the voice-over (transcript-timed windows). */
       duckMusic: z.boolean().optional(),
+      /** Encoder quality (default 'standard' = the historical args). */
+      quality: z.enum(RENDER_QUALITIES).optional(),
+      /** Output codec (default h264; hevc forces the normalize path). */
+      codec: z.enum(RENDER_CODECS).optional(),
       /** Translucent corner text over the whole film (per-render, not persisted). */
       watermark: z
         .object({
@@ -1780,9 +1870,9 @@ export interface NavigatePayload {
 /** Progress of an MP4 render. One terminal event is always sent: done or error. */
 export interface RenderProgressPayload {
   videoId: string
-  /** 0–100 across the whole pipeline (probe → normalize → transition → concat → subtitles → mux). */
+  /** 0–100 across the whole pipeline (probe → normalize → transition → concat → subtitles → overlay → mux). */
   percent: number
-  step: 'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'mux'
+  step: 'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
   done?: boolean
   /** Set on the terminal event when the render failed (or was cancelled). */
   error?: string

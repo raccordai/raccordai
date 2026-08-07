@@ -25,6 +25,13 @@
     "mp4FormatAuto": "Auto",
     "mp4FormatAutoHint": "d'après les clips",
     "mp4Subtitles": "Incruster les dialogues du scénario en sous-titres",
+    "mp4Quality": "Qualité",
+    "quality": {
+      "draft": "Brouillon",
+      "standard": "Standard",
+      "high": "Haute"
+    },
+    "mp4Codec": "Codec de sortie",
     "mp4Captions": "Sous-titres dynamiques (voix off)",
     "captionsOff": "Désactivés",
     "captions": {
@@ -200,7 +207,39 @@
     "layerDragHint": "Glisse le texte directement sur l'aperçu pour le positionner.",
     "volume": "Volume de la piste",
     "volumeHint": "100 % = original. Au-delà de 100 %, appliqué uniquement au MP4 exporté (l'aperçu ne peut pas amplifier).",
-    "volumeHintOpen": "double-clic pour régler le volume"
+    "volumeHintOpen": "double-clic pour régler le volume",
+    "speed": "Vitesse",
+    "look": "Look",
+    "lookNone": "Aucun",
+    "looks": {
+      "warm": "Chaud",
+      "cool": "Froid",
+      "faded": "Délavé",
+      "vivid": "Vif",
+      "mono": "Noir et blanc",
+      "noir": "Noir contrasté",
+      "vintage": "Vintage"
+    },
+    "motion": "Mouvement (Ken Burns)",
+    "motionNone": "Statique",
+    "motions": {
+      "zoom-in": "Zoom avant",
+      "zoom-out": "Zoom arrière",
+      "pan-left": "Panoramique gauche",
+      "pan-right": "Panoramique droite"
+    },
+    "layerAnimation": "Animation",
+    "layerAnimationNone": "Aucune",
+    "layerAnimations": {
+      "fade": "Fondu",
+      "pop": "Pop",
+      "slide-up": "Glissé vers le haut"
+    },
+    "addSticker": "Ajouter un sticker (image incrustée)",
+    "sticker": "Sticker",
+    "stickerSize": "Largeur ({{pct}} %)",
+    "stickerDelete": "Supprimer ce sticker",
+    "stickerDragHint": "Glisse le sticker directement sur l'aperçu pour le positionner."
   },
   "onboarding": {
     "skip": "Passer",
@@ -775,6 +814,7 @@
       "transition": "Fondu des transitions",
       "concat": "Assemblage",
       "subtitles": "Incrustation des sous-titres",
+      "overlay": "Incrustation des stickers",
       "mux": "Mixage audio"
     },
     "importReplaceBtn": "Remplacer",

@@ -148,6 +148,20 @@
       "when": 1786046423112,
       "tag": "0020_parallel_mongoose",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1786100033584,
+      "tag": "0021_hard_pepper_potts",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1786100978252,
+      "tag": "0022_mature_smiling_tiger",
+      "breakpoints": true
     }
   ]
 }

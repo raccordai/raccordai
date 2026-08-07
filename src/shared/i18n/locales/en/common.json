@@ -25,6 +25,13 @@
     "mp4FormatAuto": "Auto",
     "mp4FormatAutoHint": "from the clips",
     "mp4Subtitles": "Burn the scenario's dialogue as subtitles",
+    "mp4Quality": "Quality",
+    "quality": {
+      "draft": "Draft",
+      "standard": "Standard",
+      "high": "High"
+    },
+    "mp4Codec": "Output codec",
     "mp4Captions": "Dynamic captions (voice-over)",
     "captionsOff": "Off",
     "captions": {
@@ -200,7 +207,39 @@
     "layerDragHint": "Drag the text directly on the preview to position it.",
     "volume": "Track volume",
     "volumeHint": "100% = original. Values above 100% only apply to the exported MP4 (the preview cannot amplify).",
-    "volumeHintOpen": "double-click to adjust the volume"
+    "volumeHintOpen": "double-click to adjust the volume",
+    "speed": "Speed",
+    "look": "Look",
+    "lookNone": "None",
+    "looks": {
+      "warm": "Warm",
+      "cool": "Cool",
+      "faded": "Faded",
+      "vivid": "Vivid",
+      "mono": "Black & white",
+      "noir": "Noir",
+      "vintage": "Vintage"
+    },
+    "motion": "Motion (Ken Burns)",
+    "motionNone": "Static",
+    "motions": {
+      "zoom-in": "Zoom in",
+      "zoom-out": "Zoom out",
+      "pan-left": "Pan left",
+      "pan-right": "Pan right"
+    },
+    "layerAnimation": "Animation",
+    "layerAnimationNone": "None",
+    "layerAnimations": {
+      "fade": "Fade",
+      "pop": "Pop",
+      "slide-up": "Slide up"
+    },
+    "addSticker": "Add a sticker (image overlay)",
+    "sticker": "Sticker",
+    "stickerSize": "Width ({{pct}}%)",
+    "stickerDelete": "Delete this sticker",
+    "stickerDragHint": "Drag the sticker directly on the preview to position it."
   },
   "onboarding": {
     "skip": "Skip",
@@ -775,6 +814,7 @@
       "transition": "Blending transitions",
       "concat": "Assembling",
       "subtitles": "Burning subtitles",
+      "overlay": "Compositing stickers",
       "mux": "Mixing audio"
     },
     "importReplaceBtn": "Replace",

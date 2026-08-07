@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   CROSSFADE_DURATION,
+  atempoChain,
   buildCaptionEvents,
+  buildOverlayArgs,
+  clipMediaWindow,
+  encodeArgsFor,
+  stillMotionFilter,
   buildConcatArgs,
   buildConcatListContent,
   buildCrossfadeArgs,
@@ -718,6 +723,264 @@ describe('per-track volume', () => {
     expect(filter).toContain('[1:a]volume=1.5[t1]')
     // volume: 1 is a no-op — the speech track feeds apad directly.
     expect(filter).toContain('[2:a]apad[spad]')
+  })
+})
+
+describe('clip speed', () => {
+  it('divides the effective duration, media window untouched', () => {
+    const c = clip({ trimStartSec: 1, trimEndSec: 9, speed: 2 })
+    expect(clipMediaWindow(c)).toBe(8)
+    expect(clipEffectiveDuration(c)).toBe(4)
+    expect(clipEffectiveDuration(clip({ speed: 0.5 }))).toBe(10)
+  })
+
+  it('rejects the lossless path', () => {
+    const spec = { width: 1920, height: 1080, fps: 24 }
+    expect(canConcatLosslessly([clip(), clip({ speed: 1.5 })], spec)).toBe(false)
+    expect(canConcatLosslessly([clip(), clip({ speed: 1 })], spec)).toBe(true)
+  })
+
+  it('retimes video through setpts (before fps) and audio through atempo', () => {
+    const args = buildNormalizeArgs(
+      clip({ trimStartSec: 1, trimEndSec: 9, speed: 2 }),
+      { width: 1280, height: 720, fps: 24 },
+      '/tmp/seg.mp4'
+    )
+    const joined = args.join(' ')
+    // -ss/-t stay in MEDIA time; the retime happens in the filter chain.
+    expect(joined).toContain('-ss 1.000')
+    expect(joined).toContain('-t 8.000')
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('setpts=PTS/2,fps=24')
+    expect(filter).toContain(';[0:a]atempo=2[a]')
+    expect(joined).toContain('-map [v] -map [a]')
+  })
+
+  it('injected silence never goes through atempo', () => {
+    const args = buildNormalizeArgs(
+      clip({ speed: 2, probe: probe({ hasAudio: false, audioCodec: null }) }),
+      { width: 1280, height: 720, fps: 24 },
+      '/tmp/seg.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).not.toContain('atempo')
+    expect(args.join(' ')).toContain('-map [v] -map 1:a')
+  })
+
+  it('chains atempo stages outside 0.5–2', () => {
+    expect(atempoChain(1.5)).toBe('atempo=1.5')
+    expect(atempoChain(4)).toBe('atempo=2,atempo=2')
+    expect(atempoChain(3)).toBe('atempo=2,atempo=1.5')
+    expect(atempoChain(0.25)).toBe('atempo=0.5,atempo=0.5')
+  })
+})
+
+describe('clip look', () => {
+  it('chains the look between pad and fps, and rejects the lossless path', () => {
+    const args = buildNormalizeArgs(
+      clip({ look: 'mono' }),
+      { width: 1280, height: 720, fps: 24 },
+      '/tmp/seg.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('color=black,hue=s=0,fps=24')
+    const spec = { width: 1920, height: 1080, fps: 24 }
+    expect(canConcatLosslessly([clip({ look: 'mono' })], spec)).toBe(false)
+  })
+
+  it('the chain stays byte-identical without any effect', () => {
+    const plain = buildNormalizeArgs(clip(), { width: 1280, height: 720, fps: 24 }, '/tmp/s.mp4')
+    const filter = plain[plain.indexOf('-filter_complex') + 1]!
+    expect(filter).toBe(
+      '[0:v]scale=1280:720:force_original_aspect_ratio=decrease,' +
+        'pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,fps=24,format=yuv420p[v]'
+    )
+  })
+})
+
+describe('still motion (Ken Burns)', () => {
+  it('zoompan replaces the frozen loop: one input frame, d = the whole hold', () => {
+    const args = buildNormalizeArgs(
+      clip({
+        isStill: true,
+        probe: null,
+        stillDurationSeconds: 5,
+        stillMotion: 'zoom-in',
+        path: '/media/still.png'
+      }),
+      { width: 1280, height: 720, fps: 24 },
+      '/tmp/seg.mp4'
+    )
+    const joined = args.join(' ')
+    expect(joined).not.toContain('-loop 1')
+    expect(joined).toContain('-t 5 -i anullsrc')
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain("zoompan=z='min(1+0.001250*on,1.15)'")
+    expect(filter).toContain('d=120:s=1280x720:fps=24')
+    // zoompan owns the output rate — no fps filter after it.
+    expect(filter).not.toContain(',fps=24,')
+  })
+
+  it('pans traverse the hidden band across the hold', () => {
+    const spec = { width: 1920, height: 1080, fps: 24 }
+    expect(stillMotionFilter('pan-left', 5, spec)).toContain("x='(iw-iw/zoom)*(1-on/120)'")
+    expect(stillMotionFilter('pan-right', 5, spec)).toContain("x='(iw-iw/zoom)*on/120'")
+    expect(stillMotionFilter('zoom-out', 5, spec)).toContain("z='max(1.15-0.001250*on,1)'")
+  })
+
+  it('a motionless still keeps the historical loop argv', () => {
+    const args = buildNormalizeArgs(
+      clip({ isStill: true, probe: null, stillDurationSeconds: 6, path: '/media/still.png' }),
+      { width: 1280, height: 720, fps: 24 },
+      '/tmp/seg.mp4'
+    )
+    expect(args.join(' ')).toContain('-loop 1 -t 6 -i /media/still.png')
+  })
+})
+
+describe('text layer animations', () => {
+  const spec = { width: 1920, height: 1080 }
+  const base = {
+    kind: 'layer' as const,
+    startSec: 0,
+    endSec: 3,
+    text: 'Titre',
+    x: 0.5,
+    y: 0.5
+  }
+
+  it('fade and pop keep \\pos and add their tags', () => {
+    const fade = buildAssContent(spec, [{ ...base, animation: 'fade' }])
+    expect(fade).toContain('\\pos(960,540)')
+    expect(fade).toContain('\\fad(200,200)')
+    const pop = buildAssContent(spec, [{ ...base, animation: 'pop' }])
+    expect(pop).toContain('\\fad(120,0)\\fscx70\\fscy70\\t(0,150,\\fscx100\\fscy100)')
+  })
+
+  it('slide-up replaces \\pos with \\move from below', () => {
+    const ass = buildAssContent(spec, [{ ...base, animation: 'slide-up' }])
+    expect(ass).toContain('\\move(960,594,960,540,0,250)')
+    expect(ass).toContain('\\fad(150,0)')
+    expect(ass).not.toContain('\\pos(')
+  })
+
+  it('a static layer stays byte-identical', () => {
+    const ass = buildAssContent(spec, [{ ...base, animation: null }])
+    expect(ass).toContain('\\pos(960,540)')
+    expect(ass).not.toContain('\\fad')
+    expect(ass).not.toContain('\\move')
+  })
+})
+
+describe('export quality & codec', () => {
+  it("'standard' h264 is the historical encoder args byte for byte", () => {
+    expect(encodeArgsFor()).toEqual(['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18'])
+    expect(encodeArgsFor('standard', 'h264')).toEqual(encodeArgsFor())
+  })
+
+  it('quality changes the CRF/preset; hevc switches encoder and tags hvc1', () => {
+    expect(encodeArgsFor('draft')).toEqual(['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23'])
+    expect(encodeArgsFor('high')).toEqual(['-c:v', 'libx264', '-preset', 'medium', '-crf', '16'])
+    expect(encodeArgsFor('standard', 'hevc')).toEqual([
+      '-c:v',
+      'libx265',
+      '-preset',
+      'fast',
+      '-crf',
+      '24',
+      '-tag:v',
+      'hvc1'
+    ])
+  })
+
+  it('threads through the builders', () => {
+    const hevc = encodeArgsFor('standard', 'hevc')
+    expect(
+      buildNormalizeArgs(clip(), { width: 1280, height: 720, fps: 24 }, '/o.mp4', hevc)
+    ).toEqual(expect.arrayContaining(['libx265']))
+    expect(buildSubtitleBurnArgs('/i.mp4', '/l.ass', '/o.mp4', hevc)).toEqual(
+      expect.arrayContaining(['libx265'])
+    )
+  })
+})
+
+describe('audio lane absolute placement', () => {
+  it('delays offset tracks and mixes the lane instead of concatenating', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [
+        { path: '/a.mp3', startSec: 0 },
+        { path: '/b.mp3', startSec: 12.5 }
+      ],
+      [],
+      false,
+      30,
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('[2:a]adelay=12500:all=1[t2]')
+    expect(filter).toContain('[1:a][t2]amix=inputs=2:duration=longest:normalize=0[mcat]')
+    expect(filter).not.toContain('concat=')
+  })
+
+  it('adelay chains after the trim and the volume', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/a.mp3', trimStartSec: 1, trimEndSec: 6, volume: 0.5, startSec: 3 }],
+      [],
+      false,
+      30,
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain(
+      '[1:a]atrim=start=1:end=6,asetpts=PTS-STARTPTS,volume=0.5,adelay=3000:all=1[t1]'
+    )
+  })
+
+  it('an offset-less lane keeps the historical concat argv', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/a.mp3' }, { path: '/b.mp3' }],
+      [],
+      false,
+      30,
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('[1:a][2:a]concat=n=2:v=0:a=1[mcat]')
+  })
+})
+
+describe('sticker overlays', () => {
+  const spec = { width: 1920, height: 1080, fps: 24 }
+
+  it('scales each sticker, overlays at its center, enabled in its window', () => {
+    const args = buildOverlayArgs(
+      '/tmp/in.mp4',
+      [
+        { path: '/s1.png', startSec: 1, endSec: 4, x: 0.5, y: 0.5, widthFraction: 0.25 },
+        { path: '/s2.png', startSec: 2, endSec: 6, x: 0.9, y: 0.1, widthFraction: 0.1 }
+      ],
+      spec,
+      '/tmp/out.mp4'
+    )
+    const joined = args.join(' ')
+    expect(joined).toContain('-i /s1.png')
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('[1:v]scale=480:-2[s1]')
+    expect(filter).toContain('[2:v]scale=192:-2[s2]')
+    expect(filter).toContain(
+      "[0:v][s1]overlay=x='(main_w*0.5000)-(overlay_w/2)':y='(main_h*0.5000)-(overlay_h/2)':enable='between(t,1.000,4.000)'[b1]"
+    )
+    expect(filter).toContain('[b1][s2]overlay=')
+    expect(filter).toContain('[vout]')
+    expect(joined).toContain('-map [vout] -map 0:a?')
+    expect(joined).toContain('-c:a copy')
+  })
+
+  it('refuses an empty pass', () => {
+    expect(() => buildOverlayArgs('/i.mp4', [], spec, '/o.mp4')).toThrow(/at least one/)
   })
 })
 

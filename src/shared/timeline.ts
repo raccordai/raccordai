@@ -1,6 +1,8 @@
 import type { GraphNode } from './ipc/contracts'
-import { VOLUME_MAX, VOLUME_MIN } from './config'
+import { SPEED_MAX, SPEED_MIN, VOLUME_MAX, VOLUME_MIN } from './config'
+import { isClipLookId } from './looks'
 import { getModel } from './models'
+import { isStillMotionId } from './stillMotion'
 import { clampTransitionSeconds, isClipTransitionId } from './transitions'
 
 /**
@@ -201,6 +203,55 @@ export function clipVolume(node: GraphNode): number {
   const v = node.volume
   if (typeof v !== 'number' || !Number.isFinite(v)) return 1
   return Math.min(VOLUME_MAX, Math.max(VOLUME_MIN, v))
+}
+
+/**
+ * The clip's playback speed, clamped (null/undefined = 1). The rendered slot
+ * lasts `trimmed duration / speed`; preview parity via `playbackRate`.
+ */
+export function clipSpeed(node: GraphNode): number {
+  const s = node.speed
+  if (typeof s !== 'number' || !Number.isFinite(s) || s <= 0) return 1
+  return Math.min(SPEED_MAX, Math.max(SPEED_MIN, s))
+}
+
+/** The clip's colour look (a CLIP_LOOKS id) or null (untouched). */
+export function clipLook(node: GraphNode): string | null {
+  return isClipLookId(node.look) ? node.look : null
+}
+
+/** The still slot's Ken Burns preset (a STILL_MOTIONS id) or null (frozen frame). */
+export function stillMotionOf(node: GraphNode): string | null {
+  return isStillMotionId(node.stillMotion) ? node.stillMotion : null
+}
+
+/**
+ * Absolute start of an AUDIO track on the final timeline, or null (the
+ * historical layout: chained after the previous lane track).
+ */
+export function clipTimelineOffset(node: GraphNode): number | null {
+  const v = node.timelineOffsetSec
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return null
+  return v
+}
+
+/**
+ * Start seconds of each lane track on the final timeline — THE lane layout,
+ * shared by the preview player and the MP4 render. A track with an explicit
+ * offset sits there; a track without chains after the previous track's end.
+ * With no offsets anywhere this is the historical pure concatenation from 0.
+ */
+export function audioLaneStarts(
+  tracks: Array<{ offsetSec: number | null; durationSeconds: number }>
+): number[] {
+  const starts: number[] = []
+  let cursor = 0
+  for (const t of tracks) {
+    const start = t.offsetSec ?? cursor
+    starts.push(start)
+    cursor = start + Math.max(0, t.durationSeconds)
+  }
+  return starts
 }
 
 /** Transition into the NEXT clip (a CLIP_TRANSITIONS id) or null (plain cut). */

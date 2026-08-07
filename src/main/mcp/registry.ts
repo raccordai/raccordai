@@ -4,6 +4,9 @@ import { getStyle } from '@shared/styles/registry'
 import { videoAspectRatioSchema, videoResolutionSchema } from '@shared/ipc/contracts'
 import { CLIP_TRANSITION_IDS } from '@shared/transitions'
 import { CAPTION_PRESET_IDS, isCaptionPresetId } from '@shared/captions'
+import { CLIP_LOOK_IDS } from '@shared/looks'
+import { STILL_MOTION_IDS } from '@shared/stillMotion'
+import { TEXT_ANIMATION_IDS, isTextAnimationId } from '@shared/textAnimations'
 import { SCREEN_DIRECTIONS, planScenario, type ScenarioBeat } from '@shared/scenario'
 import { broadcastFocusNode, broadcastNavigate, broadcastWorkflowChanged } from '../events'
 import * as assets from '../services/assets'
@@ -39,6 +42,12 @@ import {
   listTextLayers,
   updateTextLayer
 } from '../services/textLayers'
+import {
+  createImageLayer,
+  deleteImageLayer,
+  listImageLayers,
+  updateImageLayer
+} from '../services/imageLayers'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -862,6 +871,148 @@ export const AGENT_TOOLS: AgentTool[] = [
     }
   },
   {
+    name: 'set_clip_speed',
+    description:
+      'Playback speed of a video clip on the timeline: 1 = original, 0.25–4 (0.5 = slow motion, 2 = twice as fast). Null resets. The rendered slot lasts trimmed duration ÷ speed; audio follows (pitch-corrected atempo). Preview plays at the same rate.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        speed: { type: ['number', 'null'], description: 'Factor 0.25–4, null = original (1)' }
+      },
+      ['nodeId', 'speed']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, speed }) => {
+      graph.setClipSpeed(String(nodeId), speed == null ? null : Number(speed))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_clip_look',
+    description:
+      'Colour look baked on a clip at render time (the `look` enum lists the library: warm, cool, faded, vivid, mono, noir, vintage). Null removes it. The timeline player previews a CSS approximation live.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        look: { type: ['string', 'null'], enum: [...CLIP_LOOK_IDS, null] }
+      },
+      ['nodeId', 'look']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, look }) => {
+      graph.setClipLook(String(nodeId), look == null ? null : String(look))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_still_motion',
+    description:
+      'Ken Burns motion on a STILL timeline slot (image/asset node placed via set_timeline_order): zoom-in, zoom-out, pan-left or pan-right instead of a frozen frame. Null = static. Applied at render (zoompan).',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        motion: { type: ['string', 'null'], enum: [...STILL_MOTION_IDS, null] }
+      },
+      ['nodeId', 'motion']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, motion }) => {
+      graph.setStillMotion(String(nodeId), motion == null ? null : String(motion))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_audio_offset',
+    description:
+      'Absolute start of an AUDIO track on the final timeline (seconds). Null restores the default layout (chained after the previous lane track). Overlapping tracks of a lane simply mix. Preview and MP4 render follow the same placement.',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        offsetSec: { type: ['number', 'null'], description: 'Start in seconds (≥ 0), null = chain' }
+      },
+      ['nodeId', 'offsetSec']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, offsetSec }) => {
+      graph.setTimelineOffset(String(nodeId), offsetSec == null ? null : Number(offsetSec))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'list_image_layers',
+    description:
+      'The video’s sticker track: image overlays composited over the film at render time — timing (absolute FINAL-timeline seconds), normalized center position, width as % of the output width, and the image source (an image node’s output or a project asset).',
+    inputSchema: obj({ videoId: str() }, ['videoId']),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId }) => listImageLayers(String(videoId))
+  },
+  {
+    name: 'add_image_layer',
+    description:
+      'Add a sticker (image overlay) to the video: pass nodeId (an image node — its best generation is composited) OR assetId (a project asset), never both. Position is the sticker’s CENTER (x/y normalized 0–1); widthPct sizes it as % of the output width.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        nodeId: str('Image node id (exactly one of nodeId/assetId)'),
+        assetId: str('Project asset id (exactly one of nodeId/assetId)'),
+        startSec: { type: 'number', description: 'Start, in FINAL-timeline seconds' },
+        endSec: { type: 'number', description: 'End, in FINAL-timeline seconds (> start)' },
+        x: { type: 'number', description: 'Center x, 0–1 (default 0.5)' },
+        y: { type: 'number', description: 'Center y, 0–1 (default 0.5)' },
+        widthPct: { type: 'number', description: '% of output width, 1–100 (default 25)' }
+      },
+      ['videoId', 'startSec', 'endSec']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: (args) =>
+      createImageLayer({
+        videoId: String(args['videoId']),
+        startSec: Number(args['startSec']),
+        endSec: Number(args['endSec']),
+        ...(args['nodeId'] !== undefined ? { nodeId: String(args['nodeId']) } : {}),
+        ...(args['assetId'] !== undefined ? { assetId: String(args['assetId']) } : {}),
+        ...(args['x'] !== undefined ? { x: Number(args['x']) } : {}),
+        ...(args['y'] !== undefined ? { y: Number(args['y']) } : {}),
+        ...(args['widthPct'] !== undefined ? { widthPct: Number(args['widthPct']) } : {})
+      })
+  },
+  {
+    name: 'update_image_layer',
+    description:
+      'Update a sticker’s timing, position or size (list_image_layers gives the ids). The image source is fixed — delete and re-add to change it.',
+    inputSchema: obj(
+      {
+        layerId: str(),
+        patch: {
+          type: 'object',
+          description: 'Fields to change: startSec, endSec, x, y, widthPct'
+        }
+      },
+      ['layerId', 'patch']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ layerId, patch }) =>
+      updateImageLayer(String(layerId), (patch ?? {}) as Record<string, never>)
+  },
+  {
+    name: 'delete_image_layer',
+    description: 'Remove a sticker from the timeline (easily recreated with add_image_layer).',
+    inputSchema: obj({ layerId: str() }, ['layerId']),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ layerId }) => {
+      deleteImageLayer(String(layerId))
+      return { ok: true }
+    }
+  },
+  {
     name: 'list_text_layers',
     description:
       'The video’s title track: free text layers (titles, captions, credits) with their timing (absolute seconds on the FINAL timeline), frame position (normalized x/y + numpad anchor) and typography. Burned at render.',
@@ -887,7 +1038,12 @@ export const AGENT_TOOLS: AgentTool[] = [
         sizePct: { type: 'number', description: '% of output height, 1–30 (default 6)' },
         bold: { type: 'boolean' },
         italic: { type: 'boolean' },
-        colorHex: { type: 'string', description: '#RRGGBB (default #ffffff)' }
+        colorHex: { type: 'string', description: '#RRGGBB (default #ffffff)' },
+        animation: {
+          type: 'string',
+          enum: [...TEXT_ANIMATION_IDS],
+          description: 'Entrance animation (fade, pop, slide-up); omit for static'
+        }
       },
       ['videoId', 'content', 'startSec', 'endSec']
     ),
@@ -906,7 +1062,8 @@ export const AGENT_TOOLS: AgentTool[] = [
         ...(args['sizePct'] !== undefined ? { sizePct: Number(args['sizePct']) } : {}),
         ...(args['bold'] !== undefined ? { bold: Boolean(args['bold']) } : {}),
         ...(args['italic'] !== undefined ? { italic: Boolean(args['italic']) } : {}),
-        ...(args['colorHex'] !== undefined ? { colorHex: String(args['colorHex']) } : {})
+        ...(args['colorHex'] !== undefined ? { colorHex: String(args['colorHex']) } : {}),
+        ...(isTextAnimationId(args['animation']) ? { animation: args['animation'] } : {})
       })
   },
   {
@@ -919,7 +1076,7 @@ export const AGENT_TOOLS: AgentTool[] = [
         patch: {
           type: 'object',
           description:
-            'Fields to change: content, startSec, endSec, x, y, anchor, fontFamily, sizePct, bold, italic, colorHex'
+            'Fields to change: content, startSec, endSec, x, y, anchor, fontFamily, sizePct, bold, italic, colorHex, animation (fade | pop | slide-up | null)'
         }
       },
       ['layerId', 'patch']
@@ -1613,6 +1770,16 @@ export const AGENT_TOOLS: AgentTool[] = [
           type: 'boolean',
           description: 'Duck the music bed under the voice-over (transcript-timed windows)'
         },
+        quality: {
+          type: 'string',
+          enum: ['draft', 'standard', 'high'],
+          description: 'Encoder quality (default standard)'
+        },
+        codec: {
+          type: 'string',
+          enum: ['h264', 'hevc'],
+          description: 'Output codec (default h264; hevc = smaller files, forces re-encode)'
+        },
         watermarkText: {
           type: 'string',
           description: 'Translucent corner text over the whole film (max 80 chars)'
@@ -1635,6 +1802,8 @@ export const AGENT_TOOLS: AgentTool[] = [
       burnSubtitles,
       captionsPreset,
       duckMusic,
+      quality,
+      codec,
       watermarkText,
       watermarkPosition
     }) => {
@@ -1652,6 +1821,8 @@ export const AGENT_TOOLS: AgentTool[] = [
         ...(burnSubtitles !== undefined ? { burnSubtitles: Boolean(burnSubtitles) } : {}),
         ...(isCaptionPresetId(captionsPreset) ? { captionsPreset } : {}),
         ...(duckMusic !== undefined ? { duckMusic: Boolean(duckMusic) } : {}),
+        ...(quality === 'draft' || quality === 'standard' || quality === 'high' ? { quality } : {}),
+        ...(codec === 'h264' || codec === 'hevc' ? { codec } : {}),
         ...(watermarkText
           ? { watermark: { text: String(watermarkText), ...(corner ? { position: corner } : {}) } }
           : {})

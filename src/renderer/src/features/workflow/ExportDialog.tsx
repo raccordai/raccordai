@@ -16,6 +16,8 @@ export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => v
   const [burnSubtitles, setBurnSubtitles] = useState(false)
   const [captionsPreset, setCaptionsPreset] = useState<string>('')
   const [duckMusic, setDuckMusic] = useState(false)
+  const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>('standard')
+  const [codec, setCodec] = useState<'h264' | 'hevc'>('h264')
   const [watermarkText, setWatermarkText] = useState('')
   const [watermarkPosition, setWatermarkPosition] = useState<
     'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
@@ -78,6 +80,8 @@ export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => v
                     burnSubtitles,
                     ...(captionsPreset ? { captionsPreset } : {}),
                     ...(duckMusic ? { duckMusic: true } : {}),
+                    quality,
+                    codec,
                     ...(watermarkText.trim()
                       ? {
                           watermark: {
@@ -112,6 +116,29 @@ export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => v
                   onClick={() => setPreset(p)}
                 />
               ))}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[11px] text-neutral-400">
+                {t('exportDialog.mp4Quality')}
+              </span>
+              {(['draft', 'standard', 'high'] as const).map((q) => (
+                <FormatPill
+                  key={q}
+                  active={quality === q}
+                  label={t(`exportDialog.quality.${q}` as never)}
+                  sub={q === 'draft' ? 'CRF 23' : q === 'high' ? 'CRF 16' : 'CRF 18'}
+                  onClick={() => setQuality(q)}
+                />
+              ))}
+              <select
+                className="ml-2 rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
+                value={codec}
+                onChange={(e) => setCodec(e.target.value as 'h264' | 'hevc')}
+                title={t('exportDialog.mp4Codec')}
+              >
+                <option value="h264">H.264</option>
+                <option value="hevc">H.265 (HEVC)</option>
+              </select>
             </div>
             <label className="mt-2 flex items-center gap-1.5 text-[11px] text-neutral-300">
               <input

@@ -3,10 +3,14 @@ import type { GraphNode } from './ipc/contracts'
 import {
   CROSSFADE_SECONDS,
   DEFAULT_STILL_SECONDS,
+  audioLaneStarts,
   bestGeneration,
   clipDuration,
   clipResolution,
   clipTransitionAfter,
+  clipLook,
+  clipSpeed,
+  clipTimelineOffset,
   clipTrim,
   clipVolume,
   collectAudioNodes,
@@ -14,6 +18,7 @@ import {
   isStillClip,
   shotNumber,
   stillClipSeconds,
+  stillMotionOf,
   timelineOrder,
   transitionOverlapSeconds,
   trimmedClipDuration
@@ -116,6 +121,51 @@ describe('transitions', () => {
     expect(clipTransitionAfter(b)).toBeNull()
     // a→b crossfades; b→c cuts; c's transition has nothing after it.
     expect(transitionOverlapSeconds([a, b, c])).toBeCloseTo(CROSSFADE_SECONDS)
+  })
+})
+
+describe('clipSpeed / clipLook / stillMotionOf', () => {
+  it('clipSpeed defaults to 1 and clamps into 0.25–4', () => {
+    expect(clipSpeed(node())).toBe(1)
+    expect(clipSpeed(node({ speed: null }))).toBe(1)
+    expect(clipSpeed(node({ speed: 0 }))).toBe(1)
+    expect(clipSpeed(node({ speed: 2 }))).toBe(2)
+    expect(clipSpeed(node({ speed: 0.1 }))).toBe(0.25)
+    expect(clipSpeed(node({ speed: 99 }))).toBe(4)
+  })
+
+  it('clipLook / stillMotionOf only resolve registry ids', () => {
+    expect(clipLook(node({ look: 'mono' }))).toBe('mono')
+    expect(clipLook(node({ look: 'nope' }))).toBeNull()
+    expect(clipLook(node())).toBeNull()
+    expect(stillMotionOf(node({ stillMotion: 'pan-left' }))).toBe('pan-left')
+    expect(stillMotionOf(node({ stillMotion: 'spin' }))).toBeNull()
+  })
+})
+
+describe('audio lane layout', () => {
+  it('clipTimelineOffset only accepts finite ≥ 0 values', () => {
+    expect(clipTimelineOffset(node())).toBeNull()
+    expect(clipTimelineOffset(node({ timelineOffsetSec: 2.5 }))).toBe(2.5)
+    expect(clipTimelineOffset(node({ timelineOffsetSec: -1 }))).toBeNull()
+  })
+
+  it('chains offset-less tracks and places explicit offsets absolutely', () => {
+    // Historical layout: no offsets → pure concatenation from 0.
+    expect(
+      audioLaneStarts([
+        { offsetSec: null, durationSeconds: 5 },
+        { offsetSec: null, durationSeconds: 3 }
+      ])
+    ).toEqual([0, 5])
+    // An offset places its track; the next offset-less track chains after it.
+    expect(
+      audioLaneStarts([
+        { offsetSec: null, durationSeconds: 5 },
+        { offsetSec: 10, durationSeconds: 3 },
+        { offsetSec: null, durationSeconds: 2 }
+      ])
+    ).toEqual([0, 10, 13])
   })
 })
 

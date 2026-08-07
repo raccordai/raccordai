@@ -35,6 +35,7 @@ import * as settingsService from '../services/settings'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import * as voicePersonasService from '../services/voicePersonas'
 import * as textLayersService from '../services/textLayers'
+import * as imageLayersService from '../services/imageLayers'
 import * as videosService from '../services/videos'
 
 /**
@@ -186,10 +187,20 @@ export function registerIpcHandlers(): void {
   )
   handle('nodes:setOverlay', ({ nodeId, overlay }) => graph.setClipOverlay(nodeId, overlay))
   handle('nodes:setVolume', ({ nodeId, volume }) => graph.setClipVolume(nodeId, volume))
+  handle('nodes:setSpeed', ({ nodeId, speed }) => graph.setClipSpeed(nodeId, speed))
+  handle('nodes:setLook', ({ nodeId, look }) => graph.setClipLook(nodeId, look))
+  handle('nodes:setStillMotion', ({ nodeId, motion }) => graph.setStillMotion(nodeId, motion))
+  handle('nodes:setTimelineOffset', ({ nodeId, offsetSec }) =>
+    graph.setTimelineOffset(nodeId, offsetSec)
+  )
   handle('textLayers:list', ({ videoId }) => textLayersService.listTextLayers(videoId))
   handle('textLayers:create', (input) => textLayersService.createTextLayer(input))
   handle('textLayers:update', ({ id, patch }) => textLayersService.updateTextLayer(id, patch))
   handle('textLayers:delete', ({ id }) => textLayersService.deleteTextLayer(id))
+  handle('imageLayers:list', ({ videoId }) => imageLayersService.listImageLayers(videoId))
+  handle('imageLayers:create', (input) => imageLayersService.createImageLayer(input))
+  handle('imageLayers:update', ({ id, patch }) => imageLayersService.updateImageLayer(id, patch))
+  handle('imageLayers:delete', ({ id }) => imageLayersService.deleteImageLayer(id))
   handle('nodes:replaceModel', ({ nodeId, modelId }) => graph.replaceNodeModel(nodeId, modelId))
   handle('nodes:applyVideoDefaults', ({ videoId }) => graph.applyVideoDefaultsToNodes(videoId))
   handle('nodes:remove', ({ nodeId }) => graph.removeNode(nodeId))
@@ -446,7 +457,17 @@ export function registerIpcHandlers(): void {
 
   handle(
     'render:export',
-    async ({ videoId, fps, resolution, burnSubtitles, captionsPreset, duckMusic, watermark }) => {
+    async ({
+      videoId,
+      fps,
+      resolution,
+      burnSubtitles,
+      captionsPreset,
+      duckMusic,
+      quality,
+      codec,
+      watermark
+    }) => {
       const video = videosService.getVideo(videoId)
       const base = (video?.name ?? 'video').replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'video'
       const result = await dialog.showSaveDialog({
@@ -463,6 +484,8 @@ export function registerIpcHandlers(): void {
         burnSubtitles,
         captionsPreset,
         duckMusic,
+        quality,
+        codec,
         watermark
       })
       return { path: result.filePath, durationSeconds, skipped }

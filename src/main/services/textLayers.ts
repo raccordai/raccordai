@@ -64,6 +64,7 @@ export function createTextLayer(
     bold: input.bold ?? DEFAULTS.bold,
     italic: input.italic ?? DEFAULTS.italic,
     colorHex: input.colorHex ?? DEFAULTS.colorHex,
+    animation: input.animation ?? null,
     createdAt: Date.now()
   }
   db.insert(textLayers).values(layer).run()

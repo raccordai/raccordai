@@ -17,3 +17,19 @@ export const MAX_VARIANTS = 4
  */
 export const VOLUME_MIN = 0
 export const VOLUME_MAX = 2
+
+/**
+ * Clip speed bounds (1 = original). 0.25–4 keeps the audio pitch correction
+ * inside two chained `atempo` stages at render time.
+ */
+export const SPEED_MIN = 0.25
+export const SPEED_MAX = 4
+
+/**
+ * MP4 export quality/codec choices — standalone here because contracts.ts and
+ * the (main-side) render plan both need them. 'standard' reproduces the
+ * historical encoder args byte for byte; 'hevc' always forces the normalize
+ * path (stream copy cannot transcode).
+ */
+export const RENDER_QUALITIES = ['draft', 'standard', 'high'] as [string, ...string[]]
+export const RENDER_CODECS = ['h264', 'hevc'] as [string, ...string[]]
