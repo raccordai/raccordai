@@ -70,6 +70,10 @@ export interface KeyEventLike {
  * also fire ⌘Z (undo).
  */
 export function matchesShortcut(event: KeyEventLike, shortcut: Shortcut, isMac: boolean): boolean {
+  // Chromium fires synthetic keydowns with NO `key` when the user picks a
+  // datalist/autofill suggestion with the mouse (e.g. the font field of the
+  // text-layer popover) — never a shortcut, and `.toLowerCase()` would throw.
+  if (typeof event.key !== 'string') return false
   if (event.key.toLowerCase() !== shortcut.key.toLowerCase()) return false
   const mod = isMac ? event.metaKey : event.ctrlKey
   // The non-mod modifier must be off too: on macOS Ctrl+O must not fire ⌘O.

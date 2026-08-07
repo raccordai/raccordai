@@ -53,6 +53,14 @@ describe('matchesShortcut', () => {
       false
     )
   })
+
+  it('ignores the synthetic keydowns Chromium fires without a key (datalist/autofill picks)', () => {
+    const event = press('x')
+    // Real events from a datalist pick carry `key: undefined` despite the type.
+    ;(event as { key?: string }).key = undefined
+    expect(matchesShortcut(event, { key: 'o', mod: true }, true)).toBe(false)
+    expect(matchesShortcut(event, { key: 's' }, true)).toBe(false)
+  })
 })
 
 describe('formatShortcut', () => {
