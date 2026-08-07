@@ -179,6 +179,8 @@ export const nodes = sqliteTable(
       align: number
       size: 'sm' | 'md' | 'lg'
     } | null>(),
+    /** Audio-lane volume gain (0–2, null = 1). Read through the shared clipVolume. */
+    volume: real('volume'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },

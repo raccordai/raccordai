@@ -11,24 +11,28 @@ import {
   clipTransitionAfter,
   clipTransitionSeconds,
   clipTrim,
+  clipVolume,
   collectAudioNodes,
   collectTimelineClips,
   isStillClip,
   stillClipSeconds
 } from '@shared/timeline'
 import { xfadeNameFor } from '@shared/transitions'
+import type { SpeechTranscript } from '@shared/speech'
 import { broadcastRenderProgress } from '../events'
 import { resolveMediaUrlToFile } from '../media/protocol'
 import {
   listGenerationsForNode,
   resolveSelectedOutputUrl,
-  timelineFallbackImages
+  timelineFallbackImages,
+  type GenerationRow
 } from './generations'
 import { listTextLayers } from './textLayers'
 import * as graphService from './graph'
 import * as videosService from './videos'
 import {
   buildAssContent,
+  buildCaptionEvents,
   buildConcatArgs,
   buildConcatListContent,
   buildCrossfadeArgs,
@@ -49,6 +53,8 @@ import {
   parseProgressLine,
   renderedDurationSeconds,
   sequenceDurationSeconds,
+  speechActivityWindows,
+  type CaptionTrackInput,
   type MusicTrack,
   type PlannedClip,
   type RenderStep,
@@ -173,15 +179,17 @@ async function resolveNodeMedia(
   workDir: string,
   node: GraphNode,
   name: string
-): Promise<string | null> {
+): Promise<{ path: string; row: GenerationRow } | null> {
   const rows = listGenerationsForNode(node.id)
   const best = bestGeneration(
     node,
     rows.map((r) => ({ id: r.id, status: r.status, url: r.resultPath ?? r.resultUrl, row: r }))
   )
   if (!best || best.row.status !== 'success') return null
-  if (best.row.resultPath) return best.row.resultPath
-  if (best.row.resultUrl) return downloadTo(workDir, name, best.row.resultUrl)
+  if (best.row.resultPath) return { path: best.row.resultPath, row: best.row }
+  if (best.row.resultUrl) {
+    return { path: await downloadTo(workDir, name, best.row.resultUrl), row: best.row }
+  }
   return null
 }
 
@@ -197,6 +205,10 @@ export interface RenderOptions {
   resolution?: { width: number; height: number }
   /** Burn the scenario's quoted dialogue as subtitles (nothing without quotes). */
   burnSubtitles?: boolean
+  /** Dynamic captions from the speech lane's transcripts (a CAPTION_PRESETS id). */
+  captionsPreset?: string
+  /** Duck the music bed under the voice-over (transcript-timed windows). */
+  duckMusic?: boolean
   /** Translucent corner text over the whole film (per-render, never persisted). */
   watermark?: {
     text: string
@@ -258,9 +270,9 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         skipped.push(label(node))
         continue
       }
-      const videoPath = await resolveNodeMedia(workDir, node, name)
-      if (videoPath) {
-        clips.push({ path: videoPath, isStill: false, stillDurationSeconds: 0, probe: null })
+      const media = await resolveNodeMedia(workDir, node, name)
+      if (media) {
+        clips.push({ path: media.path, isStill: false, stillDurationSeconds: 0, probe: null })
         clipNodes.push(node)
         continue
       }
@@ -289,26 +301,35 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     // timeline order, each carrying its journaled trim window (the preview
     // honours the same bounds). Nodes without output are reported as skipped
     // rather than silently dropped.
-    const collectLane = async (role: 'music' | 'speech'): Promise<MusicTrack[]> => {
-      const tracks: MusicTrack[] = []
+    const collectLane = async (
+      role: 'music' | 'speech'
+    ): Promise<Array<{ track: MusicTrack; transcript: SpeechTranscript | null }>> => {
+      const lane: Array<{ track: MusicTrack; transcript: SpeechTranscript | null }> = []
       for (const [i, node] of collectAudioNodes(graph.nodes, role).entries()) {
-        const path = await resolveNodeMedia(workDir, node, `${role}-${i + 1}`)
-        if (path) {
+        const media = await resolveNodeMedia(workDir, node, `${role}-${i + 1}`)
+        if (media) {
           // Infinity = media length unknown here (audio is never probed): an
           // untrimmed track must NOT inherit the node's declared duration as an
           // out-point — only an explicit trim survives the Infinity fallback.
           const { start, end } = clipTrim(node, Number.POSITIVE_INFINITY)
-          tracks.push({
-            path,
-            ...(start > 0 ? { trimStartSec: start } : {}),
-            ...(end !== undefined && Number.isFinite(end) ? { trimEndSec: end } : {})
+          const volume = clipVolume(node)
+          lane.push({
+            transcript: (media.row.transcript ?? null) as SpeechTranscript | null,
+            track: {
+              path: media.path,
+              ...(start > 0 ? { trimStartSec: start } : {}),
+              ...(end !== undefined && Number.isFinite(end) ? { trimEndSec: end } : {}),
+              ...(volume !== 1 ? { volume } : {})
+            }
           })
         } else skipped.push(label(node))
       }
-      return tracks
+      return lane
     }
-    const musicTracks = await collectLane('music')
-    const speechTracks = await collectLane('speech')
+    const musicLane = await collectLane('music')
+    const speechLane = await collectLane('speech')
+    const musicTracks = musicLane.map((t) => t.track)
+    const speechTracks = speechLane.map((t) => t.track)
     const hasAudioLane = musicTracks.length > 0 || speechTracks.length > 0
 
     // ── Probe ────────────────────────────────────────────────────────────
@@ -338,6 +359,33 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       (video.scenario?.shots ?? []).map((s) => [s.key, `${s.action} ${s.sound ?? ''}`])
     )
     const wantSubtitles = options.burnSubtitles === true
+    const wantCaptions = options.captionsPreset !== undefined
+    const wantDucking =
+      options.duckMusic === true && musicTracks.length > 0 && speechTracks.length > 0
+
+    // Captions & ducking both need the speech lane resolved on the FINAL
+    // timeline: each track's measured length (audio is otherwise never probed)
+    // places the next one, and its transcript carries the spoken windows.
+    const captionTracks: CaptionTrackInput[] = []
+    if (wantCaptions || wantDucking) {
+      let at = 0
+      for (const { track, transcript } of speechLane) {
+        const probe = await probeFile(active, track.path)
+        const trimStart = track.trimStartSec ?? 0
+        const mediaEnd =
+          track.trimEndSec !== undefined
+            ? Math.min(track.trimEndSec, probe.durationSeconds ?? track.trimEndSec)
+            : (probe.durationSeconds ?? undefined)
+        captionTracks.push({
+          startSec: at,
+          ...(track.trimStartSec !== undefined ? { trimStartSec: track.trimStartSec } : {}),
+          ...(track.trimEndSec !== undefined ? { trimEndSec: track.trimEndSec } : {}),
+          ...(probe.durationSeconds != null ? { durationSeconds: probe.durationSeconds } : {}),
+          segments: transcript?.segments ?? []
+        })
+        at += Math.max(0, (mediaEnd ?? trimStart) - trimStart)
+      }
+    }
 
     const spec = decideSequenceSpec(clips, {
       fps: options.fps,
@@ -395,6 +443,11 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           text: options.watermark.text,
           align: WATERMARK_ALIGN[options.watermark.position ?? 'bottom-right']
         })
+      }
+      // Dynamic captions (§8): the speech transcripts' timed segments, burned
+      // with the chosen preset — real timings, nothing invented.
+      if (wantCaptions && options.captionsPreset) {
+        assEvents.push(...buildCaptionEvents(captionTracks, options.captionsPreset, finalDuration))
       }
       // The title track (§6.12b): free layers live in final-timeline seconds
       // already — clamp to the film and drop the ones entirely outside it.
@@ -541,6 +594,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       const concatProbe = await probeFile(active, stagePath)
       const muxOut = join(workDir, 'final.mp4')
       const muxDuration = concatProbe.durationSeconds ?? finalDuration
+      const duckWindows = wantDucking ? speechActivityWindows(captionTracks) : []
       await run(
         active,
         ffmpegPath(),
@@ -551,7 +605,8 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
             speechTracks,
             concatProbe.hasAudio,
             muxDuration,
-            muxOut
+            muxOut,
+            duckWindows.length > 0 ? { duckMusic: { windows: duckWindows } } : undefined
           ),
           '-progress',
           'pipe:1'

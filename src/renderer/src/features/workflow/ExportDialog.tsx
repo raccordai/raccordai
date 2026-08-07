@@ -1,6 +1,7 @@
 import { Clapperboard, FileJson, Film, FolderArchive, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { CAPTION_PRESET_IDS } from '@shared/captions'
 import { Button } from '@renderer/components/ui/Button'
 import { RENDER_PRESETS, type RenderPreset, type WorkflowIO } from './useWorkflowIO'
 
@@ -13,6 +14,8 @@ export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => v
   const { t } = useTranslation()
   const [preset, setPreset] = useState<RenderPreset | 'auto'>('auto')
   const [burnSubtitles, setBurnSubtitles] = useState(false)
+  const [captionsPreset, setCaptionsPreset] = useState<string>('')
+  const [duckMusic, setDuckMusic] = useState(false)
   const [watermarkText, setWatermarkText] = useState('')
   const [watermarkPosition, setWatermarkPosition] = useState<
     'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
@@ -73,6 +76,8 @@ export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => v
                   onClose()
                   void io.exportMp4(preset === 'auto' ? undefined : preset, {
                     burnSubtitles,
+                    ...(captionsPreset ? { captionsPreset } : {}),
+                    ...(duckMusic ? { duckMusic: true } : {}),
                     ...(watermarkText.trim()
                       ? {
                           watermark: {
@@ -115,6 +120,29 @@ export function ExportDialog({ io, onClose }: { io: WorkflowIO; onClose: () => v
                 onChange={(e) => setBurnSubtitles(e.target.checked)}
               />
               {t('exportDialog.mp4Subtitles')}
+            </label>
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-300">
+              <span>{t('exportDialog.mp4Captions')}</span>
+              <select
+                className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
+                value={captionsPreset}
+                onChange={(e) => setCaptionsPreset(e.target.value)}
+              >
+                <option value="">{t('exportDialog.captionsOff')}</option>
+                {CAPTION_PRESET_IDS.map((id) => (
+                  <option key={id} value={id}>
+                    {t(`exportDialog.captions.${id}` as never)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-300">
+              <input
+                type="checkbox"
+                checked={duckMusic}
+                onChange={(e) => setDuckMusic(e.target.checked)}
+              />
+              {t('exportDialog.mp4Duck')}
             </label>
             <div className="mt-1.5 flex items-center gap-1.5">
               <input

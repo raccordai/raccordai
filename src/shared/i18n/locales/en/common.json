@@ -25,6 +25,14 @@
     "mp4FormatAuto": "Auto",
     "mp4FormatAutoHint": "from the clips",
     "mp4Subtitles": "Burn the scenario's dialogue as subtitles",
+    "mp4Captions": "Dynamic captions (voice-over)",
+    "captionsOff": "Off",
+    "captions": {
+      "classic": "Classic",
+      "pop": "Pop-in",
+      "karaoke": "Karaoke highlight"
+    },
+    "mp4Duck": "Lower the music under the voice-over (ducking)",
     "watermarkPlaceholder": "Watermark (translucent text, optional)",
     "watermarkCorner": {
       "top-left": "Top left",
@@ -147,11 +155,26 @@
       "crossfade": "Crossfade",
       "fadeblack": "Fade to black",
       "fadewhite": "Fade to white",
+      "fadegrays": "Fade through gray",
       "wipeleft": "Wipe left",
       "wiperight": "Wipe right",
+      "wipeup": "Wipe up",
+      "wipedown": "Wipe down",
       "slideleft": "Slide left",
       "slideright": "Slide right",
+      "slideup": "Slide up",
+      "slidedown": "Slide down",
+      "smoothleft": "Smooth wipe left",
+      "smoothright": "Smooth wipe right",
       "circleopen": "Circle open",
+      "circleclose": "Circle close",
+      "radial": "Radial sweep",
+      "rectcrop": "Rectangle crop",
+      "distance": "Distance warp",
+      "squeezeh": "Squeeze horizontal",
+      "squeezev": "Squeeze vertical",
+      "zoomin": "Zoom in",
+      "hblur": "Blur pass",
       "dissolve": "Dissolve",
       "pixelize": "Pixelize"
     },
@@ -174,7 +197,10 @@
     "layerSize": "Size (%)",
     "layerColor": "Colour",
     "layerDelete": "Delete this text",
-    "layerDragHint": "Drag the text directly on the preview to position it."
+    "layerDragHint": "Drag the text directly on the preview to position it.",
+    "volume": "Track volume",
+    "volumeHint": "100% = original. Values above 100% only apply to the exported MP4 (the preview cannot amplify).",
+    "volumeHintOpen": "double-click to adjust the volume"
   },
   "onboarding": {
     "skip": "Skip",

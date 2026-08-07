@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CROSSFADE_DURATION,
+  buildCaptionEvents,
   buildConcatArgs,
   buildConcatListContent,
   buildCrossfadeArgs,
@@ -9,6 +10,9 @@ import {
   assColor,
   buildAssContent,
   buildSubtitleBurnArgs,
+  duckingVolumeFilter,
+  karaokeWords,
+  speechActivityWindows,
   clipEffectiveDuration,
   clipIsTrimmed,
   crossfadeGroups,
@@ -542,6 +546,178 @@ describe('subtitles', () => {
     const joined = args.join(' ')
     expect(joined).toContain("-vf subtitles=filename='/tmp/layers.ass'")
     expect(joined).toContain('-c:a copy')
+  })
+})
+
+describe('dynamic captions', () => {
+  it('maps transcript segments to the final timeline (lane start + trim window)', () => {
+    const events = buildCaptionEvents(
+      [
+        {
+          startSec: 10,
+          trimStartSec: 2,
+          trimEndSec: 8,
+          segments: [
+            { start: 0, end: 1.5, text: 'Trimmed away' },
+            { start: 3, end: 5, text: 'On screen' },
+            { start: null, end: null, text: 'Unlocated' },
+            { start: 7, end: 12, text: 'Cut by the out-point' }
+          ]
+        }
+      ],
+      'classic',
+      60
+    )
+    expect(events.map((e) => e.text)).toEqual(['On screen', 'Cut by the out-point'])
+    expect(events[0]).toMatchObject({ kind: 'caption', startSec: 11, endSec: 13 })
+    // 7→12 intersected with the 2–8 trim window → 7–8, mapped to 15–16.
+    expect(events[1]).toMatchObject({ startSec: 15, endSec: 16 })
+  })
+
+  it('clamps to the film and drops fully out-of-film segments', () => {
+    const events = buildCaptionEvents(
+      [
+        {
+          startSec: 0,
+          segments: [
+            { start: 0, end: 4, text: 'a' },
+            { start: 9, end: 11, text: 'b' }
+          ]
+        }
+      ],
+      'classic',
+      3
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ startSec: 0, endSec: 3 })
+  })
+
+  it('an untimed end falls back to two seconds of reading time', () => {
+    const events = buildCaptionEvents(
+      [{ startSec: 0, segments: [{ start: 1, end: null, text: 'tail' }] }],
+      'classic',
+      60
+    )
+    expect(events[0]).toMatchObject({ startSec: 1, endSec: 3 })
+  })
+
+  it('karaoke splits the segment duration across words proportionally to length', () => {
+    const words = karaokeWords('un deux quatre', 2)
+    expect(words.map((w) => w.text)).toEqual(['un', 'deux', 'quatre'])
+    const total = words.reduce((acc, w) => acc + w.durationCs, 0)
+    expect(total).toBe(200)
+    expect(words[2]!.durationCs).toBeGreaterThan(words[0]!.durationCs)
+    // The karaoke preset stamps the words on the event.
+    const events = buildCaptionEvents(
+      [{ startSec: 0, segments: [{ start: 0, end: 2, text: 'un deux quatre' }] }],
+      'karaoke',
+      60
+    )
+    expect(events[0]!.words).toHaveLength(3)
+  })
+
+  it('renders the Caption style and the preset overrides in the ASS document', () => {
+    const ass = buildAssContent({ width: 1920, height: 1080 }, [
+      { kind: 'caption', startSec: 0, endSec: 2, text: 'Plain line', captionPreset: 'classic' },
+      { kind: 'caption', startSec: 2, endSec: 4, text: 'Pop line', captionPreset: 'pop' },
+      {
+        kind: 'caption',
+        startSec: 4,
+        endSec: 6,
+        text: 'un deux',
+        captionPreset: 'karaoke',
+        words: [
+          { text: 'un', durationCs: 80 },
+          { text: 'deux', durationCs: 120 }
+        ]
+      }
+    ])
+    expect(ass).toContain('Style: Caption,')
+    expect(ass).toContain('Dialogue: 0,0:00:00.00,0:00:02.00,Caption,,0,0,0,,Plain line')
+    expect(ass).toContain('{\\fad(120,80)\\fscx85\\fscy85\\t(0,120,\\fscx100\\fscy100)}Pop line')
+    expect(ass).toContain('{\\k80}un {\\k120}deux')
+  })
+})
+
+describe('music ducking', () => {
+  it('pads and merges the speech windows, whole-track fallback without transcript', () => {
+    const windows = speechActivityWindows(
+      [
+        {
+          startSec: 0,
+          segments: [
+            { start: 1, end: 2, text: 'a' },
+            { start: 2.2, end: 4, text: 'b' },
+            { start: 10, end: 11, text: 'c' }
+          ]
+        },
+        { startSec: 20, durationSeconds: 5, segments: [] }
+      ],
+      0.15
+    )
+    // 1–2 and 2.2–4 merge once padded; 10–11 stays apart; the transcript-less
+    // track ducks under its whole measured length.
+    expect(windows).toEqual([
+      { startSec: 0.85, endSec: 4.15 },
+      { startSec: 9.85, endSec: 11.15 },
+      { startSec: 19.85, endSec: 25.15 }
+    ])
+  })
+
+  it('builds a frame-evaluated volume expression, null with nothing to duck', () => {
+    expect(duckingVolumeFilter([])).toBeNull()
+    expect(duckingVolumeFilter([{ startSec: 1, endSec: 2.5 }], 0.4)).toBe(
+      "volume=volume='if(between(t,1.000,2.500),0.4,1)':eval=frame"
+    )
+  })
+
+  it('ducks the music lane between concat and apad, leaving the speech lane alone', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/a.mp3' }, { path: '/b.mp3' }],
+      [{ path: '/vo.mp3' }],
+      true,
+      30,
+      '/tmp/out.mp4',
+      { duckMusic: { windows: [{ startSec: 0, endSec: 5 }] } }
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain(
+      "[mcat]volume=volume='if(between(t,0.000,5.000),0.35,1)':eval=frame[mcatduck]"
+    )
+    expect(filter).toContain('[mcatduck]apad[mpad]')
+    expect(filter).toContain('[1:a][2:a]concat=n=2:v=0:a=1[mcat]')
+    expect(filter).toContain('[3:a]apad[spad]')
+  })
+})
+
+describe('per-track volume', () => {
+  it('applies the gain after the trim, chained in one filter', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/a.mp3', trimStartSec: 2, trimEndSec: 9, volume: 0.5 }],
+      [],
+      false,
+      20,
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('[1:a]atrim=start=2:end=9,asetpts=PTS-STARTPTS,volume=0.5[t1]')
+  })
+
+  it('an untrimmed track with a gain gets a lone volume filter; gain 1 stays verbatim', () => {
+    const args = buildMuxArgs(
+      '/tmp/video.mp4',
+      [{ path: '/a.mp3', volume: 1.5 }],
+      [{ path: '/vo.mp3', volume: 1 }],
+      false,
+      20,
+      '/tmp/out.mp4'
+    )
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('[1:a]volume=1.5[t1]')
+    // volume: 1 is a no-op — the speech track feeds apad directly.
+    expect(filter).toContain('[2:a]apad[spad]')
   })
 })
 

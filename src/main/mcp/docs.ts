@@ -275,6 +275,10 @@ delete_voice_persona forgets the name only; nodes keep the ids already written.
 RENDER. Speech nodes ride their own timeline lane (audioRole: speech), mixed OVER the Suno
 music bed and the clips' own audio — never concatenated after the music. Order/trim them like
 any clip (set_timeline_order, set_clip_trim); the transcript's timestamps tell you where to cut.
+Per-track gain: set_clip_volume(nodeId, 0–2) on any audio node (preview + render). At render
+time, render_video accepts captionsPreset (classic | pop | karaoke) to burn dynamic captions
+from the speech transcripts' REAL timings, and duckMusic: true to lower the music bed inside
+the spoken windows — the two staples of a narrated short.
 
 TIP for a narrated YouTube video: write_scenario first, one TTS node per narration block (or one
 dialogue node per scene), generate the speech EARLY — the transcript's real timings are better

@@ -9,6 +9,7 @@ import {
   type LayoutNode
 } from '@shared/graphLayout'
 import { APPLY_VIDEO_STYLE_PARAM } from '@shared/styles/registry'
+import { VOLUME_MAX, VOLUME_MIN } from '@shared/config'
 import { clampTransitionSeconds, isClipTransitionId } from '@shared/transitions'
 import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
@@ -136,6 +137,7 @@ export function createNode(args: {
     transitionAfter: null,
     transitionDurationSec: null,
     overlay: null,
+    volume: null,
     createdAt: now,
     updatedAt: now
   }
@@ -302,6 +304,17 @@ export function setClipTransition(
     transitionDurationSec:
       transition === null ? null : durationSec == null ? null : clampTransitionSeconds(durationSec)
   })
+}
+
+/**
+ * Volume gain of an audio track on the timeline (music/speech lane): 0–2,
+ * null = original. Validated here so every surface gets the same refusal.
+ */
+export function setClipVolume(nodeId: string, volume: number | null): void {
+  if (volume !== null && (!Number.isFinite(volume) || volume < VOLUME_MIN || volume > VOLUME_MAX)) {
+    throw new Error(`Volume must be between ${VOLUME_MIN} and ${VOLUME_MAX}.`)
+  }
+  patchNodeWithHistory(nodeId, { volume })
 }
 
 /** Text layer burned over the clip at render time (null clears it). */

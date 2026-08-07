@@ -14,6 +14,7 @@ import {
   Scissors,
   Trash2,
   Type,
+  Volume2,
   ZoomIn,
   ZoomOut
 } from 'lucide-react'
@@ -36,12 +37,13 @@ import {
 } from './data'
 import type { WorkflowGraph } from './workflowContext'
 import {
-  audioRoleOf,
   bestGeneration,
   clipDuration,
   clipTransitionAfter,
   clipTransitionSeconds,
   clipTrim,
+  clipVolume,
+  collectAudioNodes,
   collectTimelineClips,
   isStillClip,
   stillClipSeconds
@@ -178,19 +180,41 @@ function usePlaybackEngine(
     [mediaDurations]
   )
 
+  /** Transition overlap taken out of clip i's slot (0 on the last clip / a cut). */
+  const overlapAfter = useCallback(
+    (i: number) => {
+      if (i < 0 || i >= clips.length - 1) return 0
+      const node = clips[i]?.node
+      if (!node || clipTransitionAfter(node) === null) return 0
+      return clipTransitionSeconds(node)
+    },
+    [clips]
+  )
+
+  /**
+   * The clip's exclusive slot on the FINAL timeline: its trimmed duration minus
+   * the overlap its transition takes out of the film — the same subtraction the
+   * render applies (renderedDurationSeconds), so the preview clock, the ruler
+   * and the exported file all agree on where things land.
+   */
+  const slotDurationOf = useCallback(
+    (clip: EngineClip, i: number) => Math.max(0, durationOf(clip) - overlapAfter(i)),
+    [durationOf, overlapAfter]
+  )
+
   const starts = useMemo(() => {
     const out: number[] = []
     let acc = 0
-    for (const clip of clips) {
+    clips.forEach((clip, i) => {
       out.push(acc)
-      acc += durationOf(clip)
-    }
+      acc += slotDurationOf(clip, i)
+    })
     return out
-  }, [clips, durationOf])
+  }, [clips, slotDurationOf])
 
   const total = useMemo(
-    () => clips.reduce((acc, clip) => acc + durationOf(clip), 0),
-    [clips, durationOf]
+    () => clips.reduce((acc, clip, i) => acc + slotDurationOf(clip, i), 0),
+    [clips, slotDurationOf]
   )
 
   // Audio lanes (music bed + speech): independent sequential layouts, both
@@ -240,6 +264,10 @@ function usePlaybackEngine(
         if (!element.paused) element.pause()
         return
       }
+      // Per-track volume parity with the render's `volume=` (an HTMLMediaElement
+      // cannot amplify, so gains above 1 only apply to the exported MP4).
+      const volume = Math.min(1, clipVolume(clip.node))
+      if (element.volume !== volume) element.volume = volume
       const offset = t - (laneStarts[idx] ?? 0) + trimOf(clip).start
       if (!element.src.endsWith(clip.url)) {
         element.src = clip.url
@@ -411,7 +439,7 @@ function usePlaybackEngine(
           stillAnchorRef.current = anchor
         }
         const elapsed = anchor.offset + (now - anchor.wall) / 1000
-        const hold = durationOf(clip)
+        const hold = slotDurationOf(clip, activeIdx)
         setGlobalTime(base + Math.min(elapsed, hold))
         if (elapsed >= hold) {
           advance()
@@ -423,8 +451,14 @@ function usePlaybackEngine(
       const video = activeVideo()
       if (video && clip) {
         const trim = trimOf(clip)
-        setGlobalTime(base + Math.max(0, video.currentTime - trim.start))
-        if (trim.end !== undefined && video.currentTime >= trim.end - 0.03) {
+        const slot = slotDurationOf(clip, activeIdx)
+        setGlobalTime(base + Math.min(slot, Math.max(0, video.currentTime - trim.start)))
+        // A transition-joined clip cuts early: its overlap belongs to the next
+        // clip on the final timeline (the render fades the two together there).
+        if (
+          trim.end !== undefined &&
+          video.currentTime >= trim.end - overlapAfter(activeIdx) - 0.03
+        ) {
           advance()
           return
         }
@@ -490,7 +524,7 @@ function usePlaybackEngine(
       let idx = clips.length - 1
       for (let i = 0; i < clips.length; i++) {
         const start = starts[i] ?? 0
-        if (clamped >= start && clamped < start + durationOf(clips[i] as EngineClip)) {
+        if (clamped >= start && clamped < start + slotDurationOf(clips[i] as EngineClip, i)) {
           idx = i
           break
         }
@@ -517,7 +551,7 @@ function usePlaybackEngine(
       })
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- activeVideo/syncAudio are deliberately unstable helpers read at call time
-    [activeIdx, activeSlot, clips, durationOf, playing, starts, total]
+    [activeIdx, activeSlot, clips, slotDurationOf, playing, starts, total]
   )
 
   return {
@@ -561,6 +595,8 @@ export function TimelineV2({
   const { t } = useTranslation()
   // Clip inspector popover: anchored to the scissors button that opened it.
   const [editClip, setEditClip] = useState<{ idx: number; x: number; y: number } | null>(null)
+  // Audio track inspector (volume): anchored to the double-clicked lane block.
+  const [editAudio, setEditAudio] = useState<{ nodeId: string; x: number; y: number } | null>(null)
   // Drag-to-reorder: index the drag started from.
   const dragFrom = useRef<number | null>(null)
   // Horizontal zoom of the track (1 = fit; the track scrolls beyond that).
@@ -574,22 +610,13 @@ export function TimelineV2({
   const playerRef = useRef<HTMLDivElement | null>(null)
   const [playerHeight, setPlayerHeight] = useState(0)
   const clipNodes = useMemo(() => collectTimelineClips(graph.nodes), [graph.nodes])
-  const audioNodes = useMemo(
-    () =>
-      graph.nodes.filter(
-        (n) => getModel(n.modelId)?.kind === 'audio' && audioRoleOf(n) === 'music'
-      ),
-    [graph.nodes]
-  )
+  // Audio lanes through the SAME shared resolver as the MP4 render — a plain
+  // filter() would play the tracks in DB creation order while the export
+  // follows timelineOrder, and the two must never disagree.
+  const audioNodes = useMemo(() => collectAudioNodes(graph.nodes, 'music'), [graph.nodes])
   // §8 — the speech lane (ElevenLabs voice-over/dialogue): its own lane, mixed
   // OVER the music at render time, so previewed the same way.
-  const speechNodes = useMemo(
-    () =>
-      graph.nodes.filter(
-        (n) => getModel(n.modelId)?.kind === 'audio' && audioRoleOf(n) === 'speech'
-      ),
-    [graph.nodes]
-  )
+  const speechNodes = useMemo(() => collectAudioNodes(graph.nodes, 'speech'), [graph.nodes])
   const generations = useVideoGenerations(videoId).data
   const fallbackImages = useTimelineFallbackImages(videoId).data
   const textLayers = useTextLayers(videoId).data ?? []
@@ -714,9 +741,20 @@ export function TimelineV2({
       clipResize?.id === clip.node.id ? clipResize.duration : engine.durationOf(clip),
     [clipResize, engine]
   )
+  /** Block width on the track: the clip's SLOT (transition overlap subtracted),
+   *  so block edges line up with the playhead/ruler final-timeline scale. */
+  const displaySlot = useCallback(
+    (clip: EngineClip, i: number) => {
+      if (i >= clips.length - 1 || clipTransitionAfter(clip.node) === null) {
+        return displayDur(clip)
+      }
+      return Math.max(0, displayDur(clip) - clipTransitionSeconds(clip.node))
+    },
+    [clips.length, displayDur]
+  )
   const displayTotal = useMemo(
-    () => clips.reduce((acc, c) => acc + displayDur(c), 0),
-    [clips, displayDur]
+    () => clips.reduce((acc, c, i) => acc + displaySlot(c, i), 0),
+    [clips, displaySlot]
   )
 
   // Images the add-image picker offers: image-kind nodes with a successful
@@ -1240,7 +1278,7 @@ export function TimelineV2({
                   }}
                 >
                   {clips.map((clip, i) => {
-                    const width = displayTotal > 0 ? (displayDur(clip) / displayTotal) * 100 : 0
+                    const width = displayTotal > 0 ? (displaySlot(clip, i) / displayTotal) * 100 : 0
                     const isActive = i === engine.activeIdx
                     const still = fallbackImages?.[clip.node.id]
                     return (
@@ -1483,7 +1521,10 @@ export function TimelineV2({
                               e.stopPropagation()
                               onFocusNode?.(clip.node.id)
                             }}
-                            title={clip.node.label ?? getModel(clip.node.modelId)?.label}
+                            onDoubleClick={(e) =>
+                              setEditAudio({ nodeId: clip.node.id, x: e.clientX, y: e.clientY - 8 })
+                            }
+                            title={`${clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key} — ${t('timeline.volumeHintOpen')}`}
                           >
                             <Icon className="h-3 w-3 flex-shrink-0" />
                             <span className="truncate">
@@ -1491,6 +1532,11 @@ export function TimelineV2({
                                 getModel(clip.node.modelId)?.label ??
                                 clip.node.key}
                             </span>
+                            {clipVolume(clip.node) !== 1 && (
+                              <span className="flex-shrink-0 rounded bg-black/30 px-1 opacity-80">
+                                {Math.round(clipVolume(clip.node) * 100)}%
+                              </span>
+                            )}
                             <span className="ml-auto flex-shrink-0 opacity-70">
                               {fmt(displayDur(clip))}
                             </span>
@@ -1568,6 +1614,69 @@ export function TimelineV2({
             />
           ) : null
         })()}
+      {editAudio &&
+        (() => {
+          const node = graph.nodes.find((n) => n.id === editAudio.nodeId)
+          return node ? (
+            <AudioSettingsPopover
+              node={node}
+              anchor={editAudio}
+              onClose={() => setEditAudio(null)}
+            />
+          ) : null
+        })()}
+    </div>
+  )
+}
+
+/**
+ * Volume inspector for one audio track (music/speech lane block, double-click).
+ * The gain applies to the preview player (capped at 100% — an HTMLMediaElement
+ * cannot amplify) and to the MP4 render's per-track `volume=` filter.
+ */
+function AudioSettingsPopover({
+  node,
+  anchor,
+  onClose
+}: {
+  node: GraphNode
+  anchor: { x: number; y: number }
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const ref = useRef<HTMLDivElement | null>(null)
+  useDismissable(true, onClose, ref)
+  const [volume, setVolume] = useState(Math.round(clipVolume(node) * 100))
+
+  const commit = (pct: number) => {
+    void invoke('nodes:setVolume', {
+      nodeId: node.id,
+      volume: pct === 100 ? null : Math.min(2, Math.max(0, pct / 100))
+    })
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="island fixed z-50 w-60 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
+      style={{ left: anchor.x, top: anchor.y }}
+    >
+      <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
+        <Volume2 className="h-3 w-3 text-accent" /> {t('timeline.volume')}
+        <span className="ml-auto font-mono text-neutral-400">{volume}%</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={200}
+        step={5}
+        value={volume}
+        onChange={(e) => setVolume(Number(e.target.value))}
+        onPointerUp={() => commit(volume)}
+        onKeyUp={() => commit(volume)}
+        className="w-full"
+      />
+      <p className="mt-1.5 text-[10px] text-neutral-500">{t('timeline.volumeHint')}</p>
     </div>
   )
 }

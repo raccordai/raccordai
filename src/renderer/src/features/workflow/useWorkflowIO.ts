@@ -13,6 +13,7 @@ import {
 } from '@renderer/lib/exportFcpxml'
 import { fetchMediaBlob } from '@renderer/lib/mediaProxy'
 import { detectVideoFps, probeVideoDimensions } from '@renderer/lib/probeMedia'
+import { isCaptionPresetId } from '@shared/captions'
 import { bestGeneration, collectTimelineClips, isStillClip } from '@shared/timeline'
 import { graphKeys, useIpcMutation, useVideo } from './data'
 
@@ -71,6 +72,10 @@ export interface WorkflowIO {
     preset?: RenderPreset,
     options?: {
       burnSubtitles?: boolean
+      /** Dynamic captions from the speech lane's transcripts (preset id). */
+      captionsPreset?: string
+      /** Duck the music bed under the voice-over. */
+      duckMusic?: boolean
       watermark?: {
         text: string
         position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
@@ -337,6 +342,10 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
           videoId,
           ...(preset ? { resolution: RENDER_PRESETS[preset] } : {}),
           ...(options?.burnSubtitles ? { burnSubtitles: true } : {}),
+          ...(isCaptionPresetId(options?.captionsPreset)
+            ? { captionsPreset: options.captionsPreset }
+            : {}),
+          ...(options?.duckMusic ? { duckMusic: true } : {}),
           ...(options?.watermark?.text.trim() ? { watermark: options.watermark } : {})
         })
         if (result) {

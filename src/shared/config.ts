@@ -10,3 +10,10 @@ export const DEFAULT_LOCAL_API_PORT = 4517
  * credit charge; the grid compare is built for 2–4 candidates side by side.
  */
 export const MAX_VARIANTS = 4
+
+/**
+ * Audio-lane volume gain bounds (1 = original, 2 = +6 dB). Standalone here
+ * because both contracts.ts and timeline.ts need them (either would cycle).
+ */
+export const VOLUME_MIN = 0
+export const VOLUME_MAX = 2

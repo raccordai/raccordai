@@ -25,6 +25,14 @@
     "mp4FormatAuto": "Auto",
     "mp4FormatAutoHint": "d'après les clips",
     "mp4Subtitles": "Incruster les dialogues du scénario en sous-titres",
+    "mp4Captions": "Sous-titres dynamiques (voix off)",
+    "captionsOff": "Désactivés",
+    "captions": {
+      "classic": "Classique",
+      "pop": "Apparition pop",
+      "karaoke": "Karaoké (mot à mot)"
+    },
+    "mp4Duck": "Baisser la musique sous la voix (ducking)",
     "watermarkPlaceholder": "Watermark (texte en filigrane, optionnel)",
     "watermarkCorner": {
       "top-left": "Haut gauche",
@@ -147,11 +155,26 @@
       "crossfade": "Fondu enchaîné",
       "fadeblack": "Fondu au noir",
       "fadewhite": "Fondu au blanc",
+      "fadegrays": "Fondu par le gris",
       "wipeleft": "Volet vers la gauche",
       "wiperight": "Volet vers la droite",
+      "wipeup": "Volet vers le haut",
+      "wipedown": "Volet vers le bas",
       "slideleft": "Glissement vers la gauche",
       "slideright": "Glissement vers la droite",
+      "slideup": "Glissement vers le haut",
+      "slidedown": "Glissement vers le bas",
+      "smoothleft": "Volet adouci gauche",
+      "smoothright": "Volet adouci droite",
       "circleopen": "Ouverture en cercle",
+      "circleclose": "Fermeture en cercle",
+      "radial": "Balayage radial",
+      "rectcrop": "Cache rectangulaire",
+      "distance": "Morphing distance",
+      "squeezeh": "Écrasement horizontal",
+      "squeezev": "Écrasement vertical",
+      "zoomin": "Zoom avant",
+      "hblur": "Fondu flouté",
       "dissolve": "Dissolution",
       "pixelize": "Pixellisation"
     },
@@ -174,7 +197,10 @@
     "layerSize": "Taille (%)",
     "layerColor": "Couleur",
     "layerDelete": "Supprimer ce texte",
-    "layerDragHint": "Glisse le texte directement sur l'aperçu pour le positionner."
+    "layerDragHint": "Glisse le texte directement sur l'aperçu pour le positionner.",
+    "volume": "Volume de la piste",
+    "volumeHint": "100 % = original. Au-delà de 100 %, appliqué uniquement au MP4 exporté (l'aperçu ne peut pas amplifier).",
+    "volumeHintOpen": "double-clic pour régler le volume"
   },
   "onboarding": {
     "skip": "Passer",

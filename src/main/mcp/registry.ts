@@ -3,6 +3,7 @@ import { MAX_VARIANTS } from '@shared/config'
 import { getStyle } from '@shared/styles/registry'
 import { videoAspectRatioSchema, videoResolutionSchema } from '@shared/ipc/contracts'
 import { CLIP_TRANSITION_IDS } from '@shared/transitions'
+import { CAPTION_PRESET_IDS, isCaptionPresetId } from '@shared/captions'
 import { SCREEN_DIRECTIONS, planScenario, type ScenarioBeat } from '@shared/scenario'
 import { broadcastFocusNode, broadcastNavigate, broadcastWorkflowChanged } from '../events'
 import * as assets from '../services/assets'
@@ -785,7 +786,8 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     name: 'set_clip_transition',
-    description: `Set the transition from a clip INTO the next one at render time, or null for a plain cut (the default and the doctrine’s preference). Each transition overlaps the two clips by durationSec (default 0.5 s) and shortens the film accordingly. Library: ${CLIP_TRANSITION_IDS.join(', ')}.`,
+    description:
+      'Set the transition from a clip INTO the next one at render time, or null for a plain cut (the default and the doctrine’s preference). Each transition overlaps the two clips by durationSec (default 0.5 s) and shortens the film accordingly. The library ids are the `transition` enum values.',
     inputSchema: obj(
       {
         nodeId: str(),
@@ -838,6 +840,24 @@ export const AGENT_TOOLS: AgentTool[] = [
               size: o.size === 'sm' || o.size === 'lg' ? o.size : 'md'
             }
       )
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_clip_volume',
+    description:
+      'Volume gain of an audio track on the timeline (music/speech lanes): 1 = original, 0–2 (e.g. 0.5 = half, 2 = double). Null resets. Applies to the preview player and the MP4 render (per-track ffmpeg volume).',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        volume: { type: ['number', 'null'], description: 'Gain 0–2, null = original (1)' }
+      },
+      ['nodeId', 'volume']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, volume }) => {
+      graph.setClipVolume(String(nodeId), volume == null ? null : Number(volume))
       return { ok: true }
     }
   },
@@ -1583,6 +1603,16 @@ export const AGENT_TOOLS: AgentTool[] = [
           type: 'boolean',
           description: 'Burn the scenario’s quoted dialogue as subtitles'
         },
+        captionsPreset: {
+          type: 'string',
+          enum: [...CAPTION_PRESET_IDS],
+          description:
+            'Burn dynamic captions from the speech lane’s transcripts (real ElevenLabs timings): classic line, pop-in, or karaoke word highlight. Omit for none.'
+        },
+        duckMusic: {
+          type: 'boolean',
+          description: 'Duck the music bed under the voice-over (transcript-timed windows)'
+        },
         watermarkText: {
           type: 'string',
           description: 'Translucent corner text over the whole film (max 80 chars)'
@@ -1603,6 +1633,8 @@ export const AGENT_TOOLS: AgentTool[] = [
       fps,
       resolution,
       burnSubtitles,
+      captionsPreset,
+      duckMusic,
       watermarkText,
       watermarkPosition
     }) => {
@@ -1618,6 +1650,8 @@ export const AGENT_TOOLS: AgentTool[] = [
         ...(fps !== undefined ? { fps: Number(fps) } : {}),
         ...(res ? { resolution: { width: Number(res.width), height: Number(res.height) } } : {}),
         ...(burnSubtitles !== undefined ? { burnSubtitles: Boolean(burnSubtitles) } : {}),
+        ...(isCaptionPresetId(captionsPreset) ? { captionsPreset } : {}),
+        ...(duckMusic !== undefined ? { duckMusic: Boolean(duckMusic) } : {}),
         ...(watermarkText
           ? { watermark: { text: String(watermarkText), ...(corner ? { position: corner } : {}) } }
           : {})

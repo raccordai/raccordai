@@ -185,6 +185,7 @@ export function registerIpcHandlers(): void {
     graph.setClipTransition(nodeId, transition, durationSec)
   )
   handle('nodes:setOverlay', ({ nodeId, overlay }) => graph.setClipOverlay(nodeId, overlay))
+  handle('nodes:setVolume', ({ nodeId, volume }) => graph.setClipVolume(nodeId, volume))
   handle('textLayers:list', ({ videoId }) => textLayersService.listTextLayers(videoId))
   handle('textLayers:create', (input) => textLayersService.createTextLayer(input))
   handle('textLayers:update', ({ id, patch }) => textLayersService.updateTextLayer(id, patch))
@@ -443,25 +444,30 @@ export function registerIpcHandlers(): void {
     return restored
   })
 
-  handle('render:export', async ({ videoId, fps, resolution, burnSubtitles, watermark }) => {
-    const video = videosService.getVideo(videoId)
-    const base = (video?.name ?? 'video').replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'video'
-    const result = await dialog.showSaveDialog({
-      title: 'Export MP4',
-      defaultPath: `${base}.mp4`,
-      filters: [{ name: 'MPEG-4 video', extensions: ['mp4'] }]
-    })
-    if (result.canceled || !result.filePath) return null
-    const { durationSeconds, skipped } = await renderService.renderVideo({
-      videoId,
-      outputPath: result.filePath,
-      fps,
-      resolution,
-      burnSubtitles,
-      watermark
-    })
-    return { path: result.filePath, durationSeconds, skipped }
-  })
+  handle(
+    'render:export',
+    async ({ videoId, fps, resolution, burnSubtitles, captionsPreset, duckMusic, watermark }) => {
+      const video = videosService.getVideo(videoId)
+      const base = (video?.name ?? 'video').replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'video'
+      const result = await dialog.showSaveDialog({
+        title: 'Export MP4',
+        defaultPath: `${base}.mp4`,
+        filters: [{ name: 'MPEG-4 video', extensions: ['mp4'] }]
+      })
+      if (result.canceled || !result.filePath) return null
+      const { durationSeconds, skipped } = await renderService.renderVideo({
+        videoId,
+        outputPath: result.filePath,
+        fps,
+        resolution,
+        burnSubtitles,
+        captionsPreset,
+        duckMusic,
+        watermark
+      })
+      return { path: result.filePath, durationSeconds, skipped }
+    }
+  )
   handle('render:cancel', ({ videoId }) => renderService.cancelRender(videoId))
 
   handle('chat:get', ({ threadId }) => chatService.getChatState(threadId))

@@ -1,4 +1,5 @@
 import type { GraphNode } from './ipc/contracts'
+import { VOLUME_MAX, VOLUME_MIN } from './config'
 import { getModel } from './models'
 import { clampTransitionSeconds, isClipTransitionId } from './transitions'
 
@@ -189,6 +190,17 @@ export function clipTrim(
 export function trimmedClipDuration(node: GraphNode, rawDurationSec?: number): number | undefined {
   const { start, end } = clipTrim(node, rawDurationSec)
   return end === undefined ? undefined : end - start
+}
+
+/**
+ * The track's volume gain, clamped (null/undefined = 1, untouched). Applied to
+ * the audio lanes by the MP4 render (ffmpeg `volume=`) and by the preview
+ * player (capped at 1 there — an HTMLMediaElement cannot amplify).
+ */
+export function clipVolume(node: GraphNode): number {
+  const v = node.volume
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 1
+  return Math.min(VOLUME_MAX, Math.max(VOLUME_MIN, v))
 }
 
 /** Transition into the NEXT clip (a CLIP_TRANSITIONS id) or null (plain cut). */

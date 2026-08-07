@@ -8,6 +8,7 @@ import {
   clipResolution,
   clipTransitionAfter,
   clipTrim,
+  clipVolume,
   collectAudioNodes,
   collectTimelineClips,
   isStillClip,
@@ -115,6 +116,20 @@ describe('transitions', () => {
     expect(clipTransitionAfter(b)).toBeNull()
     // a→b crossfades; b→c cuts; c's transition has nothing after it.
     expect(transitionOverlapSeconds([a, b, c])).toBeCloseTo(CROSSFADE_SECONDS)
+  })
+})
+
+describe('clipVolume', () => {
+  it('defaults to 1 when unset or garbage', () => {
+    expect(clipVolume(node())).toBe(1)
+    expect(clipVolume(node({ volume: null }))).toBe(1)
+    expect(clipVolume(node({ volume: Number.NaN }))).toBe(1)
+  })
+
+  it('clamps into the 0–2 gain range', () => {
+    expect(clipVolume(node({ volume: 0.5 }))).toBe(0.5)
+    expect(clipVolume(node({ volume: -3 }))).toBe(0)
+    expect(clipVolume(node({ volume: 9 }))).toBe(2)
   })
 })
 

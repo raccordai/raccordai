@@ -350,7 +350,7 @@ export interface AssEvent {
   startSec: number
   endSec: number
   text: string
-  kind: 'subtitle' | 'title' | 'watermark' | 'layer'
+  kind: 'subtitle' | 'title' | 'watermark' | 'layer' | 'caption'
   /** ASS numpad alignment 1–9 (titles/watermark/layers; subtitles are always 2). */
   align?: number
   /** Title size preset (defaults to 'md'). */
@@ -363,6 +363,9 @@ export interface AssEvent {
   bold?: boolean
   italic?: boolean
   colorHex?: string
+  /** Dynamic captions: preset id + karaoke word timings (centiseconds). */
+  captionPreset?: string
+  words?: Array<{ text: string; durationCs: number }>
 }
 
 /** #RRGGBB → ASS &H00BBGGRR (ASS colours are little-endian BGR). */
@@ -391,6 +394,158 @@ export function extractDialogue(text: string): string[] {
     if (line) lines.push(line)
   }
   return lines
+}
+
+// ── Dynamic captions (speech-lane transcripts → timed ASS events) ────────────
+
+/** One transcript segment as stored on generations.transcript (§8). */
+export interface CaptionSegmentInput {
+  start: number | null
+  end: number | null
+  text: string
+}
+
+/** One speech-lane track resolved for captioning/ducking. */
+export interface CaptionTrackInput {
+  /** Where the track starts on the FINAL timeline (lane concatenation order). */
+  startSec: number
+  /** Trim window inside the media (already clamped by the shared clipTrim). */
+  trimStartSec?: number
+  trimEndSec?: number
+  /** Measured media length (probed) — the no-transcript ducking fallback. */
+  durationSeconds?: number
+  segments: CaptionSegmentInput[]
+}
+
+/**
+ * Word timings for an ASS karaoke line: the segment's duration split across
+ * its words proportionally to their length (the alignment is segment-grained,
+ * so word boundaries are estimated — good enough for a highlight sweep).
+ */
+export function karaokeWords(
+  text: string,
+  durationSeconds: number
+): Array<{ text: string; durationCs: number }> {
+  const words = text.split(/\s+/).filter((w) => w !== '')
+  if (words.length === 0) return []
+  const totalCs = Math.max(words.length, Math.round(durationSeconds * 100))
+  const weight = words.reduce((acc, w) => acc + w.length, 0)
+  let used = 0
+  return words.map((w, i) => {
+    const cs =
+      i === words.length - 1
+        ? Math.max(1, totalCs - used)
+        : Math.max(1, Math.round((totalCs * w.length) / weight))
+    used += cs
+    return { text: w, durationCs: cs }
+  })
+}
+
+/**
+ * Caption events from the speech lane's transcripts: each timed segment is
+ * mapped from media time to the final timeline (trim window subtracted, lane
+ * start added), clamped to the film. Segments the alignment could not locate
+ * (null start) are skipped — nothing is invented. An untimed end falls back to
+ * two seconds, the reading-time floor.
+ */
+export function buildCaptionEvents(
+  tracks: CaptionTrackInput[],
+  preset: string,
+  finalDurationSeconds: number
+): AssEvent[] {
+  const events: AssEvent[] = []
+  for (const track of tracks) {
+    const trimStart = Math.max(0, track.trimStartSec ?? 0)
+    const trimEnd = track.trimEndSec
+    for (const seg of track.segments) {
+      if (seg.start === null) continue
+      const text = seg.text.trim()
+      if (text === '') continue
+      const rawEnd = seg.end ?? seg.start + 2
+      const from = Math.max(seg.start, trimStart)
+      const to = trimEnd !== undefined ? Math.min(rawEnd, trimEnd) : rawEnd
+      if (to <= from) continue
+      const startSec = track.startSec + (from - trimStart)
+      const endSec = Math.min(track.startSec + (to - trimStart), finalDurationSeconds)
+      if (startSec >= finalDurationSeconds || endSec <= startSec) continue
+      events.push({
+        kind: 'caption',
+        startSec,
+        endSec,
+        text,
+        captionPreset: preset,
+        ...(preset === 'karaoke' ? { words: karaokeWords(text, endSec - startSec) } : {})
+      })
+    }
+  }
+  return events
+}
+
+/**
+ * When the voice speaks, on the final timeline: the transcript segments mapped
+ * like buildCaptionEvents, padded and merged. A track without a usable
+ * transcript ducks under its whole (measured, trimmed) length instead — better
+ * too much ducking than a voice buried in music.
+ */
+export function speechActivityWindows(
+  tracks: CaptionTrackInput[],
+  padSeconds = 0.15
+): Array<{ startSec: number; endSec: number }> {
+  const raw: Array<{ startSec: number; endSec: number }> = []
+  for (const track of tracks) {
+    const trimStart = Math.max(0, track.trimStartSec ?? 0)
+    const trimEnd = track.trimEndSec
+    const timed = track.segments.filter((s) => s.start !== null)
+    if (timed.length === 0) {
+      const mediaEnd =
+        track.durationSeconds === undefined
+          ? trimEnd
+          : trimEnd !== undefined
+            ? Math.min(trimEnd, track.durationSeconds)
+            : track.durationSeconds
+      if (mediaEnd !== undefined && mediaEnd > trimStart) {
+        raw.push({ startSec: track.startSec, endSec: track.startSec + (mediaEnd - trimStart) })
+      }
+      continue
+    }
+    for (const seg of timed) {
+      const segStart = seg.start as number
+      const rawEnd = seg.end ?? segStart + 2
+      const from = Math.max(segStart, trimStart)
+      const to = trimEnd !== undefined ? Math.min(rawEnd, trimEnd) : rawEnd
+      if (to <= from) continue
+      raw.push({
+        startSec: track.startSec + (from - trimStart),
+        endSec: track.startSec + (to - trimStart)
+      })
+    }
+  }
+  const padded = raw
+    .map((w) => ({ startSec: Math.max(0, w.startSec - padSeconds), endSec: w.endSec + padSeconds }))
+    .sort((a, b) => a.startSec - b.startSec)
+  const merged: typeof padded = []
+  for (const w of padded) {
+    const last = merged[merged.length - 1]
+    if (last && w.startSec <= last.endSec) last.endSec = Math.max(last.endSec, w.endSec)
+    else merged.push({ ...w })
+  }
+  return merged
+}
+
+/**
+ * The music lane's ducking filter: unity gain everywhere, dropped to `gain`
+ * inside the speech windows (frame-evaluated volume expression). Null when
+ * there is nothing to duck under.
+ */
+export function duckingVolumeFilter(
+  windows: Array<{ startSec: number; endSec: number }>,
+  gain = 0.35
+): string | null {
+  if (windows.length === 0) return null
+  const terms = windows
+    .map((w) => `between(t,${w.startSec.toFixed(3)},${w.endSec.toFixed(3)})`)
+    .join('+')
+  return `volume=volume='if(${terms},${gain},1)':eval=frame`
 }
 
 /** 71.5 → "0:01:11.50" (ASS uses centiseconds). */
@@ -424,6 +579,8 @@ export function buildAssContent(
 ): string {
   const subtitleSize = Math.round(spec.height * 0.05)
   const watermarkSize = Math.round(spec.height * 0.033)
+  const captionSize = Math.round(spec.height * 0.055)
+  const captionMargin = Math.round(spec.height * 0.09)
   const margin = Math.round(spec.height * 0.04)
   const header = [
     '[Script Info]',
@@ -441,6 +598,9 @@ export function buildAssContent(
     // Free layers: the style is a neutral base — every event overrides
     // position, font, size, weight and colour for itself.
     `Style: FreeLayer,Arial,${subtitleSize},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,1,2,1,5,0,0,0,1`,
+    // Dynamic captions: bold bottom-center, strong outline. SecondaryColour is
+    // the karaoke "not yet spoken" grey — \k sweeps it to PrimaryColour.
+    `Style: Caption,Arial,${captionSize},&H00FFFFFF,&H00C8C8C8,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,${margin},${margin},${captionMargin},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
@@ -453,9 +613,18 @@ export function buildAssContent(
           ? 'Title'
           : e.kind === 'watermark'
             ? 'Watermark'
-            : 'FreeLayer'
+            : e.kind === 'caption'
+              ? 'Caption'
+              : 'FreeLayer'
     const overrides: string[] = []
-    if (e.kind !== 'subtitle' && e.align !== undefined) overrides.push(`\\an${e.align}`)
+    if (e.kind !== 'subtitle' && e.kind !== 'caption' && e.align !== undefined) {
+      overrides.push(`\\an${e.align}`)
+    }
+    // Caption presets: 'classic' is the bare style; 'pop' scales in with a
+    // quick fade; 'karaoke' carries its word timings in the text itself.
+    if (e.kind === 'caption' && e.captionPreset === 'pop') {
+      overrides.push('\\fad(120,80)\\fscx85\\fscy85\\t(0,120,\\fscx100\\fscy100)')
+    }
     if (e.kind === 'title' && e.size && e.size !== 'md') {
       overrides.push(`\\fs${Math.round(spec.height * TITLE_SIZE_FACTOR[e.size])}`)
     }
@@ -470,7 +639,11 @@ export function buildAssContent(
       if (e.colorHex) overrides.push(`\\1c${assColor(e.colorHex)}`)
     }
     const prefix = overrides.length > 0 ? `{${overrides.join('')}}` : ''
-    return `Dialogue: 0,${formatAssTimestamp(e.startSec)},${formatAssTimestamp(e.endSec)},${style},,0,0,0,,${prefix}${escapeAssText(e.text)}`
+    const body =
+      e.kind === 'caption' && e.captionPreset === 'karaoke' && e.words && e.words.length > 0
+        ? e.words.map((w) => `{\\k${w.durationCs}}${escapeAssText(w.text)}`).join(' ')
+        : escapeAssText(e.text)
+    return `Dialogue: 0,${formatAssTimestamp(e.startSec)},${formatAssTimestamp(e.endSec)},${style},,0,0,0,,${prefix}${body}`
   })
   return [...header, ...lines, ''].join('\n')
 }
@@ -538,6 +711,8 @@ export interface MusicTrack {
   /** Trim window inside the track (already clamped by the shared clipTrim). */
   trimStartSec?: number
   trimEndSec?: number
+  /** Volume gain (0–2; undefined or 1 = untouched, keeps the argv historical). */
+  volume?: number
 }
 
 /**
@@ -556,30 +731,41 @@ export function buildMuxArgs(
   speech: MusicTrack[],
   videoHasAudio: boolean,
   durationSeconds: number,
-  outPath: string
+  outPath: string,
+  opts?: {
+    /** Duck the music bed inside the speech windows (see duckingVolumeFilter). */
+    duckMusic?: { windows: Array<{ startSec: number; endSec: number }>; gain?: number }
+  }
 ): string[] {
   const args = ['-y', '-hide_banner', '-nostdin', '-i', videoPath]
   for (const t of [...music, ...speech]) args.push('-i', t.path)
 
   const chains: string[] = []
-  // An untrimmed track feeds the chain directly — the argv stays byte-identical
+  // An untouched track feeds the chain directly — the argv stays byte-identical
   // to the pre-trim builder; a trimmed one goes through its own atrim first
-  // (asetpts rebases timestamps so concat/apad see a stream starting at 0).
+  // (asetpts rebases timestamps so concat/apad see a stream starting at 0), and
+  // a per-track volume gain chains after the trim.
   const buildLane = (
     tracks: MusicTrack[],
     firstInput: number,
     catLabel: string,
-    padLabel: string
+    padLabel: string,
+    laneFilter?: string | null
   ): string | null => {
     if (tracks.length === 0) return null
     const labels = tracks.map((m, i) => {
       const idx = firstInput + i
       const src = `[${idx}:a]`
+      const filters: string[] = []
       const start = m.trimStartSec ?? 0
-      if (start <= 0 && m.trimEndSec === undefined) return src
-      const parts = [`start=${start}`]
-      if (m.trimEndSec !== undefined) parts.push(`end=${m.trimEndSec}`)
-      chains.push(`${src}atrim=${parts.join(':')},asetpts=PTS-STARTPTS[t${idx}]`)
+      if (start > 0 || m.trimEndSec !== undefined) {
+        const parts = [`start=${start}`]
+        if (m.trimEndSec !== undefined) parts.push(`end=${m.trimEndSec}`)
+        filters.push(`atrim=${parts.join(':')}`, 'asetpts=PTS-STARTPTS')
+      }
+      if (m.volume !== undefined && m.volume !== 1) filters.push(`volume=${m.volume}`)
+      if (filters.length === 0) return src
+      chains.push(`${src}${filters.join(',')}[t${idx}]`)
       return `[t${idx}]`
     })
     let label: string
@@ -589,11 +775,19 @@ export function buildMuxArgs(
     } else {
       label = labels[0] as string
     }
+    // Lane-wide filter (music ducking): after concat, in final-timeline time.
+    if (laneFilter) {
+      chains.push(`${label}${laneFilter}[${catLabel}duck]`)
+      label = `[${catLabel}duck]`
+    }
     chains.push(`${label}apad[${padLabel}]`)
     return `[${padLabel}]`
   }
 
-  const musicLane = buildLane(music, 1, 'mcat', 'mpad')
+  const duckFilter = opts?.duckMusic
+    ? duckingVolumeFilter(opts.duckMusic.windows, opts.duckMusic.gain)
+    : null
+  const musicLane = buildLane(music, 1, 'mcat', 'mpad', duckFilter)
   const speechLane = buildLane(speech, 1 + music.length, 'scat', 'spad')
   const mixInputs = [videoHasAudio ? '[0:a]' : null, musicLane, speechLane].filter(
     (l): l is string => l !== null

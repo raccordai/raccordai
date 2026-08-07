@@ -3,6 +3,8 @@ import { MAX_VARIANTS } from '../config'
 import { SCENARIO_VERSION, SCREEN_DIRECTIONS, type Scenario } from '../scenario'
 import { type SpeechTranscript } from '../speech'
 import { CLIP_TRANSITION_IDS, TRANSITION_MAX_SECONDS, TRANSITION_MIN_SECONDS } from '../transitions'
+import { CAPTION_PRESET_IDS } from '../captions'
+import { VOLUME_MAX, VOLUME_MIN } from '../config'
 
 /**
  * Single source of truth for the renderer <-> main boundary.
@@ -551,6 +553,8 @@ export const graphNodeSchema = z.object({
   transitionAfter: z.string().nullable().optional(),
   transitionDurationSec: z.number().nullable().optional(),
   overlay: clipOverlaySchema.nullable().optional(),
+  /** Audio-lane volume gain (0–2, null = 1) — read through the shared clipVolume. */
+  volume: z.number().nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -1090,6 +1094,14 @@ export const ipcContracts = {
     input: z.object({ nodeId: z.string(), overlay: clipOverlaySchema.nullable() }),
     output: z.void()
   },
+  /** Volume gain of an audio track (music/speech lane): 0–2, null = original. */
+  'nodes:setVolume': {
+    input: z.object({
+      nodeId: z.string(),
+      volume: z.number().min(VOLUME_MIN).max(VOLUME_MAX).nullable()
+    }),
+    output: z.void()
+  },
 
   // Free text layers of the timeline (§6.12b) — the title track.
   'textLayers:list': {
@@ -1458,6 +1470,10 @@ export const ipcContracts = {
         .optional(),
       /** Burn the scenario's quoted dialogue as subtitles. */
       burnSubtitles: z.boolean().optional(),
+      /** Dynamic captions from the speech lane's transcripts (preset id; absent = off). */
+      captionsPreset: z.enum(CAPTION_PRESET_IDS).optional(),
+      /** Duck the music bed under the voice-over (transcript-timed windows). */
+      duckMusic: z.boolean().optional(),
       /** Translucent corner text over the whole film (per-render, not persisted). */
       watermark: z
         .object({
