@@ -1503,8 +1503,14 @@ export const ipcContracts = {
     output: z.object({
       running: z.boolean(),
       url: z.string().nullable(),
-      token: z.string()
+      token: z.string(),
+      authDisabled: z.boolean()
     })
+  },
+  /** Opt-in tokenless MCP access — safe-ish because the server binds loopback only. */
+  'settings:setLocalApiAuthDisabled': {
+    input: z.object({ disabled: z.boolean() }),
+    output: z.void()
   },
   'settings:setKieApiKey': { input: z.object({ key: z.string() }), output: z.void() },
   'settings:getGenerationConcurrency': { input: z.void(), output: z.number() },

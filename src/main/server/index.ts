@@ -4,7 +4,7 @@ import { RESPONSE_ALREADY_SENT } from '@hono/node-server/utils/response'
 import { handleMcpRequest } from '../mcp/server'
 import { app as electronApp } from 'electron'
 import { getReleaseChannel } from '../env'
-import { getLocalApiPort, getLocalApiToken } from '../services/settings'
+import { getLocalApiAuthDisabled, getLocalApiPort, getLocalApiToken } from '../services/settings'
 import { logInfo } from '../services/logger'
 
 /**
@@ -32,7 +32,9 @@ function buildApp(): Hono<{ Bindings: HttpBindings }> {
   const token = getLocalApiToken()
   const authed = new Hono<{ Bindings: HttpBindings }>()
   authed.use('*', async (c, next) => {
-    if (c.req.header('Authorization') !== `Bearer ${token}`) {
+    // Tokenless mode is re-read per request so the Settings toggle applies
+    // without a restart. Loopback-only binding is what makes it acceptable.
+    if (!getLocalApiAuthDisabled() && c.req.header('Authorization') !== `Bearer ${token}`) {
       return c.json({ error: 'unauthorized' }, 401)
     }
     await next()

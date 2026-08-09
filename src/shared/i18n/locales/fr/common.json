@@ -867,7 +867,9 @@
     "token": "Token",
     "copy": "Copier",
     "copied": "Copié ✓",
-    "stopped": "Serveur local arrêté — active le flag local-api puis redémarre l'app."
+    "stopped": "Serveur local arrêté — active le flag local-api puis redémarre l'app.",
+    "noAuth": "Autoriser l'accès sans token",
+    "noAuthHint": "Les clients MCP locaux se connectent sans en-tête Authorization. Le serveur n'écoute que sur 127.0.0.1, mais tout processus de cette machine pourra alors piloter l'app."
   },
   "styles": {
     "anime": {

@@ -10,6 +10,10 @@ manage assets.
 - **Endpoint**: `http://127.0.0.1:4517/mcp` (Streamable HTTP transport, POST)
 - **Auth**: `Authorization: Bearer <token>` — URL and token can be copied from
   **Settings → Integrations → MCP server**
+- **Tokenless mode** (opt-in): the "Allow access without a token" toggle in the
+  same Settings block drops the Bearer requirement. The server only ever binds
+  `127.0.0.1`, but any local process can then drive the app — leave it off
+  unless a client cannot send headers. Applies immediately, no restart.
 - Requires the app to be running (the local API starts with the app).
 
 Example — wiring up Claude Code:
@@ -18,6 +22,8 @@ Example — wiring up Claude Code:
 claude mcp add raccord --transport http http://127.0.0.1:4517/mcp \
   --header "Authorization: Bearer <token>"
 ```
+
+With tokenless mode on, the `--header` flag can simply be omitted.
 
 ## Philosophy: exploratory documentation
 

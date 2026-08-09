@@ -295,9 +295,14 @@ function BackupBlock(): React.JSX.Element {
 
 function McpBlock(): React.JSX.Element {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const info = useQuery({
     queryKey: ['settings', 'localApiInfo'],
     queryFn: () => invoke('settings:localApiInfo')
+  })
+  const setAuthDisabled = useMutation({
+    mutationFn: (disabled: boolean) => invoke('settings:setLocalApiAuthDisabled', { disabled }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['settings', 'localApiInfo'] })
   })
   const [copied, setCopied] = useState<'url' | 'token' | null>(null)
 
@@ -338,6 +343,18 @@ function McpBlock(): React.JSX.Element {
       ) : (
         <p className="mt-2 text-xs text-warning">{t('mcp.stopped')}</p>
       )}
+      <div className="mt-3 flex items-center justify-between gap-4 border-t border-neutral-800 pt-3">
+        <div>
+          <div className="text-xs text-neutral-200">{t('mcp.noAuth')}</div>
+          <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">{t('mcp.noAuthHint')}</p>
+        </div>
+        <input
+          type="checkbox"
+          checked={info.data?.authDisabled ?? false}
+          onChange={(e) => setAuthDisabled.mutate(e.target.checked)}
+          className="h-4 w-4 flex-shrink-0 rounded border-neutral-600 bg-neutral-900"
+        />
+      </div>
     </div>
   )
 }

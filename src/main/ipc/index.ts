@@ -340,9 +340,13 @@ export function registerIpcHandlers(): void {
     return {
       running: status.running,
       url: status.running ? `http://127.0.0.1:${status.port}/mcp` : null,
-      token: settingsService.getLocalApiToken()
+      token: settingsService.getLocalApiToken(),
+      authDisabled: settingsService.getLocalApiAuthDisabled()
     }
   })
+  handle('settings:setLocalApiAuthDisabled', ({ disabled }) =>
+    settingsService.setLocalApiAuthDisabled(disabled)
+  )
   handle('settings:setKieApiKey', ({ key }) => settingsService.setKieApiKey(key))
   handle('settings:kieApiKeyStatus', () => settingsService.kieApiKeyStatus())
   handle('settings:testKieApiKey', async () => ({ status: await kieTestApiKey() }))

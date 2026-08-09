@@ -250,3 +250,16 @@ export function getLocalApiToken(): string {
   setSetting('localApiToken', token)
   return token
 }
+
+/**
+ * Tokenless MCP access (opt-in, Settings → MCP). Only tolerable because the
+ * local API binds 127.0.0.1 exclusively — enabling it still means any local
+ * process can drive the app, hence default off.
+ */
+export function getLocalApiAuthDisabled(): boolean {
+  return getSetting('localApiAuthDisabled') === true
+}
+
+export function setLocalApiAuthDisabled(disabled: boolean): void {
+  setSetting('localApiAuthDisabled', disabled)
+}

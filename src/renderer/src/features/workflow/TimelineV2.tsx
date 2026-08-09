@@ -2143,6 +2143,17 @@ export function TimelineV2({
 }
 
 /**
+ * Clamp a centred popover's `left` so the island stays fully on screen: the
+ * anchors are clip centres, so on the timeline's last clips half the popover
+ * would overflow the window edge. Works on centres because every popover
+ * carries `-translate-x-1/2`.
+ */
+function popoverLeft(anchorX: number, widthPx: number): number {
+  const half = widthPx / 2 + 8
+  return Math.min(Math.max(anchorX, half), Math.max(half, window.innerWidth - half))
+}
+
+/**
  * Inspector for one sticker: timing, size (as % of the output width) and
  * deletion. Position is set by dragging the sticker ON THE PLAYER (x/y are
  * normalized centers — the preview is the render).
@@ -2184,7 +2195,7 @@ function StickerSettingsPopover({
     <div
       ref={ref}
       className="island fixed z-50 w-64 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: anchor.x, top: anchor.y }}
+      style={{ left: popoverLeft(anchor.x, 256), top: anchor.y }}
     >
       <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
         <StickerIcon className="h-3 w-3 text-accent" /> {t('timeline.sticker')}
@@ -2272,7 +2283,7 @@ function AudioSettingsPopover({
     <div
       ref={ref}
       className="island fixed z-50 w-60 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: anchor.x, top: anchor.y }}
+      style={{ left: popoverLeft(anchor.x, 240), top: anchor.y }}
     >
       <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
         <Volume2 className="h-3 w-3 text-accent" /> {t('timeline.volume')}
@@ -2404,7 +2415,7 @@ function ClipSettingsPopover({
     <div
       ref={ref}
       className="island fixed z-50 w-72 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: anchor.x, top: anchor.y }}
+      style={{ left: popoverLeft(anchor.x, 288), top: anchor.y }}
     >
       <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
         <Scissors className="h-3 w-3 text-accent" /> {t('timeline.clipSettings')}
@@ -2702,7 +2713,7 @@ function LayerSettingsPopover({
     <div
       ref={ref}
       className="island fixed z-50 w-72 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: anchor.x, top: anchor.y }}
+      style={{ left: popoverLeft(anchor.x, 288), top: anchor.y }}
     >
       <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
         <Type className="h-3 w-3 text-accent" /> {t('timeline.layerSettings')}
@@ -2846,7 +2857,7 @@ function ImagePickerPopover({
     <div
       ref={ref}
       className="island fixed z-50 w-64 -translate-x-1/2 -translate-y-full px-2 py-2 text-[11px]"
-      style={{ left: anchor.x, top: anchor.y }}
+      style={{ left: popoverLeft(anchor.x, 256), top: anchor.y }}
     >
       <div className="mb-1.5 flex items-center gap-1.5 px-1 font-semibold text-neutral-200">
         <ImagePlus className="h-3 w-3 text-accent" /> {t('timeline.addImage')}
