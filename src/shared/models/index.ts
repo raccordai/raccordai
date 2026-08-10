@@ -10,7 +10,10 @@ import { seedance2Mini } from './seedance-2-mini'
 import { seedance15Pro } from './seedance-15-pro'
 import { grokImagineI2V } from './grok-imagine-i2v'
 import { grokImagineT2V } from './grok-imagine-t2v'
+import { grokImagine15Preview } from './grok-imagine-15-preview'
 import { kling3 } from './kling-3'
+import { volcengineLipSync } from './volcengine-lip-sync'
+import { omnihuman15 } from './omnihuman-15'
 import { sunoMusic } from './suno-music'
 import { elevenlabsTts } from './elevenlabs-tts'
 import { elevenlabsDialogue } from './elevenlabs-dialogue'
@@ -33,6 +36,9 @@ export const MODELS: ModelDefinition[] = [
   kling3,
   grokImagineT2V,
   grokImagineI2V,
+  grokImagine15Preview,
+  volcengineLipSync,
+  omnihuman15,
   sunoMusic,
   elevenlabsTts,
   elevenlabsDialogue
@@ -46,10 +52,9 @@ const MODEL_MAP = new Map<string, ModelDefinition>(MODELS.map((m) => [m.id, m]))
  * the canonical id (and the string sent to kie.ai) is always the target's `.id`.
  */
 const MODEL_ALIASES: Record<string, string> = {
-  // Grok Imagine 1.5 preview → current Grok Imagine i2v. (The current model
-  // reuses the historical 'grok-imagine/image-to-video' id, so Grok 1.0 nodes
-  // resolve directly and the 1.0 → 1.5 alias is gone with the 1.5 model.)
-  'grok-imagine-video-1-5-preview': 'grok-imagine/image-to-video'
+  // Currently empty: 'grok-imagine-video-1-5-preview' was aliased to the plain
+  // Grok i2v while the 1.5 model was retired — it is back as a real model, so
+  // legacy 1.5 nodes resolve directly (an alias here would shadow it).
 }
 for (const [alias, target] of Object.entries(MODEL_ALIASES)) {
   const def = MODEL_MAP.get(target)

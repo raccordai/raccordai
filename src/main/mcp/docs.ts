@@ -261,6 +261,18 @@ the spoken text with per-segment [m:ss] timestamps (speaker labels on dialogue).
 get_transcript(nodeId) and reuse it for subtitles, matching shots to narration beats, trimming
 clips to the voice, or the YouTube description.
 
+MAKING A FACE SPEAK — two models, by what you start from:
+  - An EXISTING clip whose character must say an exact line: volcengine/video-to-video-lip-sync
+    re-animates the speaker's mouth to match a speech track. Wire the clip into video_url and the
+    ElevenLabs node's output into audio_url (pure vocals work best — enable separate_vocal if the
+    audio carries music/noise). No prompt; the output duration follows the audio (the clip is
+    trimmed or looped).
+  - A STILL portrait (people, pets, anime): omnihuman-1-5 animates the whole performance from the
+    audio, lip-synced. Wire a clean portrait into image_url (a frame anchor — never a design
+    sheet) and the speech into audio_url (≤60 s, ≤15 s reads best); the optional prompt only
+    directs emotion/gesture/camera.
+Details: docs "model:volcengine/video-to-video-lip-sync" and docs "model:omnihuman-1-5".
+
 VOICE PERSONAS — the consistency mechanism. A persona names an ElevenLabs voice app-wide:
 "Narrateur IS voice X", optionally pinned to a niche (the YouTube channel). Same doctrine as the
 visual cast (docs "casting") but for who SPEAKS instead of who appears:

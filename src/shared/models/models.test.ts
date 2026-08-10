@@ -151,12 +151,12 @@ describe('model lookup', () => {
     expect(() => getModelOrThrow('nope')).toThrowError(/nope/)
   })
 
-  it('resolves legacy aliases to the replacement model', () => {
-    // Workflows saved with Grok Imagine 1.5 must keep running on the current
-    // Grok i2v (which reuses the historical 'grok-imagine/image-to-video' id,
-    // so Grok 1.0 nodes resolve directly, no alias needed).
+  it('resolves legacy 1.5 nodes to the restored Grok 1.5 model, not an alias', () => {
+    // The 1.5 id was aliased to the plain Grok i2v while the model was retired;
+    // it is a real model again and MUST NOT be shadowed by a leftover alias.
     const model = getModel('grok-imagine-video-1-5-preview')
-    expect(model?.id).toBe('grok-imagine/image-to-video')
+    expect(model?.id).toBe('grok-imagine-video-1-5-preview')
+    expect(model?.label).toContain('1.5')
   })
 })
 
@@ -420,6 +420,41 @@ describe('grok imagine family', () => {
     expect(fixed).toMatchObject({ aspect_ratio: '9:16' })
   })
 
+  it('1.5 preview accepts sub-6s durations and runs without images (t2v)', () => {
+    const model = getModelOrThrow('grok-imagine-video-1-5-preview')
+    const params = model.paramsSchema.parse({ prompt: 'a fox runs', duration: 3 })
+    const payload = model.buildPayload({ params, inputs: {} })
+    expect(payload).toMatchObject({ prompt: 'a fox runs', duration: 3 })
+    expect(payload).not.toHaveProperty('image_urls')
+  })
+
+  it('1.5 preview maps legacy 4:3/3:4 ratios to the closest current enum value', () => {
+    const model = getModelOrThrow('grok-imagine-video-1-5-preview')
+    for (const [legacy, mapped] of [
+      ['4:3', '3:2'],
+      ['3:4', '2:3']
+    ]) {
+      const params = model.paramsSchema.parse({ prompt: 'x', aspect_ratio: legacy })
+      expect(model.buildPayload({ params, inputs: {} })).toMatchObject({ aspect_ratio: mapped })
+    }
+    // …and the UI never offers the legacy values.
+    const field = model.paramFields.find((f) => f.key === 'aspect_ratio')
+    expect(field?.options?.some((o) => o.value === '4:3')).toBe(false)
+  })
+
+  it('1.5 preview rejects several images at 1080p (API limit) before the spend', () => {
+    const model = getModelOrThrow('grok-imagine-video-1-5-preview')
+    const params = model.paramsSchema.parse({ prompt: 'x', resolution: '1080p' })
+    expect(() =>
+      model.buildPayload({
+        params,
+        inputs: { image_urls: ['https://x/a.png', 'https://x/b.png'] }
+      })
+    ).toThrowError(/single source image/)
+    const one = model.buildPayload({ params, inputs: { image_urls: ['https://x/a.png'] } })
+    expect(one).toMatchObject({ image_urls: ['https://x/a.png'], resolution: '1080p' })
+  })
+
   it('i2v never offers spicy mode (rejected with external image URLs)', () => {
     const model = getModelOrThrow('grok-imagine/image-to-video')
     expect(model.paramsSchema.safeParse({ mode: 'spicy' }).success).toBe(false)
@@ -469,6 +504,92 @@ describe('kling-3.0/video', () => {
     expect(() =>
       kling.buildPayload({ params, inputs: { last_frame: ['https://x/b.png'] } })
     ).toThrowError(/First frame/)
+  })
+})
+
+describe('volcengine/video-to-video-lip-sync', () => {
+  const lipSync = getModelOrThrow('volcengine/video-to-video-lip-sync')
+
+  it('requires exactly one video and one audio source', () => {
+    for (const key of ['video_url', 'audio_url']) {
+      const handle = lipSync.inputs.find((i) => i.key === key)
+      expect(handle?.required).toBe(true)
+      expect(handle?.maxCount).toBe(1)
+    }
+  })
+
+  it('lite mode sends the loop switches and omits the basic-only ones', () => {
+    const params = lipSync.paramsSchema.parse({})
+    const payload = lipSync.buildPayload({
+      params,
+      inputs: { video_url: ['https://x/clip.mp4'], audio_url: ['https://x/voice.mp3'] }
+    })
+    expect(payload).toEqual({
+      mode: 'lite',
+      separate_vocal: false,
+      video_url: 'https://x/clip.mp4',
+      audio_url: 'https://x/voice.mp3',
+      align_audio: true,
+      align_audio_reverse: false
+    })
+  })
+
+  it('basic mode sends open_scenedet and omits the lite-only switches', () => {
+    const params = lipSync.paramsSchema.parse({
+      mode: 'basic',
+      open_scenedet: true,
+      templ_start_seconds: 5
+    })
+    const payload = lipSync.buildPayload({ params, inputs: {} })
+    expect(payload).toEqual({ mode: 'basic', separate_vocal: false, open_scenedet: true })
+  })
+
+  it('sends templ_start_seconds when set and drops align_audio_reverse when the loop is off', () => {
+    const params = lipSync.paramsSchema.parse({ templ_start_seconds: 3, align_audio: false })
+    const payload = lipSync.buildPayload({ params, inputs: {} })
+    expect(payload).toMatchObject({ align_audio: false, templ_start_seconds: 3 })
+    expect(payload).not.toHaveProperty('align_audio_reverse')
+  })
+})
+
+describe('omnihuman-1-5', () => {
+  const omni = getModelOrThrow('omnihuman-1-5')
+
+  it('declares the portrait as a required single frame anchor and masks as optional', () => {
+    const portrait = omni.inputs.find((i) => i.key === 'image_url')
+    expect(portrait?.required).toBe(true)
+    expect(portrait?.maxCount).toBe(1)
+    expect(portrait?.frameAnchor).toBe(true)
+    const masks = omni.inputs.find((i) => i.key === 'mask_url')
+    expect(masks?.required).toBeUndefined()
+    expect(masks?.maxCount).toBe(5)
+  })
+
+  it('omits the optional fields at their defaults (empty prompt, seed -1, no masks)', () => {
+    const params = omni.paramsSchema.parse({})
+    const payload = omni.buildPayload({
+      params,
+      inputs: { image_url: ['https://x/face.png'], audio_url: ['https://x/voice.mp3'] }
+    })
+    expect(payload).toEqual({
+      output_resolution: '1080',
+      pe_fast_mode: false,
+      image_url: 'https://x/face.png',
+      audio_url: 'https://x/voice.mp3'
+    })
+  })
+
+  it('sends prompt, seed and masks when set', () => {
+    const params = omni.paramsSchema.parse({ prompt: 'sings joyfully', seed: 42 })
+    const payload = omni.buildPayload({
+      params,
+      inputs: { mask_url: ['https://x/m1.png', 'https://x/m2.png'] }
+    })
+    expect(payload).toMatchObject({
+      prompt: 'sings joyfully',
+      seed: 42,
+      mask_url: ['https://x/m1.png', 'https://x/m2.png']
+    })
   })
 })
 
