@@ -70,3 +70,12 @@ export function formatRoadmapContext(context: {
   ]
   return `NICHE CONTEXT — this video was created from a niche roadmap item; respect it without being asked (ground the scenario in the angle and evidence, keep the thumbnail on-brief, reuse the channel voices):\n${lines.join('\n')}`
 }
+
+/**
+ * The PROJECT INSTRUCTIONS block appended to the system prompt when the
+ * session's project carries Instructions (the per-project markdown methodology,
+ * Instructions tab). Pure — chat.ts fetches the project, this renders it.
+ */
+export function formatProjectInstructions(projectName: string, instructions: string): string {
+  return `PROJECT INSTRUCTIONS — the user's methodology for project "${projectName}". These instructions take PRIORITY over the general guidance above whenever they conflict, and apply to EVERY video of this project without being asked — they exist to keep the project's videos consistent. The user maintains them in the project's Instructions tab; update them with set_project_instructions only when the user asks to change the method.\n${instructions}`
+}

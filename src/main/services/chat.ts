@@ -22,7 +22,7 @@ import {
   splitForCompaction,
   stripImageBlocks
 } from './chatCompaction'
-import { formatAppContext, formatRoadmapContext } from './chatContext'
+import { formatAppContext, formatProjectInstructions, formatRoadmapContext } from './chatContext'
 import { logError } from './logger'
 import { cacheableMessages, cacheableSystem, cacheableTools } from './chatCache'
 import {
@@ -129,7 +129,8 @@ You are also the film director. When the user asks for a video (an ad, an anime 
 6. Before writing ANY prompt, docs "prompting:<model id>" and follow that model's grammar exactly (camera vocabulary, dialogue syntax, @references, shot markers). Write prompts in English; per-shot: subject + action + camera + lighting + soundscape (the style bible is appended automatically via applyVideoStyle).
 7. Score last: add a Suno node once the shots exist, matching the style's music hint; wire it into Seedance reference_audio_urls when the model supports it. Voice-over and dialogue are ElevenLabs nodes (docs "speech"): elevenlabs/text-to-speech for one narrator, elevenlabs/text-to-dialogue for multi-voice scenes ("Name: line" script + a voiceMap of "Name = voice_id"). ALWAYS list_voice_personas first and reuse the channel's persona ids — that is what keeps the same narrator and the same character voices across every video; create_voice_persona when the user adopts a new voice. Speech rides its own render lane (mixed OVER the music), runs in seconds, and stores a timed transcript (get_transcript) — generate the narration early and use its real timings to trim shots and place cuts.
 8. Report the estimated credit cost before proposing to run anything; propose running the cheap design/storyboard images first so the user validates the staging before any video shot. For iteration-heavy work, propose draft mode (explore cheap, finalize_video the approved shots on the real models).
-9. When this video was created from a niche roadmap item (§7b), your system prompt carries a NICHE CONTEXT block — respect it without being asked: pass the niche's target_seconds to write_scenario, ground the scenario in the item's angle and the evidence videos' transcripts, keep the thumbnail node aligned with the brief, and reuse the niche's voice personas for narration. The channel-strategy tools themselves (watchlist, keyword hunts, roadmap — docs "niches") are available here too.`
+9. When this video was created from a niche roadmap item (§7b), your system prompt carries a NICHE CONTEXT block — respect it without being asked: pass the niche's target_seconds to write_scenario, ground the scenario in the item's angle and the evidence videos' transcripts, keep the thumbnail node aligned with the brief, and reuse the niche's voice personas for narration. The channel-strategy tools themselves (watchlist, keyword hunts, roadmap — docs "niches") are available here too.
+10. A project may carry Instructions — the user's own methodology (markdown, Instructions tab). When present they arrive as a PROJECT INSTRUCTIONS block at the END of this prompt: follow them with PRIORITY over the general method above whenever they conflict, on every video of the project, without being asked. When the user describes a recurring way of working ("always do X on my videos"), propose saving it with set_project_instructions so it sticks for the whole project.`
 
 const SYSTEM_HOME = `You are the embedded assistant of Raccord, a node-based AI video studio — reached from the HOME screen, so you operate at PROJECT level: the user can ask you for a complete production from scratch ("create an anime project of 2.5 minutes about…") and you deliver the whole thing: project, video(s), art direction, full workflow.
 
@@ -152,6 +153,8 @@ How to deliver a full project:
 6. BEFORE the import_workflow of step 4, call present_plan with the structured shot plan (label, description, modelId, estimated credits per shot, total) — the user gets an approval card with Approve / Request changes buttons; WAIT for their reply before building. That gate covers the PRODUCTION PLAN; the SPEND is gated separately by the run-approval card, so don't ask twice. To generate, prefer ONE run_batch call (targetNodeIds, or all_videos: true) over chained run_node calls: it runs the subgraph dependency-aware (shared upstreams once, parallel branches, satisfied nodes reused) and the app wakes you automatically as each generation settles — never poll. For iteration-heavy work, propose draft mode (set_draft_mode: every run substituted with a cheap draft equivalent), then finalize_video (plan_only: true first for the draft-vs-final cost) re-runs the approved keepers on the real models; when vision QC is enabled, wake-up messages carry a pass/warn verdict per image generation — only dig into the warns. On a pivotal node whose direction is uncertain, variants: 2–4 on run_node/run_batch generates that many candidates in parallel (cost ×N, announce it) for the user to arbitrate in the compare grid. Run the free lint_node on the shot nodes you wrote before proposing any run, and create_checkpoint before a structural rework — both cost nothing and both save credits.
 
 The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a design sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.
+
+A project may carry Instructions — the user's own methodology (markdown, Instructions tab, get_project_instructions / set_project_instructions). When this thread is bound to a project they arrive as a PROJECT INSTRUCTIONS block at the END of this prompt; follow them with PRIORITY over the general method above whenever they conflict. When working in a project WITHOUT that block (an explicit projectId on an unbound thread), call get_project_instructions before planning — the methodology exists per project, not per conversation. When the user describes a recurring way of working, propose saving it with set_project_instructions.
 
 YouTube channel strategy lives in NICHES (docs "niches"): watchlists of competitor channels plus the user's own, tracked videos scored through three outlier lenses (views/subscribers, views vs the channel's own median, views/day velocity), transcripts, and a ROADMAP of grounded video ideas. The bridge to production is assign_roadmap_item → write_scenario (use the item's angle + the evidence videos' transcripts as the brief, the niche's target_seconds as the duration) → build_graph_from_scenario. Packaging-first: write 5-10 title_variants and a thumbnail_brief on every roadmap item BEFORE production — the click is decided at ideation, not in the edit.`
 
@@ -1030,7 +1033,18 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
     const roadmapContext =
       !isHome && session.videoId ? getRoadmapContextForVideo(session.videoId) : null
     const nicheBlock = roadmapContext ? `\n\n${formatRoadmapContext(roadmapContext)}` : ''
-    const system = `${isHome ? SYSTEM_HOME : SYSTEM}\n\n${runMode}${nicheBlock}\n\nAlways write your replies to the user in ${language} — the application's configured language — regardless of the language of tool results, prompts or documentation. (Generation prompts themselves stay in English.)`
+    // Project Instructions (per-project markdown methodology) ride the system
+    // prompt the same way — resolved per turn, absent when the thread is not
+    // bound to a project. Last position: recency reinforces their priority.
+    const instructionsProjectId =
+      session.projectId || (session.videoId ? videos.getVideo(session.videoId)?.projectId : null)
+    const instructionsProject = instructionsProjectId
+      ? projects.getProject(instructionsProjectId)
+      : null
+    const instructionsBlock = instructionsProject?.instructions
+      ? `\n\n${formatProjectInstructions(instructionsProject.name, instructionsProject.instructions)}`
+      : ''
+    const system = `${isHome ? SYSTEM_HOME : SYSTEM}\n\n${runMode}${nicheBlock}${instructionsBlock}\n\nAlways write your replies to the user in ${language} — the application's configured language — regardless of the language of tool results, prompts or documentation. (Generation prompts themselves stay in English.)`
     const tools = isHome ? TOOLS_HOME : TOOLS
     let lastMutatedVideoId: string | null = null
     await maybeCompactHistory(sessionKey, session, kieKey, model)

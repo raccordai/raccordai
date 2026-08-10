@@ -10,6 +10,8 @@ import type { Scenario } from '@shared/scenario'
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
+  /** Free per-project methodology (markdown) — the assistant reads AND writes this, and obeys it with priority. */
+  instructions: text('instructions'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull()
 })

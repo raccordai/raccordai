@@ -253,6 +253,32 @@ export const AGENT_TOOLS: AgentTool[] = [
     }
   },
   {
+    name: 'get_project_instructions',
+    description:
+      "The project's Instructions: the user's methodology (markdown) that every video of the project must follow. Read it before planning work in a project whose instructions you have not seen this conversation.",
+    inputSchema: obj({ projectId: str() }, ['projectId']),
+    scope: 'project',
+    risk: 'read',
+    execute: ({ projectId }) => ({
+      instructions: projects.getProject(String(projectId))?.instructions ?? null
+    })
+  },
+  {
+    name: 'set_project_instructions',
+    description:
+      "Replace the project's Instructions (full-replacement markdown; empty string clears). Only when the user asks to save or change their per-project methodology.",
+    inputSchema: obj(
+      { projectId: str(), instructions: str('Full replacement markdown; empty string clears.') },
+      ['projectId', 'instructions']
+    ),
+    scope: 'project',
+    risk: 'write',
+    execute: ({ projectId, instructions }) => {
+      projects.setProjectInstructions(String(projectId), String(instructions))
+      return { ok: true }
+    }
+  },
+  {
     name: 'delete_project',
     description: 'Delete a whole project: its videos, graphs, generations and assets. Destructive.',
     inputSchema: obj({ projectId: str() }, ['projectId']),
@@ -451,6 +477,9 @@ export const AGENT_TOOLS: AgentTool[] = [
         // §6 iteration loop: cheap-substitution runs / vision checks on settle.
         draftMode: video.draftMode,
         qcEnabled: video.qcEnabled,
+        // The project's methodology exists — read it with get_project_instructions
+        // before planning work when true.
+        hasProjectInstructions: Boolean(projects.getProject(video.projectId)?.instructions),
         // §6.7 — the shot list this graph is meant to realize. Summary only:
         // get_scenario returns the shots with their prompt scaffolds.
         scenario: video.scenario

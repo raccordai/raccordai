@@ -570,7 +570,16 @@
     "subjectPlaceholder": "ex. Léa, 20 ans, cheveux roses, veste jaune",
     "designBadgeHint": "Planche de design publiée — à brancher en référence, jamais en frame anchor",
     "deleteReferencedConfirm": "Supprimer l'asset « {{name}} » ? {{count}} nœud(s) l'utilisent dans : {{videos}}. Ces nœuds perdront leur média.",
-    "tabCasting": "Casting"
+    "tabCasting": "Casting",
+    "tabInstructions": "Instructions"
+  },
+  "instructionsPage": {
+    "hint": "La méthodologie du projet, en markdown libre. L'assistant la lit en priorité à chaque tour, sur chaque vidéo du projet — écris ici ta façon de faire (structure des plans, ton, règles de montage) plutôt que de la répéter conversation après conversation.",
+    "placeholder": "# Méthode du projet\n\n- Toujours ouvrir sur un plan d'ensemble\n- Trois plans par scène, jamais plus\n- Ton : sobre, pas d'emphase…",
+    "edit": "Éditer",
+    "preview": "Aperçu",
+    "save": "Enregistrer",
+    "charCount": "{{count}} / {{max}} caractères"
   },
   "castingPage": {
     "intro": "Le casting nomme les identités du film : « Léa », c'est cette planche. Le nom est ce que les prompts transportent d'un plan à l'autre — et repointer un rôle vers une planche régénérée se fait ici, une fois, au lieu de courir après les plans qui référençaient l'ancienne.",

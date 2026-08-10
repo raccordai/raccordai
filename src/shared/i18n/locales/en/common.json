@@ -570,7 +570,16 @@
     "subjectPlaceholder": "e.g. Léa, 20, pink hair, yellow jacket",
     "designBadgeHint": "Published design sheet — wire it as a reference, never a frame anchor",
     "deleteReferencedConfirm": "Delete asset “{{name}}”? {{count}} node(s) use it in: {{videos}}. Those nodes will lose their media.",
-    "tabCasting": "Casting"
+    "tabCasting": "Casting",
+    "tabInstructions": "Instructions"
+  },
+  "instructionsPage": {
+    "hint": "The project's methodology, in free markdown. The assistant reads it with priority on every turn, for every video of the project — write your way of working here (shot structure, tone, editing rules) instead of repeating it conversation after conversation.",
+    "placeholder": "# Project method\n\n- Always open on an establishing shot\n- Three shots per scene, never more\n- Tone: restrained, no hype…",
+    "edit": "Edit",
+    "preview": "Preview",
+    "save": "Save",
+    "charCount": "{{count}} / {{max}} characters"
   },
   "castingPage": {
     "intro": "The cast names the film's identities: \"Léa\" IS this sheet. The name is what prompts carry from shot to shot — and re-pointing a role at a regenerated sheet happens here, once, instead of hunting the shots that referenced the old one.",

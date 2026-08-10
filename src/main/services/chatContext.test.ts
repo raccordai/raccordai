@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type { Niche, NicheRoadmapItem, VoicePersona } from '@shared/ipc/contracts'
-import { formatAppContext, formatRoadmapContext } from './chatContext'
+import { formatAppContext, formatProjectInstructions, formatRoadmapContext } from './chatContext'
+
+describe('formatProjectInstructions', () => {
+  it('renders the priority header, the project name and the markdown verbatim', () => {
+    const md = '# Méthode\n\n- Toujours 3 shots\n- Jamais de zoom'
+    const block = formatProjectInstructions('Ma chaîne', md)
+    expect(block).toMatch(/^PROJECT INSTRUCTIONS — /)
+    expect(block).toContain('project "Ma chaîne"')
+    expect(block).toContain('PRIORITY')
+    expect(block).toContain('EVERY video')
+    expect(block).toContain('set_project_instructions')
+    // The markdown itself is passed through untouched, after the header line.
+    expect(block.endsWith(`\n${md}`)).toBe(true)
+  })
+})
 
 describe('formatAppContext', () => {
   it('returns null without a context', () => {

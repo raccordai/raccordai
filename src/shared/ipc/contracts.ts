@@ -5,6 +5,7 @@ import { type SpeechTranscript } from '../speech'
 import { CLIP_TRANSITION_IDS, TRANSITION_MAX_SECONDS, TRANSITION_MIN_SECONDS } from '../transitions'
 import { CAPTION_PRESET_IDS } from '../captions'
 import {
+  PROJECT_INSTRUCTIONS_MAX_CHARS,
   RENDER_CODECS,
   RENDER_QUALITIES,
   SPEED_MAX,
@@ -98,6 +99,8 @@ export type AppInfo = z.infer<typeof appInfoSchema>
 export const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
+  /** Free per-project methodology (markdown) — the assistant reads AND writes this, and obeys it with priority. */
+  instructions: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -886,6 +889,13 @@ export const ipcContracts = {
   },
   'projects:rename': {
     input: z.object({ id: z.string(), name: z.string().trim().min(1) }),
+    output: z.void()
+  },
+  'projects:setInstructions': {
+    input: z.object({
+      id: z.string(),
+      instructions: z.string().max(PROJECT_INSTRUCTIONS_MAX_CHARS).nullable()
+    }),
     output: z.void()
   },
 

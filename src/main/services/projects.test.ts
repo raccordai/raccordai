@@ -7,7 +7,15 @@ import type { Db } from '../db/client'
 import { generations } from '../db/schema'
 import { mediaDirFor } from '../media/files'
 import { createNode } from './graph'
-import { createProject, deleteProject, getProject, listProjects, renameProject } from './projects'
+import { PROJECT_INSTRUCTIONS_MAX_CHARS } from '@shared/config'
+import {
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  renameProject,
+  setProjectInstructions
+} from './projects'
 import {
   createVideo,
   deleteVideo,
@@ -56,6 +64,30 @@ describe('projects', () => {
     const p = createProject('Old')
     renameProject(p.id, 'New')
     expect(getProject(p.id)?.name).toBe('New')
+  })
+
+  it('sets, normalizes and clears the project instructions', () => {
+    const p = createProject('P')
+    expect(p.instructions).toBeNull()
+
+    setProjectInstructions(p.id, '# Méthode\n\nToujours 3 shots.')
+    const updated = getProject(p.id)
+    expect(updated?.instructions).toBe('# Méthode\n\nToujours 3 shots.')
+    expect(updated!.updatedAt).toBeGreaterThanOrEqual(p.updatedAt)
+
+    // Whitespace-only stores null; explicit null clears.
+    setProjectInstructions(p.id, '   \n  ')
+    expect(getProject(p.id)?.instructions).toBeNull()
+    setProjectInstructions(p.id, 'x')
+    setProjectInstructions(p.id, null)
+    expect(getProject(p.id)?.instructions).toBeNull()
+  })
+
+  it('rejects instructions over the size cap', () => {
+    const p = createProject('P')
+    expect(() =>
+      setProjectInstructions(p.id, 'a'.repeat(PROJECT_INSTRUCTIONS_MAX_CHARS + 1))
+    ).toThrow(/character limit/)
   })
 
   it('deleting a project cascades to its videos', () => {

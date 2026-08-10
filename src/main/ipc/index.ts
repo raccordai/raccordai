@@ -71,6 +71,9 @@ export function registerIpcHandlers(): void {
   handle('projects:create', ({ name }) => projects.createProject(name))
   handle('projects:delete', ({ id }) => projects.deleteProject(id))
   handle('projects:rename', ({ id, name }) => projects.renameProject(id, name))
+  handle('projects:setInstructions', ({ id, instructions }) =>
+    projects.setProjectInstructions(id, instructions)
+  )
   handle('projects:overview', () => library.projectsOverview())
   handle('videos:overview', ({ projectId }) => library.videosOverview(projectId))
 

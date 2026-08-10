@@ -96,6 +96,15 @@ reference input at all, comes back in `skipped` with a reason), and
 character/décor/prop sheet — a role that already exists is cast, not
 regenerated. Details: `docs "casting"`.
 
+The project's **Instructions** are the user's own methodology (free markdown,
+the project page's Instructions tab): how every video of the project must be
+made. `get_project_instructions` returns it, and `get_workflow` reports
+`hasProjectInstructions` so a headless agent knows to read it before planning —
+over MCP the context is pull-only, whereas the embedded chat gets the block
+injected into its system prompt automatically. `set_project_instructions`
+replaces it wholesale (the assistant maintains it like the niche's positioning
+brief), capped at 20k characters.
+
 Three free tools frame the spend (§6.3/6.4/6.5). `lint_node` applies the app's
 prompting doctrine before a run — reference wired but never addressed, design
 sheet on a frame anchor, storyboard shot without the anti-grid guard, param

@@ -39,6 +39,11 @@ Edges wire a source node's output into a target node's input:
 
 Typical session:
   1. list_projects → list_videos → get_workflow (ids of everything)
+  1a. When get_workflow reports hasProjectInstructions: true, call
+     get_project_instructions BEFORE planning anything: it is the user's own
+     per-project methodology (markdown) and takes PRIORITY over the generic
+     method below. set_project_instructions replaces it (full replacement) —
+     only when the user asks to save or change their method.
   1b. Asked for a film from a brief? Write the SCENARIO first — write_scenario turns beats into a
      shot list whose durations the model accepts, chained cut to cut, before any graph exists
      (docs "scenario"). It is the step where the constraints are cheap to respect. Then

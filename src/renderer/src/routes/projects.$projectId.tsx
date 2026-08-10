@@ -12,6 +12,7 @@ import {
 } from '@shared/templates/registry'
 import { AssetCard } from '@renderer/components/AssetCard'
 import { CastingTab } from '@renderer/features/casting/CastingTab'
+import { InstructionsTab } from '@renderer/features/projects/InstructionsTab'
 import { LibraryCard } from '@renderer/components/LibraryCard'
 import { useConfirm } from '@renderer/components/feedback/Feedback'
 import { useProject } from '@renderer/features/workflow/data'
@@ -37,7 +38,7 @@ function VideosPage(): React.JSX.Element {
   const confirmModal = useConfirm()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<'videos' | 'assets' | 'casting'>('videos')
+  const [tab, setTab] = useState<'videos' | 'assets' | 'casting' | 'instructions'>('videos')
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState<string | null>(null)
@@ -242,7 +243,7 @@ function VideosPage(): React.JSX.Element {
 
         {/* Videos / Assets tabs — the asset library is project-wide, shared by every video. */}
         <div className="mt-5 flex gap-1 border-b border-neutral-800">
-          {(['videos', 'assets', 'casting'] as const).map((key) => (
+          {(['videos', 'assets', 'casting', 'instructions'] as const).map((key) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -256,7 +257,9 @@ function VideosPage(): React.JSX.Element {
                 ? `${t('assetsPage.tabVideos')} (${videos.data?.length ?? 0})`
                 : key === 'assets'
                   ? `${t('assetsPage.tabAssets')} (${assets.data?.length ?? 0})`
-                  : `${t('assetsPage.tabCasting')} (${castings.data?.length ?? 0})`}
+                  : key === 'casting'
+                    ? `${t('assetsPage.tabCasting')} (${castings.data?.length ?? 0})`
+                    : t('assetsPage.tabInstructions')}
             </button>
           ))}
         </div>
@@ -373,7 +376,9 @@ function VideosPage(): React.JSX.Element {
         </form>
       )}
 
-      {tab === 'casting' ? (
+      {tab === 'instructions' ? (
+        <InstructionsTab projectId={projectId} project={project ?? null} />
+      ) : tab === 'casting' ? (
         <CastingTab projectId={projectId} assets={assets.data ?? []} />
       ) : tab === 'assets' ? (
         (assets.data?.length ?? 0) === 0 ? (

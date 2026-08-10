@@ -26,6 +26,14 @@ export const SPEED_MIN = 0.25
 export const SPEED_MAX = 4
 
 /**
+ * Per-project Instructions (markdown methodology) size cap — the block is
+ * appended to the assistant's system prompt every turn, so an unbounded blob
+ * would bloat every request. ~5k tokens. Enforced at write time (IPC zod +
+ * service), never truncated at read time.
+ */
+export const PROJECT_INSTRUCTIONS_MAX_CHARS = 20_000
+
+/**
  * MP4 export quality/codec choices — standalone here because contracts.ts and
  * the (main-side) render plan both need them. 'standard' reproduces the
  * historical encoder args byte for byte; 'hevc' always forces the normalize
