@@ -238,12 +238,20 @@ async function publicUrlForGeneration(
     return url
   }
 
-  // Main output: the kie.ai CDN URL is directly fetchable by kie itself.
-  if (gen.resultUrl) return gen.resultUrl
-  if (!gen.resultPath) return null
+  // Main output: a kie.ai CDN URL is directly fetchable by kie itself — but an
+  // ElevenLabs result persists its LOCAL staging file's file:// URL as
+  // resultUrl, which kie cannot fetch (400 "Invalid audio format"): anything
+  // non-http goes through the same upload path as a downloaded resultPath.
+  if (gen.resultUrl && !gen.resultUrl.startsWith('file://')) return gen.resultUrl
+  const localPath =
+    gen.resultPath ??
+    (gen.resultUrl && existsSync(fileURLToPath(gen.resultUrl))
+      ? fileURLToPath(gen.resultUrl)
+      : null)
+  if (!localPath) return null
   const cached = uploadFresh(gen.resultUploadedUrl, gen.resultUploadedAt)
   if (cached) return cached
-  const url = await kieUploadFile(gen.resultPath, 'raccord/results')
+  const url = await kieUploadFile(localPath, 'raccord/results')
   db.update(generations)
     .set({ resultUploadedUrl: url, resultUploadedAt: Date.now() })
     .where(eq(generations.id, gen.id))
