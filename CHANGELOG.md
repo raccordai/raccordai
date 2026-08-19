@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.3.0](https://github.com/raccordai/raccordai/compare/v1.2.0...v1.3.0) (2026-08-19)
+
+
+### Features
+
+* **casting:** name an identity once, cast it on every shot ([6165fc5](https://github.com/raccordai/raccordai/commit/6165fc575bf57cf437c3f5e1985d636eddab97ea))
+* **feedback:** review notes at the playhead, bucket panel and MCP tools ([7473b80](https://github.com/raccordai/raccordai/commit/7473b80df3c32d6a6209b872d5915b817e4f12ad))
+* **hygiene:** disk cleanup on delete, arm64 ffprobe ([d67cfed](https://github.com/raccordai/raccordai/commit/d67cfed7a8d5110bb808be9df2db99f38008b95d))
+* **mcp:** complete the agent surface & window-free last-frame ([13060ae](https://github.com/raccordai/raccordai/commit/13060aee2c854a4214c801cc97e502a35ae21f4f))
+* **mcp:** opt-in tokenless access for local clients ([17d64f4](https://github.com/raccordai/raccordai/commit/17d64f405c0efe8a3962f72f0c9fec7f3c6722d6))
+* **models:** volcengine lip-sync, OmniHuman 1.5 and restored Grok ([53347c4](https://github.com/raccordai/raccordai/commit/53347c4c14cc6f7d52534a1404c8ee619fc81695))
+* **niches:** outlier lenses, snapshots & packaging-first roadmap ([889d129](https://github.com/raccordai/raccordai/commit/889d129dddf27d4066e1ba87342cfaf1818977c6))
+* **niches:** YouTube niche research ([13738fb](https://github.com/raccordai/raccordai/commit/13738fbc7a88573912eb9f01131681480e3d4638))
+* **projects:** per-project markdown instructions ([13f88f7](https://github.com/raccordai/raccordai/commit/13f88f7716f9c814fcf7c5164ce744a21130a9bf))
+* **recipes:** shot presets and design sheets ([b02ebb7](https://github.com/raccordai/raccordai/commit/b02ebb7f6e93321bed3d8a5a49ad623b255e92e4))
+* **reliability:** file log, crash handlers & renderer error funnel ([829b8f7](https://github.com/raccordai/raccordai/commit/829b8f7878dd2bab1ca58bed5af40f2b3cea2fc9))
+* **scenario:** the shot list builds the graph, not the assistant ([bb82b97](https://github.com/raccordai/raccordai/commit/bb82b9728e57157f38a7ff355f6895e5086a7625))
+* **speech:** Native ElevenLabs TTS & multi-voice dialogue ([0a3b2e2](https://github.com/raccordai/raccordai/commit/0a3b2e255b06d8942a94f23db8d22138af3b7f0d))
+* **timeline:** dynamic captions, music ducking, expanded transitions ([523e616](https://github.com/raccordai/raccordai/commit/523e616848ed171f89a50b1d22f272967a574ca3))
+* **timeline:** edge-resize handles on every lane and still image slots ([7ab53ff](https://github.com/raccordai/raccordai/commit/7ab53ff78375b4e681810b5604ac0d81706abfe5))
+* **timeline:** free audio placement, sticker track and export ([aa2c837](https://github.com/raccordai/raccordai/commit/aa2c83799a8f5537da882963c66788c18ad3dbce))
+* **timeline:** magnetic snapping, NLE shortcuts ([e811d37](https://github.com/raccordai/raccordai/commit/e811d370a3b10ce1877e955bf1ed7714088feaf5))
+* **timeline:** split/razor per-segment trim, transitions on additive ([0f9e989](https://github.com/raccordai/raccordai/commit/0f9e98948a390750355192962b77c06fb3c0a428))
+* **timeline:** title track with free positioning & typography, MCP-drivable ([2278c01](https://github.com/raccordai/raccordai/commit/2278c0110a242c77cf6958a19efbe752399c229f))
+
+
+### Bug Fixes
+
+* **models:** align seedance 2 credit rates with kie.ai pricing ([71529b6](https://github.com/raccordai/raccordai/commit/71529b668dd379e15453e12201e6b3086487503c))
+* **renderer:** guard matchesShortcut against undefined event.key ([c11865e](https://github.com/raccordai/raccordai/commit/c11865e2785a6511578b0c1ca3a99f6188994f97))
+* **renderer:** stop surfacing benign ResizeObserver loop warnings ([2074f79](https://github.com/raccordai/raccordai/commit/2074f7927139ad4437c9f165f6ddc0cd22213e84))
+* **runEngine:** upload ElevenLabs staged audio before wiring ([#74](https://github.com/raccordai/raccordai/issues/74)) ([2dcd824](https://github.com/raccordai/raccordai/commit/2dcd824504b7f213f3cd2e9a2060eeae24f6d2db))
+
 ## [1.2.0](https://github.com/raccordai/raccordai/compare/v1.1.0...v1.2.0) (2026-07-27)
 
 
