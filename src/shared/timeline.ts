@@ -60,6 +60,9 @@ export function timelineOrder(nodes: GraphNode[]): GraphNode[] {
 /** Default hold time of a still clip (image placed on the timeline). */
 export const DEFAULT_STILL_SECONDS = 5
 
+/** Fallback length of a clip whose media and params give no duration. */
+export const DEFAULT_CLIP_SECONDS = 5
+
 /**
  * True when the node's timeline slot holds a STILL: an image-kind node, or a
  * `studio/asset` node (uploaded media held as a picture). Stills only enter
@@ -344,6 +347,155 @@ export function transitionOverlapSeconds(clips: GraphNode[]): number {
   return clips
     .slice(0, -1)
     .reduce((sum, c) => sum + (clipTransitionAfter(c) !== null ? clipTransitionSeconds(c) : 0), 0)
+}
+
+// ── Resolved timeline (MCP `get_timeline`) ──────────────────────────────────
+
+/** Where a resolved duration came from — agents weigh 'measured' higher. */
+export type DurationSource = 'measured' | 'declared' | 'default'
+
+/** One playable slot with its FINAL-timeline placement fully computed. */
+export interface ResolvedTimelineEntry {
+  nodeId: string
+  nodeKey: string
+  label: string | null
+  modelId: string
+  segmentIndex: number
+  still: boolean
+  /** FINAL-timeline seconds (transition overlaps already subtracted). */
+  startSec: number
+  endSec: number
+  /** The slot's exclusive length (trimmed, speed-adjusted, minus overlap). */
+  durationSec: number
+  trimStartSec: number
+  trimEndSec: number | null
+  speed: number
+  transitionAfter: string | null
+  transitionSec: number
+  durationSource: DurationSource
+}
+
+/** One audio-lane track with its computed start (audioLaneStarts layout). */
+export interface ResolvedAudioTrack {
+  nodeId: string
+  nodeKey: string
+  label: string | null
+  modelId: string
+  role: 'music' | 'speech'
+  /** FINAL-timeline start: the explicit offset, or chained after the previous track. */
+  startSec: number
+  endSec: number
+  durationSec: number
+  /** The stored explicit offset (null = chained) — what set_audio_offset wrote. */
+  offsetSec: number | null
+  volume: number
+  trimStartSec: number
+  trimEndSec: number | null
+  durationSource: DurationSource
+}
+
+export interface ResolvedTimeline {
+  entries: ResolvedTimelineEntry[]
+  /** The film's length — equals the render's renderedDurationSeconds. */
+  totalSeconds: number
+  music: ResolvedAudioTrack[]
+  speech: ResolvedAudioTrack[]
+}
+
+/** Raw media length + provenance for one node (measured beats declared). */
+function rawDurationOf(
+  node: GraphNode,
+  mediaDurations: Record<string, number>
+): { raw: number; source: DurationSource } {
+  const measured = mediaDurations[node.id]
+  if (typeof measured === 'number' && Number.isFinite(measured) && measured > 0) {
+    return { raw: measured, source: 'measured' }
+  }
+  const declared = clipDuration(node)
+  if (declared !== undefined) return { raw: declared, source: 'declared' }
+  return { raw: DEFAULT_CLIP_SECONDS, source: 'default' }
+}
+
+/**
+ * The whole timeline resolved to FINAL-timeline seconds — the same math as the
+ * preview player and the MP4 render (trim windows, speed division, transition
+ * overlaps, audioLaneStarts), packaged for agents: `get_timeline` is how an
+ * agent knows where shot N starts before calling set_audio_offset to sync a
+ * voice-over. `mediaDurations` maps nodeId → measured media seconds (ffprobe
+ * in main, HTMLMediaElement in the renderer); nodes absent from it fall back
+ * to their declared params duration.
+ */
+export function resolveTimeline(
+  nodes: GraphNode[],
+  mediaDurations: Record<string, number> = {}
+): ResolvedTimeline {
+  const entries: ResolvedTimelineEntry[] = []
+  const timelineEntries = collectTimelineEntries(nodes)
+  let cursor = 0
+  timelineEntries.forEach((entry, i) => {
+    const still = isStillClip(entry.node)
+    const { raw, source } = rawDurationOf(entry.node, mediaDurations)
+    const trim = segmentTrim(entry.segment, still ? undefined : raw)
+    const speed = clipSpeed(entry.node)
+    // A still's declared length IS its trim window (stillClipSeconds).
+    const effective = still
+      ? stillClipSeconds(entry.node)
+      : Math.max(0, (trim.end ?? raw) - trim.start) / speed
+    const isLast = i === timelineEntries.length - 1
+    const transitionAfter = isLast ? null : segmentTransitionAfter(entry.segment)
+    const transitionSec = transitionAfter !== null ? segmentTransitionSeconds(entry.segment) : 0
+    const slot = Math.max(0, effective - transitionSec)
+    entries.push({
+      nodeId: entry.node.id,
+      nodeKey: entry.node.key,
+      label: entry.node.label,
+      modelId: entry.node.modelId,
+      segmentIndex: entry.segmentIndex,
+      still,
+      startSec: cursor,
+      endSec: cursor + slot,
+      durationSec: slot,
+      trimStartSec: trim.start,
+      trimEndSec: trim.end ?? null,
+      speed,
+      transitionAfter,
+      transitionSec,
+      durationSource: still ? 'declared' : source
+    })
+    cursor += slot
+  })
+
+  const lane = (role: 'music' | 'speech'): ResolvedAudioTrack[] => {
+    const tracks = collectAudioNodes(nodes, role)
+    const durations = tracks.map((node) => {
+      const { raw, source } = rawDurationOf(node, mediaDurations)
+      const trim = clipTrim(node, raw)
+      return { duration: Math.max(0, (trim.end ?? raw) - trim.start), trim, source }
+    })
+    const starts = audioLaneStarts(
+      tracks.map((node, i) => ({
+        offsetSec: clipTimelineOffset(node),
+        durationSeconds: durations[i]!.duration
+      }))
+    )
+    return tracks.map((node, i) => ({
+      nodeId: node.id,
+      nodeKey: node.key,
+      label: node.label,
+      modelId: node.modelId,
+      role,
+      startSec: starts[i]!,
+      endSec: starts[i]! + durations[i]!.duration,
+      durationSec: durations[i]!.duration,
+      offsetSec: clipTimelineOffset(node),
+      volume: clipVolume(node),
+      trimStartSec: durations[i]!.trim.start,
+      trimEndSec: durations[i]!.trim.end ?? null,
+      durationSource: durations[i]!.source
+    }))
+  }
+
+  return { entries, totalSeconds: cursor, music: lane('music'), speech: lane('speech') }
 }
 
 export function clipResolution(node: GraphNode): string | undefined {

@@ -9,6 +9,8 @@ import type * as React from 'react'
 
 const HEIGHT_STORAGE_KEY = 'raccord:timeline-height'
 const COLLAPSED_STORAGE_KEY = 'raccord:timeline-collapsed'
+const MUTED_STORAGE_KEY = 'raccord:timeline-muted'
+const INPUT_STILLS_STORAGE_KEY = 'raccord:timeline-input-stills'
 const MIN_HEIGHT = 160
 const MAX_HEIGHT_VH = 0.8 // 80% of viewport
 
@@ -28,6 +30,43 @@ export function useCollapsed(): [boolean, (v: boolean) => void] {
   }, [])
 
   return [collapsed, set]
+}
+
+// Preview-only mute of the whole timeline (clips + music + speech lanes),
+// persisted like the collapse state. Never touches the exported MP4.
+export function useMuted(): [boolean, (v: boolean) => void] {
+  const [muted, setMuted] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(MUTED_STORAGE_KEY) === '1'
+  })
+
+  const set = useCallback((v: boolean) => {
+    setMuted(v)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(MUTED_STORAGE_KEY, v ? '1' : '0')
+    }
+  }, [])
+
+  return [muted, set]
+}
+
+// Animatic mode (ON by default): clips without a generated output play their
+// INPUT image as a still, so the whole film can be reviewed (and annotated)
+// from its start frames before spending video credits.
+export function useInputStills(): [boolean, (v: boolean) => void] {
+  const [enabled, setEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    return window.localStorage.getItem(INPUT_STILLS_STORAGE_KEY) !== '0'
+  })
+
+  const set = useCallback((v: boolean) => {
+    setEnabled(v)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(INPUT_STILLS_STORAGE_KEY, v ? '1' : '0')
+    }
+  }, [])
+
+  return [enabled, set]
 }
 
 function readStoredHeight(): number {

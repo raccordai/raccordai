@@ -107,7 +107,7 @@ Conventions:
     always set an AI-facing "description" so future agents know what the media depicts.
   - The user sees the graph update live in the app while you work.
 
-Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "doctrine", "scenario", "casting", "continuity", "styles", "designs", "shots", "templates", "template:<id>".`
+Other topics: "workflow-json", "models", "model:<id>", "prompting:<id>", "doctrine", "scenario", "casting", "continuity", "speech", "timeline", "styles", "designs", "shots", "templates", "template:<id>".`
 
 const WORKFLOW_JSON = `Workflow JSON (version 1) — the bulk import/export format (import_workflow / export_workflow):
 {
@@ -785,8 +785,41 @@ COSTS. YouTube Data API: free 10k units/day (a full refresh of a 10-channel nich
 units). DataForSEO: real money per search — never launch a batch of keyword searches without the
 user asking. Transcripts: free, but unofficial (YouTube captions) — some videos have none.`
 
+const TIMELINE = `Timeline editing & export (§6.12/§8) — placing clips, audio and overlays on the
+FINAL timeline, then rendering the MP4.
+
+TWO READS. get_workflow returns the RAW editing state per node (timelineOrder, trim, transitions,
+segments, speed, look, volume, timelineOffsetSec). get_timeline returns the RESOLVED placement:
+each entry's start/end/duration in FINAL-timeline seconds (media probed for real durations, trims
+and speed applied, transition overlaps subtracted — durationSource says whether a length was
+measured, declared or a default), the film's totalSeconds, and the music/speech lanes with each
+track's computed start. Always read get_timeline before placing anything by time.
+
+CLIPS. set_timeline_order fixes the sequence; set_clip_trim cuts a window inside the media
+(MEDIA seconds — on a 2x clip the timeline shows half); split_clip razors an entry in two;
+set_clip_transition joins two entries (each transition SHORTENS the film by its length);
+set_clip_speed / set_clip_look / set_still_motion bake per-clip effects.
+
+AUDIO SYNC (the ElevenLabs workflow). Audio nodes land on their lane by model (music = Suno bed,
+speech = voice-over/dialogue). Tracks without an offset chain one after another; set_audio_offset
+places a track absolutely on the final timeline. To sync a VO on a shot: get_timeline → find the
+shot entry's startSec → set_audio_offset(voNode, startSec). For sub-second work inside the audio,
+get_transcript's segments carry raw float start/end (MEDIA time of the audio file): the moment a
+sentence starts inside the file must be subtracted when computing the offset, or trimmed away
+first with set_clip_trim. set_clip_volume (0-2) balances a track; the render can also duck the
+whole music bed under speech (duckMusic).
+
+OVERLAYS. add_text_layer / add_image_layer live in absolute FINAL-timeline seconds (get_timeline
+tells you where a shot starts); set_clip_overlay burns a text on ONE clip instead.
+
+EXPORT (render_video). Options: quality draft|standard|high, codec h264|hevc, fps, resolution,
+burnSubtitles (scenario's quoted dialogue), captionsPreset (classic|pop|karaoke, needs speech
+transcripts), duckMusic, watermark. Returns the output path, the real durationSeconds and the
+skipped slots. The preview, the FCPXML export and the MP4 all follow the same timeline resolution
+— what get_timeline reports is what renders.`
+
 export const DOC_TOPICS =
-  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | casting | continuity | speech | niches | styles | designs | shots | templates | template:<id>'
+  'overview | workflow-json | models | model:<id> | prompting:<id> | doctrine | scenario | casting | continuity | speech | timeline | niches | styles | designs | shots | templates | template:<id>'
 
 export function getDoc(topic: string): string {
   if (topic === 'overview') return OVERVIEW
@@ -796,6 +829,7 @@ export function getDoc(topic: string): string {
   if (topic === 'casting') return CASTING
   if (topic === 'continuity') return CONTINUITY
   if (topic === 'speech') return SPEECH
+  if (topic === 'timeline') return TIMELINE
   if (topic === 'niches') return NICHES
   if (topic.startsWith('model:')) return modelDetail(topic.slice('model:'.length))
   if (topic.startsWith('prompting:')) return promptingGuide(topic.slice('prompting:'.length))

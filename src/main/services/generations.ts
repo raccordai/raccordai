@@ -137,9 +137,13 @@ export function resolveSelectedOutputUrl(
 }
 
 /**
- * Still-frame fallback for video nodes whose generations all failed:
- * maps nodeId → URL of the first connected image input. Port of
- * convex/nodes.ts timelineFallbackImages.
+ * Still-frame fallback for video nodes without a usable output: maps nodeId →
+ * URL of the first connected image input. Port of convex/nodes.ts
+ * timelineFallbackImages. Two scopes: 'failed' (historical — only nodes whose
+ * generations ALL failed; what the MP4 render substitutes) and 'missing'
+ * (any video node with no success yet, never-run and in-flight included —
+ * what the preview's animatic mode plays so the film can be reviewed from
+ * its input stills before spending video credits).
  */
 export function timelineFallbackImages(
   videoId: string,
@@ -152,7 +156,8 @@ export function timelineFallbackImages(
       sourceHandle: string
       createdAt: number
     }>
-  }
+  },
+  scope: 'failed' | 'missing' = 'failed'
 ): Record<string, string> {
   void videoId
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]))
@@ -170,7 +175,8 @@ export function timelineFallbackImages(
     const hasSuccess = gens.some((g) => g.status === 'success')
     const anyActive = gens.some((g) => g.status === 'running' || g.status === 'pending')
     const hasFailure = gens.some((g) => g.status === 'failed')
-    if (hasSuccess || anyActive || !hasFailure) continue
+    if (hasSuccess) continue
+    if (scope === 'failed' && (anyActive || !hasFailure)) continue
 
     const incoming = graph.edges
       .filter((e) => e.targetNodeId === node.id && imageInputs.has(e.targetHandle))

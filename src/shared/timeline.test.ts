@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { GraphNode } from './ipc/contracts'
 import {
   CROSSFADE_SECONDS,
+  DEFAULT_CLIP_SECONDS,
   DEFAULT_STILL_SECONDS,
   audioLaneStarts,
   bestGeneration,
@@ -20,6 +21,7 @@ import {
   segmentTransitionAfter,
   segmentTrim,
   isStillClip,
+  resolveTimeline,
   shotNumber,
   stillClipSeconds,
   stillMotionOf,
@@ -293,6 +295,79 @@ describe('collectAudioNodes', () => {
       music1.id,
       music2.id
     ])
+  })
+})
+
+describe('resolveTimeline', () => {
+  it('places entries with trims, speed and transition overlaps subtracted', () => {
+    const a = node({ label: 'Shot 1', params: { duration: 8 }, trimStartSec: 1, trimEndSec: 7 })
+    const b = node({
+      label: 'Shot 2',
+      params: { duration: 4 },
+      speed: 2,
+      transitionAfter: 'crossfade',
+      transitionDurationSec: 0.5
+    })
+    const c = node({ label: 'Shot 3', params: { duration: 4 } })
+    const resolved = resolveTimeline([c, a, b])
+    // a: 6 s trimmed; b: 4 s / speed 2 = 2 s minus the 0.5 s crossfade into c.
+    expect(resolved.entries.map((e) => [e.startSec, e.durationSec])).toEqual([
+      [0, 6],
+      [6, 1.5],
+      [7.5, 4]
+    ])
+    expect(resolved.entries[1]).toMatchObject({
+      speed: 2,
+      transitionAfter: 'crossfade',
+      transitionSec: 0.5,
+      durationSource: 'declared'
+    })
+    // The last entry never carries a transition (nothing follows).
+    expect(resolved.entries[2]!.transitionAfter).toBeNull()
+    expect(resolved.totalSeconds).toBe(11.5)
+  })
+
+  it('prefers measured media durations and falls back to the default', () => {
+    const measured = node({ label: 'Shot 1', params: { duration: 8 } })
+    const bare = node({ label: 'Shot 2', params: {} })
+    const resolved = resolveTimeline([measured, bare], { [measured.id]: 7.6 })
+    expect(resolved.entries[0]).toMatchObject({ durationSec: 7.6, durationSource: 'measured' })
+    expect(resolved.entries[1]).toMatchObject({
+      durationSec: DEFAULT_CLIP_SECONDS,
+      durationSource: 'default'
+    })
+  })
+
+  it('lays audio lanes out like the render: chained, then absolute offsets', () => {
+    const shot = node({ label: 'Shot 1', params: { duration: 10 } })
+    const bed = node({ modelId: 'suno/generate-music', label: 'Music 1' })
+    const vo = node({
+      modelId: 'elevenlabs/text-to-speech',
+      label: 'VO 1',
+      timelineOffsetSec: 3.5,
+      volume: 0.8
+    })
+    const resolved = resolveTimeline([shot, bed, vo], { [bed.id]: 20, [vo.id]: 4 })
+    expect(resolved.music).toHaveLength(1)
+    expect(resolved.music[0]).toMatchObject({
+      startSec: 0,
+      durationSec: 20,
+      offsetSec: null,
+      durationSource: 'measured'
+    })
+    expect(resolved.speech[0]).toMatchObject({
+      startSec: 3.5,
+      endSec: 7.5,
+      offsetSec: 3.5,
+      volume: 0.8,
+      role: 'speech'
+    })
+  })
+
+  it('a still slot lasts its trim window', () => {
+    const still = node({ modelId: 'studio/asset', timelineOrder: 0, trimEndSec: 3 })
+    const resolved = resolveTimeline([still])
+    expect(resolved.entries[0]).toMatchObject({ still: true, durationSec: 3 })
   })
 })
 

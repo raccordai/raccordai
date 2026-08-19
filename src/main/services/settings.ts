@@ -165,7 +165,9 @@ export function backfillOnboardingCompleted(): void {
   if (!getOnboardingCompleted() && getKieApiKey() !== null) setOnboardingCompleted()
 }
 
-const concurrencySchema = z.number().int().min(1).max(8)
+// kie.ai tolerates 100+ concurrent tasks per account (the real limit is 20 new
+// submissions / 10 s, and 429s are retried by the queue) — 16 stays well under.
+const concurrencySchema = z.number().int().min(1).max(16)
 const DEFAULT_MAX_CONCURRENT_GENERATIONS = 2
 
 /** How many kie.ai generations may be in flight at once (queue slot count). */

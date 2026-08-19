@@ -46,6 +46,7 @@ export default defineConfig({
         'src/main/services/backup.ts',
         'src/main/services/textLayers.ts',
         'src/main/services/imageLayers.ts',
+        'src/main/services/feedback.ts',
         'src/main/services/voicePersonas.ts',
         'src/main/mcp/registry.ts',
         'src/main/mcp/docs.ts',

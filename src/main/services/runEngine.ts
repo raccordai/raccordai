@@ -181,15 +181,33 @@ function uploadFresh(url: string | null, at: number | null): string | null {
   return url && at && Date.now() - at < UPLOAD_TTL_MS ? url : null
 }
 
+/**
+ * kie deletes uploads earlier than its documented ~3 days (observed dead within
+ * ~30 h), so a TTL-fresh cache entry is only reused after a live HEAD probe —
+ * a dead URL re-uploads the local copy instead of failing the run with a
+ * 400 "Image fetch failed".
+ */
+async function uploadStillAlive(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { method: 'HEAD' })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 async function publicUrlForAsset(assetId: string): Promise<string | null> {
   const db = getDb()
   const asset = db.select().from(assets).where(eq(assets.id, assetId)).get()
   if (!asset) return null
-  if (asset.sourceUrl) return asset.sourceUrl
-  if (!asset.filePath) return null
+  // Local-first: a URL-imported asset keeps its sourceUrl, but that remote
+  // reference can expire or refuse kie's fetcher (400 "Image fetch failed") —
+  // the managed local copy goes through the File Upload API like every other
+  // asset. sourceUrl is only the fallback for rows whose local file is gone.
+  if (!asset.filePath || !existsSync(asset.filePath)) return asset.sourceUrl ?? null
 
   const cached = uploadFresh(asset.uploadedUrl, asset.uploadedAt)
-  if (cached) return cached
+  if (cached && (await uploadStillAlive(cached))) return cached
   const url = await kieUploadFile(asset.filePath, 'raccord/assets')
   db.update(assets)
     .set({ uploadedUrl: url, uploadedAt: Date.now() })
@@ -229,7 +247,7 @@ async function publicUrlForGeneration(
     const lastFramePath = gen.lastFramePath ?? (await waitForLastFramePath(gen.id))
     if (!lastFramePath) return null
     const cached = uploadFresh(gen.lastFrameUploadedUrl, gen.lastFrameUploadedAt)
-    if (cached) return cached
+    if (cached && (await uploadStillAlive(cached))) return cached
     const url = await kieUploadFile(lastFramePath, 'raccord/frames')
     db.update(generations)
       .set({ lastFrameUploadedUrl: url, lastFrameUploadedAt: Date.now() })
@@ -238,19 +256,22 @@ async function publicUrlForGeneration(
     return url
   }
 
-  // Main output: a kie.ai CDN URL is directly fetchable by kie itself — but an
-  // ElevenLabs result persists its LOCAL staging file's file:// URL as
+  // Main output: a kie.ai CDN URL is directly fetchable by kie itself — while
+  // it lasts (result files also expire server-side): with a local copy on hand
+  // the URL is probed first, and a dead one falls through to the upload path.
+  // An ElevenLabs result persists its LOCAL staging file's file:// URL as
   // resultUrl, which kie cannot fetch (400 "Invalid audio format"): anything
   // non-http goes through the same upload path as a downloaded resultPath.
-  if (gen.resultUrl && !gen.resultUrl.startsWith('file://')) return gen.resultUrl
+  const remoteUrl = gen.resultUrl && !gen.resultUrl.startsWith('file://') ? gen.resultUrl : null
   const localPath =
-    gen.resultPath ??
-    (gen.resultUrl && existsSync(fileURLToPath(gen.resultUrl))
+    (gen.resultPath && existsSync(gen.resultPath) ? gen.resultPath : null) ??
+    (gen.resultUrl?.startsWith('file://') && existsSync(fileURLToPath(gen.resultUrl))
       ? fileURLToPath(gen.resultUrl)
       : null)
+  if (remoteUrl && (!localPath || (await uploadStillAlive(remoteUrl)))) return remoteUrl
   if (!localPath) return null
   const cached = uploadFresh(gen.resultUploadedUrl, gen.resultUploadedAt)
-  if (cached) return cached
+  if (cached && (await uploadStillAlive(cached))) return cached
   const url = await kieUploadFile(localPath, 'raccord/results')
   db.update(generations)
     .set({ resultUploadedUrl: url, resultUploadedAt: Date.now() })

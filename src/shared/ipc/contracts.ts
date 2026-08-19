@@ -590,6 +590,29 @@ export const textLayerInputSchema = textLayerSchema.omit({ id: true, createdAt: 
   animation: true
 })
 
+/**
+ * A feedback note (§6.13): a comment taken while watching the timeline,
+ * anchored to a final-timeline timecode and to the node under the playhead
+ * (label snapshotted so the note survives node deletion/renaming). Worked
+ * through in the editor's feedback panel and by agents via MCP.
+ */
+export const feedbackItemSchema = z.object({
+  id: z.string(),
+  videoId: z.string(),
+  nodeId: z.string().nullable(),
+  nodeLabel: z.string().trim().min(1).max(200).nullable(),
+  timecodeSec: z.number().min(0).nullable(),
+  comment: z.string().trim().min(1).max(2000),
+  status: z.enum(['open', 'done']),
+  createdAt: z.number()
+})
+export type FeedbackItem = z.infer<typeof feedbackItemSchema>
+
+/** Creation payload: everything but the generated id/createdAt; anchors optional. */
+export const feedbackItemInputSchema = feedbackItemSchema
+  .omit({ id: true, createdAt: true })
+  .partial({ nodeId: true, nodeLabel: true, timecodeSec: true, status: true })
+
 export const graphNodeSchema = z.object({
   id: z.string(),
   videoId: z.string(),
@@ -999,6 +1022,14 @@ export const ipcContracts = {
     input: z.object({ projectId: z.string() }),
     output: z.array(z.array(z.string()))
   },
+  /**
+   * Copies an asset's managed file to a user-picked path — native save dialog
+   * in the handler; null = cancelled.
+   */
+  'assets:export': {
+    input: z.object({ assetId: z.string() }),
+    output: z.object({ path: z.string() }).nullable()
+  },
 
   /** Casting (§6.10) — the project's named identities. */
   'casting:listByProject': {
@@ -1068,7 +1099,9 @@ export const ipcContracts = {
     output: z.object({ nodes: z.array(graphNodeSchema), edges: z.array(graphEdgeSchema) })
   },
   'graph:timelineFallbackImages': {
-    input: z.object({ videoId: z.string() }),
+    // 'failed' (default) = the render's substitution scope; 'missing' = every
+    // video node without a success yet (the preview's animatic mode).
+    input: z.object({ videoId: z.string(), scope: z.enum(['failed', 'missing']).optional() }),
     output: z.record(z.string(), z.string())
   },
   'nodes:create': {
@@ -1243,6 +1276,21 @@ export const ipcContracts = {
     output: imageLayerSchema
   },
   'imageLayers:delete': { input: z.object({ id: z.string() }), output: z.void() },
+
+  // Feedback bucket (§6.13) — review notes taken while watching the timeline.
+  'feedback:list': {
+    input: z.object({ videoId: z.string() }),
+    output: z.array(feedbackItemSchema)
+  },
+  'feedback:create': { input: feedbackItemInputSchema, output: feedbackItemSchema },
+  'feedback:update': {
+    input: z.object({
+      id: z.string(),
+      patch: feedbackItemSchema.omit({ id: true, videoId: true, createdAt: true }).partial()
+    }),
+    output: feedbackItemSchema
+  },
+  'feedback:delete': { input: z.object({ id: z.string() }), output: z.void() },
   'nodes:replaceModel': {
     input: z.object({ nodeId: z.string(), modelId: z.string() }),
     output: z.void()
@@ -1525,7 +1573,7 @@ export const ipcContracts = {
   'settings:setKieApiKey': { input: z.object({ key: z.string() }), output: z.void() },
   'settings:getGenerationConcurrency': { input: z.void(), output: z.number() },
   'settings:setGenerationConcurrency': {
-    input: z.object({ value: z.number().int().min(1).max(8) }),
+    input: z.object({ value: z.number().int().min(1).max(16) }),
     output: z.void()
   },
   'settings:kieApiKeyStatus': {

@@ -36,6 +36,7 @@ import { elevenlabsListVoices } from '../services/elevenlabs'
 import * as voicePersonasService from '../services/voicePersonas'
 import * as textLayersService from '../services/textLayers'
 import * as imageLayersService from '../services/imageLayers'
+import * as feedbackService from '../services/feedback'
 import * as videosService from '../services/videos'
 
 /**
@@ -146,6 +147,22 @@ export function registerIpcHandlers(): void {
   handle('assets:references', ({ assetId }) => assetsService.assetReferences(assetId))
   handle('assets:setTags', ({ assetId, tags }) => assetsService.setAssetTags(assetId, tags))
   handle('assets:duplicateGroups', ({ projectId }) => assetsService.duplicateAssetGroups(projectId))
+  handle('assets:export', async ({ assetId }) => {
+    const asset = assetsService.getAsset(assetId)
+    if (!asset?.filePath) {
+      throw new Error('This asset has no local file to export.')
+    }
+    const ext = extname(asset.filePath).replace('.', '')
+    const base = asset.name.replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'asset'
+    const result = await dialog.showSaveDialog({
+      title: 'Export asset',
+      defaultPath: ext ? `${base}.${ext}` : base,
+      ...(ext ? { filters: [{ name: 'Media', extensions: [ext] }] } : {})
+    })
+    if (result.canceled || !result.filePath) return null
+    await copyFile(asset.filePath, result.filePath)
+    return { path: result.filePath }
+  })
 
   handle('casting:listByProject', ({ projectId }) => castingService.listCastings(projectId))
   handle('casting:create', (input) => castingService.createCasting(input))
@@ -167,8 +184,8 @@ export function registerIpcHandlers(): void {
   handle('scenario:buildGraph', (input) => scenarioGraph.buildGraphFromScenario(input))
 
   handle('graph:get', ({ videoId }) => graph.listGraph(videoId))
-  handle('graph:timelineFallbackImages', ({ videoId }) =>
-    generationsService.timelineFallbackImages(videoId, graph.listGraph(videoId))
+  handle('graph:timelineFallbackImages', ({ videoId, scope }) =>
+    generationsService.timelineFallbackImages(videoId, graph.listGraph(videoId), scope)
   )
   handle('nodes:create', (input) => graph.createNode(input))
   handle('recipes:createNode', (input) => recipesService.createRecipeNode(input))
@@ -208,6 +225,10 @@ export function registerIpcHandlers(): void {
   handle('imageLayers:create', (input) => imageLayersService.createImageLayer(input))
   handle('imageLayers:update', ({ id, patch }) => imageLayersService.updateImageLayer(id, patch))
   handle('imageLayers:delete', ({ id }) => imageLayersService.deleteImageLayer(id))
+  handle('feedback:list', ({ videoId }) => feedbackService.listFeedback(videoId))
+  handle('feedback:create', (input) => feedbackService.createFeedbackItem(input))
+  handle('feedback:update', ({ id, patch }) => feedbackService.updateFeedbackItem(id, patch))
+  handle('feedback:delete', ({ id }) => feedbackService.deleteFeedbackItem(id))
   handle('nodes:replaceModel', ({ nodeId, modelId }) => graph.replaceNodeModel(nodeId, modelId))
   handle('nodes:applyVideoDefaults', ({ videoId }) => graph.applyVideoDefaultsToNodes(videoId))
   handle('nodes:remove', ({ nodeId }) => graph.removeNode(nodeId))

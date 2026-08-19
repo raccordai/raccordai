@@ -721,10 +721,18 @@ function ModelNodeEditor({
         </div>
       )}
 
+      {/* Model tips (prompting, anchors vs references…). Collapsed by default —
+          like the guide below, it is reference material, not chrome. */}
       {model.promptingNotes && (
-        <div className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 p-3 text-[11px] leading-relaxed text-neutral-400 whitespace-pre-wrap">
-          {model.promptingNotes}
-        </div>
+        <details className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+          <summary className="cursor-pointer select-none text-[11px] font-semibold text-neutral-300">
+            <BookOpen className="mr-1 inline h-3 w-3 text-accent-soft" />
+            {t('editor.promptingNotes')}
+          </summary>
+          <p className="mt-2 text-[11px] leading-relaxed whitespace-pre-wrap text-neutral-400">
+            {model.promptingNotes}
+          </p>
+        </details>
       )}
 
       {/* The model's full prompting guide. It used to be agent-only (the MCP

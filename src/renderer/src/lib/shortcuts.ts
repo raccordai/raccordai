@@ -50,7 +50,9 @@ export const SHORTCUTS = {
   stepForward: { key: '.' },
   /** Set the in/out of the clip under the playhead AT the playhead. */
   trimIn: { key: 'i' },
-  trimOut: { key: 'o' }
+  trimOut: { key: 'o' },
+  /** Feedback bucket (§6.13): note the frame under the playhead. */
+  addNote: { key: 'n' }
 } as const satisfies Record<string, Shortcut>
 
 export type ShortcutId = keyof typeof SHORTCUTS

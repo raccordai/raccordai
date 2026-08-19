@@ -62,6 +62,8 @@ async function bootstrap(): Promise<void> {
     void queryClient.invalidateQueries({ queryKey: ['textLayers'] })
     // The sticker track (§6.12d) — same broadcast.
     void queryClient.invalidateQueries({ queryKey: ['imageLayers'] })
+    // The feedback bucket (§6.13) — same broadcast (MCP agents mark items done).
+    void queryClient.invalidateQueries({ queryKey: ['feedback'] })
     // The assistant can also change the video's style template (set_video_style).
     void queryClient.invalidateQueries({ queryKey: ['videos'] })
     // The home assistant can create projects and videos.

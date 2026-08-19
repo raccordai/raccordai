@@ -142,7 +142,10 @@
     "empty": "Add video nodes to populate the timeline.",
     "clipCount_one": "{{count}} clip",
     "clipCount_other": "{{count}} clips",
-    "generating": "generating",
+    "generatingCount_one": "{{count}} generation in progress",
+    "generatingCount_other": "{{count}} generations in progress",
+    "mute": "Mute the preview",
+    "unmute": "Unmute the preview",
     "clipGenerating": "generating…",
     "clipEmpty": "empty",
     "prevClip": "Previous clip",
@@ -192,6 +195,14 @@
     "zoomIn": "Zoom the timeline in",
     "zoomOut": "Zoom the timeline out",
     "addText": "Add text at the playhead",
+    "inputStillsOn": "Animatic on: ungenerated clips play their input image (click to disable)",
+    "inputStillsOff": "Animatic off: ungenerated clips stay empty (click to enable)",
+    "inputStillBadge": "input image",
+    "addNote": "Add a note on this frame (N)",
+    "addNoteTitle": "Note",
+    "notePlaceholder": "Your note on this frame…",
+    "noteHint": "↵ to save",
+    "noteSave": "Add",
     "addImage": "Add a still image",
     "addImageEmpty": "No image available in the graph (generate an image or import an asset first).",
     "removeFromTimeline": "Remove from the timeline (the node stays in the graph)",
@@ -530,7 +541,9 @@
       "error": "Error: {{error}}"
     },
     "notifyOnCompletion": "Completion notifications",
-    "notifyOnCompletionHint": "Show a system notification when a generation finishes while the app is in the background."
+    "notifyOnCompletionHint": "Show a system notification when a generation finishes while the app is in the background.",
+    "generationConcurrency": "Concurrent generations",
+    "generationConcurrencyHint": "How many kie.ai generations run in parallel. Changes apply immediately, including to already-queued runs. Note: more parallelism means credits are spent faster."
   },
   "time": {
     "justNow": "just now",
@@ -571,7 +584,9 @@
     "designBadgeHint": "Published design sheet — wire it as a reference, never a frame anchor",
     "deleteReferencedConfirm": "Delete asset “{{name}}”? {{count}} node(s) use it in: {{videos}}. Those nodes will lose their media.",
     "tabCasting": "Casting",
-    "tabInstructions": "Instructions"
+    "tabInstructions": "Instructions",
+    "download": "Download",
+    "downloaded": "Asset saved to {{path}}"
   },
   "instructionsPage": {
     "hint": "The project's methodology, in free markdown. The assistant reads it with priority on every turn, for every video of the project — write your way of working here (shot structure, tone, editing rules) instead of repeating it conversation after conversation.",
@@ -706,6 +721,16 @@
       "edges": "rewire {{count}} connection(s)",
       "selections": "change the selected output on {{count}} node(s)"
     },
+    "feedback": {
+      "title": "Feedback",
+      "open": "Feedback — the notes taken while watching the timeline",
+      "empty": "No notes yet. Pause the timeline and press N to note the frame under the playhead.",
+      "copyAll": "Copy the list (markdown, ready for a to-do)",
+      "markDone": "Mark as done",
+      "markOpen": "Reopen",
+      "delete": "Delete this note",
+      "deleteConfirm": "Delete this note? A user note is unrecoverable."
+    },
     "scenario": {
       "title": "Scenario",
       "open": "Scenario — the shot list written before the graph",
@@ -766,6 +791,7 @@
     "redo": "Redo the undone change",
     "replaceConfirm": "Replace the existing nodes, or merge the import into the current graph?",
     "deleteNodeConfirm": "Delete this node and all its generations?",
+    "copyNodeName": "Copy the node name",
     "estimatedCost": "~{{credits}} credits (estimate)",
     "historyPanel": {
       "title": "History",
@@ -866,6 +892,7 @@
     "recipePreviewHide": "Hide the prompt",
     "recipeMore": "Options",
     "promptGuide": "Model prompting guide",
+    "promptingNotes": "Model tips (prompting, inputs, references)",
     "promptGuideShow": "Read the prompting guide",
     "promptGuideHide": "Hide the guide"
   },

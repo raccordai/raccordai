@@ -48,6 +48,13 @@ import {
   listImageLayers,
   updateImageLayer
 } from '../services/imageLayers'
+import {
+  createFeedbackItem,
+  deleteFeedbackItem,
+  listFeedback,
+  updateFeedbackItem
+} from '../services/feedback'
+import { getTimelineInfo } from '../services/timelineInfo'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -509,6 +516,15 @@ export const AGENT_TOOLS: AgentTool[] = [
           // has its own trim/transition, addressed by segmentIndex.
           segments: n.segments ?? null,
           overlay: n.overlay ?? null,
+          // Baked per-clip effects + audio placement — what set_clip_speed /
+          // set_clip_look / set_still_motion / set_clip_volume /
+          // set_audio_offset wrote (null = untouched). get_timeline returns
+          // the RESOLVED placement these produce.
+          speed: n.speed ?? null,
+          look: n.look ?? null,
+          stillMotion: n.stillMotion ?? null,
+          volume: n.volume ?? null,
+          timelineOffsetSec: n.timelineOffsetSec ?? null,
           hasSuccessfulOutput: gens.some((g) => g.nodeId === n.id && g.status === 'success')
         })),
         edges: edges.map((e) => ({
@@ -521,6 +537,15 @@ export const AGENT_TOOLS: AgentTool[] = [
         assets: assets.listAssets(video.projectId).map(assetRow)
       }
     }
+  },
+  {
+    name: 'get_timeline',
+    description:
+      'The RESOLVED timeline in FINAL-timeline seconds (media probed for real durations): each clip entry’s start/end/duration (trims, speed and transition overlaps applied), the film’s totalSeconds, and the music/speech lanes with each track’s computed start. This is how you know where shot N starts before syncing audio with set_audio_offset or placing text/image layers.',
+    inputSchema: obj({ videoId: str() }, ['videoId']),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId }) => getTimelineInfo(String(videoId))
   },
   {
     name: 'write_scenario',
@@ -1008,7 +1033,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'set_audio_offset',
     description:
-      'Absolute start of an AUDIO track on the final timeline (seconds). Null restores the default layout (chained after the previous lane track). Overlapping tracks of a lane simply mix. Preview and MP4 render follow the same placement.',
+      'Absolute start of an AUDIO track on the final timeline (seconds). Null restores the default layout (chained after the previous lane track). Overlapping tracks of a lane simply mix. Preview and MP4 render follow the same placement. Read get_timeline first for where the clips start (docs "timeline" for the sync method).',
     inputSchema: obj(
       {
         nodeId: str(),
@@ -1175,6 +1200,75 @@ export const AGENT_TOOLS: AgentTool[] = [
     risk: 'write',
     execute: ({ layerId }) => {
       deleteTextLayer(String(layerId))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'list_feedback',
+    description:
+      'The video’s feedback bucket: review notes the user took while watching the timeline. Each item has a comment, a status (open | done), and usually a FINAL-timeline timecodeSec + the node (id + label snapshot) under the playhead. Work through the open items, then mark each one done with update_feedback.',
+    inputSchema: obj({ videoId: str() }, ['videoId']),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId }) => listFeedback(String(videoId))
+  },
+  {
+    name: 'add_feedback',
+    description:
+      'Add a note to the video’s feedback bucket (e.g. a follow-up the user asked for). timecodeSec is in FINAL-timeline seconds; nodeId/nodeLabel anchor the note to the shot it is about.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        comment: str('The note (max 2000 chars)'),
+        timecodeSec: {
+          type: 'number',
+          description: 'FINAL-timeline seconds; omit for a general note'
+        },
+        nodeId: str('Node the note is about'),
+        nodeLabel: str('Display name of that node at note time')
+      },
+      ['videoId', 'comment']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: (args) =>
+      createFeedbackItem({
+        videoId: String(args['videoId']),
+        comment: String(args['comment']),
+        ...(args['timecodeSec'] !== undefined ? { timecodeSec: Number(args['timecodeSec']) } : {}),
+        ...(args['nodeId'] !== undefined ? { nodeId: String(args['nodeId']) } : {}),
+        ...(args['nodeLabel'] !== undefined ? { nodeLabel: String(args['nodeLabel']) } : {})
+      })
+  },
+  {
+    name: 'update_feedback',
+    description:
+      'Update a feedback item (list_feedback gives the ids) — set status to "done" once a note has been addressed, or amend comment/timecodeSec.',
+    inputSchema: obj(
+      {
+        feedbackId: str(),
+        patch: {
+          type: 'object',
+          description:
+            'Fields to change: status ("open" | "done"), comment, timecodeSec, nodeId, nodeLabel'
+        }
+      },
+      ['feedbackId', 'patch']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ feedbackId, patch }) =>
+      updateFeedbackItem(String(feedbackId), (patch ?? {}) as Record<string, never>)
+  },
+  {
+    name: 'delete_feedback',
+    description:
+      'Delete a feedback item. A user note is unrecoverable once deleted — prefer marking it done with update_feedback.',
+    inputSchema: obj({ feedbackId: str() }, ['feedbackId']),
+    scope: 'global',
+    risk: 'destructive',
+    execute: ({ feedbackId }) => {
+      deleteFeedbackItem(String(feedbackId))
       return { ok: true }
     }
   },
@@ -1464,7 +1558,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'get_transcript',
     description:
-      'The timed transcript of a speech node’s output ([m:ss] per segment, speaker labels on dialogue) — reuse it for subtitles, shot timing or the YouTube description. Pass generation_id for a specific take.',
+      'The timed transcript of a speech node’s output: `segments` carry the raw float start/end seconds (MEDIA time of the audio file — the precision sub-second sync with set_audio_offset needs), `formatted` renders them as [m:ss] lines with speaker labels. Pass generation_id for a specific take.',
     inputSchema: obj({ nodeId: str(), generation_id: str('Defaults to the node’s best output.') }, [
       'nodeId'
     ]),
@@ -1484,6 +1578,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       return {
         generationId: row.id,
         text: transcript.text,
+        segments: transcript.segments,
         formatted: formatTranscript(transcript)
       }
     }

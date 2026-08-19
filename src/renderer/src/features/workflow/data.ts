@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import type {
   AssetWithUrl,
+  FeedbackItem,
   Generation,
   GraphEdge,
   GraphNode,
@@ -45,7 +46,9 @@ export function useGraph(videoId: string): UseQueryResult<WorkflowGraphData> {
 export function useTimelineFallbackImages(videoId: string): UseQueryResult<Record<string, string>> {
   return useQuery({
     queryKey: graphKeys.fallbackImages(videoId),
-    queryFn: () => invoke('graph:timelineFallbackImages', { videoId })
+    // 'missing' scope: input stills for EVERY clip without a success yet, so
+    // the timeline's animatic mode can play them (the render keeps 'failed').
+    queryFn: () => invoke('graph:timelineFallbackImages', { videoId, scope: 'missing' })
   })
 }
 
@@ -88,6 +91,14 @@ export function useImageLayers(videoId: string): UseQueryResult<ImageLayer[]> {
   return useQuery({
     queryKey: ['imageLayers', videoId],
     queryFn: () => invoke('imageLayers:list', { videoId })
+  })
+}
+
+/** The feedback bucket (§6.13) — same refresh contract as the layer tracks. */
+export function useFeedback(videoId: string): UseQueryResult<FeedbackItem[]> {
+  return useQuery({
+    queryKey: ['feedback', videoId],
+    queryFn: () => invoke('feedback:list', { videoId })
   })
 }
 

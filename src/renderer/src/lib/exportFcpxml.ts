@@ -1,6 +1,6 @@
 import type { GraphNode } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
-import { clipDuration, clipTrim, isStillClip, stillClipSeconds } from '@shared/timeline'
+import { clipDuration, clipTrim, clipVolume, isStillClip, stillClipSeconds } from '@shared/timeline'
 
 /**
  * FCPXML 1.8 timeline export, bundled with its media into a ZIP.
@@ -92,6 +92,23 @@ export interface ClipMedia {
   duration: number
 }
 
+/**
+ * One audio-lane track bundled with the export (§8 music/speech lanes),
+ * already placed on the FINAL timeline (audioLaneStarts — the same layout the
+ * preview and the MP4 render follow). Exported as clips CONNECTED to the first
+ * spine element: lane -1 = music bed, lane -2 = voice-over/dialogue.
+ */
+export interface FcpxmlAudioTrack {
+  node: GraphNode
+  /** e.g. "media/audio-01-vo.mp3" inside the ZIP. */
+  mediaPath: string
+  role: 'music' | 'speech'
+  /** Probed real duration in seconds (params/default fallback when absent). */
+  duration?: number
+  /** Absolute start on the final timeline, in seconds. */
+  startSec: number
+}
+
 /** One timeline slot: the node plus the relative path of its media inside the ZIP (if any). */
 export interface FcpxmlClip {
   node: GraphNode
@@ -157,8 +174,20 @@ export function extForMime(mime: string | undefined): string {
       return 'jpg'
     case 'image/webp':
       return 'webp'
+    case 'audio/mpeg':
+      return 'mp3'
+    case 'audio/mp4':
+    case 'audio/x-m4a':
+      return 'm4a'
+    case 'audio/wav':
+    case 'audio/x-wav':
+      return 'wav'
+    case 'audio/ogg':
+      return 'ogg'
     default:
-      return mime?.startsWith('image/') ? 'img' : 'mp4'
+      if (mime?.startsWith('image/')) return 'img'
+      if (mime?.startsWith('audio/')) return 'mp3'
+      return 'mp4'
   }
 }
 
@@ -185,7 +214,7 @@ function buildNote(node: GraphNode, index: number, dur: number, isStill: boolean
 export function buildFcpxml(
   videoName: string,
   clips: FcpxmlClip[],
-  opts: { fps?: number } = {}
+  opts: { fps?: number; audio?: FcpxmlAudioTrack[] } = {}
 ): string {
   const name = escapeXml(videoName || 'Untitled')
 
@@ -217,6 +246,10 @@ export function buildFcpxml(
   // Accumulate in whole frames so spine offsets stay gapless and frame-aligned
   // (summing rounded per-clip durations, never raw floats).
   let offsetFrames = 0
+  // In-point of the FIRST spine element: connected audio clips are anchored to
+  // it, and a connected clip's offset is in the PARENT's local time (sequence
+  // position + parent start), so a trimmed first clip must shift them all.
+  let firstStartFrames = 0
 
   clips.forEach(({ node, mediaPath, isStill, media }, i) => {
     // Prefer the real probed media duration; fall back to the node's configured
@@ -248,6 +281,7 @@ export function buildFcpxml(
         `<video ref="${assetId}" offset="${off}" name="${clipName}" duration="${duration}" start="0s"><note>${note}</note></video>`
       )
     } else if (mediaPath) {
+      if (i === 0) firstStartFrames = toFrames(trim.start)
       // No `hasAudio`: these AI clips are silent, and claiming audio makes FCP
       // conform a track that doesn't exist. `format` matches the real media.
       // The asset covers the WHOLE media; the spine clip's `start` is the
@@ -267,10 +301,48 @@ export function buildFcpxml(
     offsetFrames += frames
   })
 
+  // §8 audio lanes: each track becomes an audio asset + an <asset-clip>
+  // CONNECTED to the first spine element (lane -1 music, -2 speech) at its
+  // final-timeline start — the placement the preview and the MP4 render use.
+  const audio = opts.audio ?? []
+  const audioTrimmed = audio.map((t) => {
+    const raw = t.duration ?? clipDuration(t.node) ?? DEFAULT_CLIP_SECONDS
+    const trim = clipTrim(t.node, raw)
+    return { ...t, raw, trim, dur: Math.max(0.04, (trim.end ?? raw) - trim.start) }
+  })
+  if (audioTrimmed.length > 0 && spine.length === 0) {
+    // Audio with no clips at all: a silent gap carries the connected tracks.
+    const end = Math.max(...audioTrimmed.map((t) => t.startSec + t.dur))
+    offsetFrames = Math.max(1, toFrames(end))
+    spine.push(`<gap name="Audio" offset="0s" duration="${fromFrames(offsetFrames)}"></gap>`)
+  }
+  if (audioTrimmed.length > 0) {
+    const connected = audioTrimmed.map((t, i) => {
+      const assetId = `au${i + 1}`
+      const trackName = escapeXml(clipLabel(t.node))
+      // No format/rate claims: FCP reads them from the file itself (lying
+      // about media properties is what breaks imports).
+      assets.push(
+        `<asset id="${assetId}" name="${trackName}" src="${escapeXml(t.mediaPath)}" start="0s" duration="${fromFrames(Math.max(1, toFrames(t.raw)))}" hasAudio="1" audioSources="1"/>`
+      )
+      const gain = clipVolume(t.node)
+      const adjust =
+        gain === 1
+          ? ''
+          : `<adjust-volume amount="${gain <= 0 ? '-96' : (20 * Math.log10(gain)).toFixed(1)}dB"/>`
+      const off = fromFrames(toFrames(t.startSec) + firstStartFrames)
+      return `<asset-clip ref="${assetId}" lane="${t.role === 'music' ? -1 : -2}" offset="${off}" name="${trackName}" duration="${fromFrames(Math.max(1, toFrames(t.dur)))}" start="${fromFrames(toFrames(t.trim.start))}" audioRole="${t.role === 'music' ? 'music' : 'dialogue'}">${adjust}</asset-clip>`
+    })
+    // Anchored items come AFTER the parent's <note> in the FCPXML element order.
+    spine[0] = spine[0]!.replace(/<\/(asset-clip|video|gap)>$/, `${connected.join('')}</$1>`)
+  }
+
   const formatEls = [...formats.values()].map((f) => {
     const fname = fcpFormatName(f.width, f.height, fps)
     const nameAttr = fname ? ` name="${fname}"` : ''
-    return `<format id="${f.id}"${nameAttr} frameDuration="${frameDuration}" width="${f.width}" height="${f.height}"/>`
+    // colorSpace matches FCP's own exports — its absence on a custom format is
+    // a known trigger of the "unexpected value" import warning.
+    return `<format id="${f.id}"${nameAttr} frameDuration="${frameDuration}" width="${f.width}" height="${f.height}" colorSpace="1-1-1 (Rec. 709)"/>`
   })
 
   // Wrap the project in <library><event> — the structure FCP itself exports.
@@ -284,7 +356,7 @@ export function buildFcpxml(
   <library>
     <event name="${name}">
       <project name="${name}">
-        <sequence format="${sequenceFormatId}" tcStart="0s" tcFormat="NDF" duration="${fromFrames(offsetFrames)}">
+        <sequence format="${sequenceFormatId}" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k" duration="${fromFrames(offsetFrames)}">
           <spine>${spine.join('')}</spine>
         </sequence>
       </project>

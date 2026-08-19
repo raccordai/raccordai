@@ -14,7 +14,7 @@ import { AssetCard } from '@renderer/components/AssetCard'
 import { CastingTab } from '@renderer/features/casting/CastingTab'
 import { InstructionsTab } from '@renderer/features/projects/InstructionsTab'
 import { LibraryCard } from '@renderer/components/LibraryCard'
-import { useConfirm } from '@renderer/components/feedback/Feedback'
+import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { useProject } from '@renderer/features/workflow/data'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
@@ -36,6 +36,7 @@ function VideosPage(): React.JSX.Element {
   const { projectId } = Route.useParams()
   const { t } = useTranslation()
   const confirmModal = useConfirm()
+  const toast = useToast()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<'videos' | 'assets' | 'casting' | 'instructions'>('videos')
@@ -164,6 +165,13 @@ function VideosPage(): React.JSX.Element {
   const removeAsset = useMutation({
     mutationFn: (assetId: string) => invoke('assets:remove', { assetId }),
     onSuccess: invalidateAssets
+  })
+  const exportAsset = useMutation({
+    mutationFn: (assetId: string) => invoke('assets:export', { assetId }),
+    onSuccess: (result) => {
+      if (result) toast.success(t('assetsPage.downloaded', { path: result.path }))
+    },
+    onError: (err) => toast.error(err.message)
   })
   const renameProject = useMutation({
     mutationFn: (value: string) => invoke('projects:rename', { id: projectId, name: value }),
@@ -445,6 +453,7 @@ function VideosPage(): React.JSX.Element {
                       })
                       setAssetTags.mutate({ assetId: asset.id, tags: patch.tags })
                     }}
+                    onDownload={() => exportAsset.mutate(asset.id)}
                     onDelete={() => {
                       void (async () => {
                         // Workflows referencing the asset via studio/asset nodes would

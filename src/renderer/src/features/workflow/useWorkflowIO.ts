@@ -9,12 +9,23 @@ import {
   clipSlug,
   extForMime,
   sanitizeName,
+  type FcpxmlAudioTrack,
   type FcpxmlClip
 } from '@renderer/lib/exportFcpxml'
 import { fetchMediaBlob } from '@renderer/lib/mediaProxy'
-import { detectVideoFps, probeVideoDimensions } from '@renderer/lib/probeMedia'
+import { detectVideoFps, probeAudioDuration, probeVideoDimensions } from '@renderer/lib/probeMedia'
 import { isCaptionPresetId } from '@shared/captions'
-import { bestGeneration, collectTimelineClips, isStillClip } from '@shared/timeline'
+import {
+  audioLaneStarts,
+  audioRoleOf,
+  bestGeneration,
+  clipDuration,
+  clipTimelineOffset,
+  clipTrim,
+  collectAudioNodes,
+  collectTimelineClips,
+  isStillClip
+} from '@shared/timeline'
 import { graphKeys, useIpcMutation, useVideo } from './data'
 
 // Workflow import/export actions, extracted from the toolbar so the app menu
@@ -244,6 +255,57 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
         )
       )
 
+      // §8 audio lanes (Suno bed + ElevenLabs speech): bundle each track's file
+      // and compute its final-timeline start with the SAME lane layout as the
+      // preview and the MP4 render (audioLaneStarts — explicit offsets are
+      // absolute, offset-less tracks chain after the previous one).
+      const audioResolved = (
+        await Promise.all(
+          collectAudioNodes(nodes).map(async (node, i) => {
+            const gens = await invoke('generations:listForNode', { nodeId: node.id })
+            const gen = bestGeneration(node, gens)
+            if (gen?.status !== 'success' || !gen.url) return null
+            let blob: Blob
+            try {
+              blob = await fetchMediaBlob(gen.url)
+            } catch {
+              return null
+            }
+            const mime = blob.type || gen.resultMimeType || 'audio/mpeg'
+            const path = `media/audio-${String(i + 1).padStart(2, '0')}-${clipSlug(node)}.${extForMime(mime)}`
+            return {
+              node,
+              path,
+              bytes: new Uint8Array(await blob.arrayBuffer()),
+              duration: (await probeAudioDuration(blob)) ?? undefined
+            }
+          })
+        )
+      ).filter((t) => t !== null)
+      const audioTracks: FcpxmlAudioTrack[] = []
+      for (const role of ['music', 'speech'] as const) {
+        const lane = audioResolved.filter((track) => audioRoleOf(track.node) === role)
+        const starts = audioLaneStarts(
+          lane.map((track) => {
+            const raw = track.duration ?? clipDuration(track.node) ?? 5
+            const trim = clipTrim(track.node, raw)
+            return {
+              offsetSec: clipTimelineOffset(track.node),
+              durationSeconds: Math.max(0, (trim.end ?? raw) - trim.start)
+            }
+          })
+        )
+        lane.forEach((track, i) =>
+          audioTracks.push({
+            node: track.node,
+            mediaPath: track.path,
+            role,
+            duration: track.duration,
+            startSec: starts[i] ?? 0
+          })
+        )
+      }
+
       // Detect the source frame rate once (clips share a pipeline) from the first
       // probed video, reusing its already-downloaded bytes. Falls back to 25fps.
       const firstVideo = resolved.find((r) => r.file && r.clip.media)
@@ -256,12 +318,15 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
       const xml = buildFcpxml(
         videoName ?? 'timeline',
         resolved.map((r) => r.clip),
-        { fps }
+        { fps, audio: audioTracks }
       )
 
       const entries: Zippable = { [`${baseName}.fcpxml`]: new TextEncoder().encode(xml) }
       for (const r of resolved) {
         if (r.file) entries[r.file.path] = r.file.bytes
+      }
+      for (const track of audioResolved) {
+        entries[track.path] = track.bytes
       }
 
       const zipped = zipSync(entries)
@@ -271,7 +336,7 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
     } finally {
       setExportingZip(false)
     }
-  }, [timelineClips, toast, videoId, videoName])
+  }, [timelineClips, nodes, toast, videoId, videoName])
 
   /**
    * Plain media export: each timeline clip's video, numbered in timeline order

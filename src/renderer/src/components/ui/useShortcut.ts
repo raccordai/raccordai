@@ -23,10 +23,14 @@ export function shortcutLabel(id: ShortcutId): string {
  * is attached once per (id, enabled) instead of on every render.
  *
  * Keystrokes aimed at a text field are ignored unless `allowWhileTyping`.
+ *
+ * A handler that returns `false` declines the keystroke: preventDefault is
+ * skipped so the browser's default action still runs (e.g. ⌘C must fall
+ * through to the native copy when the user has TEXT selected).
  */
 export function useShortcut(
   id: ShortcutId,
-  handler: (event: KeyboardEvent) => void,
+  handler: (event: KeyboardEvent) => boolean | void,
   options: { enabled?: boolean; allowWhileTyping?: boolean } = {}
 ): void {
   const { enabled = true, allowWhileTyping = false } = options
@@ -39,8 +43,8 @@ export function useShortcut(
     function onKeyDown(event: KeyboardEvent): void {
       if (!matchesShortcut(event, shortcut, IS_MAC)) return
       if (!allowWhileTyping && isTypingTarget(event.target)) return
+      if (handlerRef.current(event) === false) return
       event.preventDefault()
-      handlerRef.current(event)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)

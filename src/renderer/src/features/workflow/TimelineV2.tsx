@@ -7,8 +7,11 @@ import {
   ChevronRight,
   ChevronUp,
   Film,
+  Image as ImageIcon,
+  ImageOff,
   ImagePlus,
   Loader2,
+  MessageSquarePlus,
   Pause,
   Play,
   Scissors,
@@ -16,6 +19,7 @@ import {
   Trash2,
   Type,
   Volume2,
+  VolumeX,
   ZoomIn,
   ZoomOut
 } from 'lucide-react'
@@ -39,6 +43,7 @@ import {
 } from './data'
 import type { WorkflowGraph } from './workflowContext'
 import {
+  DEFAULT_CLIP_SECONDS,
   audioLaneStarts,
   bestGeneration,
   clipDuration,
@@ -57,11 +62,12 @@ import {
   stillClipSeconds,
   stillMotionOf
 } from '@shared/timeline'
+import { formatTimecode } from '@shared/annotations'
 import { CLIP_LOOK_IDS, lookCssFilter } from '@shared/looks'
 import { STILL_MOTION_IDS } from '@shared/stillMotion'
 import { TEXT_ANIMATION_IDS } from '@shared/textAnimations'
 import { CLIP_TRANSITION_IDS } from '@shared/transitions'
-import { useResizableHeight } from './timelineHooks'
+import { useInputStills, useMuted, useResizableHeight } from './timelineHooks'
 import { Waveform } from './Waveform'
 import { formatSeconds } from '../../lib/formatSeconds'
 import { snapSpan, snapTolerance } from '../../lib/timelineSnap'
@@ -121,9 +127,10 @@ interface EngineClip {
   declared: number
   /** Still image slot (image/asset node): no media clock, held for `declared`. */
   still?: boolean
+  /** Animatic slot: an ungenerated VIDEO clip playing its INPUT image as a
+   *  still. Playback-only — editing gestures keep treating the node as video. */
+  placeholder?: boolean
 }
-
-const DEFAULT_CLIP_SECONDS = 5
 
 /** Shortest length a resize handle can leave (clip trim window, text layer). */
 const MIN_RESIZE_SECONDS = 0.2
@@ -163,7 +170,8 @@ function EdgeHandle({
 function usePlaybackEngine(
   clips: EngineClip[],
   audioClips: EngineClip[],
-  speechClips: EngineClip[] = []
+  speechClips: EngineClip[] = [],
+  muted = false
 ) {
   const videoARef = useRef<HTMLVideoElement | null>(null)
   const videoBRef = useRef<HTMLVideoElement | null>(null)
@@ -275,6 +283,9 @@ function usePlaybackEngine(
       shouldPlay: boolean
     ) => {
       if (!element || laneClips.length === 0) return
+      // Global preview mute: applied on the element (volume stays the render
+      // parity value, so unmuting never has to recompute it).
+      if (element.muted !== muted) element.muted = muted
       let idx = -1
       for (let i = 0; i < laneClips.length; i++) {
         const start = laneStarts[i] ?? 0
@@ -313,7 +324,7 @@ function usePlaybackEngine(
       if (shouldPlay && element.paused) void element.play().catch(() => undefined)
       if (!shouldPlay && !element.paused) element.pause()
     },
-    [durationOf, trimOf]
+    [durationOf, trimOf, muted]
   )
   const syncAudio = useCallback(
     (t: number, shouldPlay: boolean) => {
@@ -704,6 +715,16 @@ export function TimelineV2({
   const assetMedia = useAssetNodeMedia(videoId, graph.nodes).data
   // Add-image picker popover (anchored to the header button).
   const [imagePicker, setImagePicker] = useState<{ x: number; y: number } | null>(null)
+  // Feedback bucket (§6.13): quick note on the frame under the playhead. The
+  // context is FROZEN at open time so a late seek can't shift the timecode.
+  const [notePopover, setNotePopover] = useState<{
+    x: number
+    y: number
+    timecodeSec: number
+    nodeId: string | null
+    nodeLabel: string | null
+  } | null>(null)
+  const noteButtonRef = useRef<HTMLButtonElement | null>(null)
   // Live edge-resize of a clip block (video/still/audio): duration override
   // applied to the track's widths only — playback keeps the committed trim.
   const [clipResize, setClipResize] = useState<{ id: string; duration: number } | null>(null)
@@ -734,6 +755,11 @@ export function TimelineV2({
     }
   }, [collapsed, clipNodes.length])
 
+  // Animatic mode (persisted, ON by default): a video clip with no output yet
+  // plays its INPUT image as a still for its declared duration — the whole
+  // film reviews (and annotates) from its start frames before any credit.
+  const [inputStills, setInputStills] = useInputStills()
+
   const clips: EngineClip[] = useMemo(() => {
     return collectTimelineEntries(graph.nodes).map((entry) => {
       const node = entry.node
@@ -741,17 +767,24 @@ export function TimelineV2({
       const gens = (generations ?? []).filter((g) => g.nodeId === node.id)
       const best = bestGeneration(node, gens)
       const genUrl = best?.status === 'success' ? (best.url ?? null) : null
+      const mediaUrl =
+        node.modelId === 'studio/asset' ? (assetMedia?.[node.id]?.url ?? null) : genUrl
+      const placeholderUrl =
+        !still && !mediaUrl && inputStills ? (fallbackImages?.[node.id] ?? null) : null
       return {
         node,
         segment: entry.segment,
         segmentIndex: entry.segmentIndex,
         entryId: entry.entryId,
-        url: node.modelId === 'studio/asset' ? (assetMedia?.[node.id]?.url ?? null) : genUrl,
+        url: mediaUrl ?? placeholderUrl,
         declared: still ? stillClipSeconds(node) : (clipDuration(node) ?? DEFAULT_CLIP_SECONDS),
-        still
+        // A placeholder plays like a still (no media clock) but keeps its
+        // declared VIDEO duration and stays a video node for every edit.
+        still: still || placeholderUrl !== null,
+        placeholder: placeholderUrl !== null
       }
     })
-  }, [graph.nodes, generations, assetMedia])
+  }, [graph.nodes, generations, assetMedia, fallbackImages, inputStills])
 
   const toAudioClip = useCallback(
     (node: GraphNode): EngineClip => {
@@ -777,8 +810,14 @@ export function TimelineV2({
     [speechNodes, toAudioClip]
   )
 
-  const engine = usePlaybackEngine(clips, audioClips, speechClips)
-  const anyRunning = (generations ?? []).some((g) => g.status === 'running')
+  // Preview-only mute (persisted): silences clips + both audio lanes at once.
+  const [muted, setMuted] = useMuted()
+  const engine = usePlaybackEngine(clips, audioClips, speechClips, muted)
+  // Everything in flight (queued rows included — they hold a slot too), so the
+  // header chip reports how much work is actually pending, not just 'running'.
+  const inFlightCount = (generations ?? []).filter(
+    (g) => g.status === 'running' || g.status === 'pending'
+  ).length
   const trackRef = useRef<HTMLDivElement | null>(null)
   const scrubbing = useRef(false)
   // Same persisted height as timeline v1 — drag the top edge to grow the player.
@@ -963,7 +1002,9 @@ export function TimelineV2({
   const beginClipResize = useCallback(
     (clip: EngineClip, side: 'left' | 'right') => (e: ReactPointerEvent) => {
       const node = clip.node
-      if (clip.still) {
+      // A placeholder is a VIDEO node: its grips trim the media window like
+      // any clip (the still path would overwrite the trim as a hold time).
+      if (clip.still && !clip.placeholder) {
         const orig = stillClipSeconds(node)
         const durAt = (d: number) =>
           clamp(side === 'right' ? orig + d : orig - d, MIN_STILL_SECONDS, MAX_STILL_SECONDS)
@@ -1132,6 +1173,29 @@ export function TimelineV2({
     })
   })
 
+  // N = note the frame under the playhead into the feedback bucket (§6.13):
+  // pauses, freezes the timecode + node identity, opens the note popover.
+  // Plain function — useShortcut keeps its handler in a ref, no memo needed.
+  const openNotePopover = (anchor: { x: number; y: number }): void => {
+    engine.pause()
+    const clip = clips[engine.activeIdx]
+    setNotePopover({
+      ...anchor,
+      timecodeSec: Math.round(engine.globalTime * 10) / 10,
+      nodeId: clip?.node.id ?? null,
+      nodeLabel: clip
+        ? (clip.node.label ?? getModel(clip.node.modelId)?.label ?? clip.node.key)
+        : null
+    })
+  }
+  useShortcut('addNote', (event) => {
+    if (event.repeat) return
+    const button = noteButtonRef.current
+    if (!button) return
+    const r = button.getBoundingClientRect()
+    openNotePopover({ x: r.left + r.width / 2, y: r.top - 6 })
+  })
+
   /** Magnetic drag targets: every entry boundary (the playhead joins at drag time). */
   const snapTargets = useMemo(() => {
     const out = [0]
@@ -1231,9 +1295,10 @@ export function TimelineV2({
           <span className="text-neutral-500">
             {t('timeline.clipCount', { count: clips.length })}
           </span>
-          {anyRunning && (
+          {inFlightCount > 0 && (
             <span className="flex items-center gap-1 text-warning">
-              <Loader2 className="h-3 w-3 animate-spin" /> {t('timeline.generating')}
+              <Loader2 className="h-3 w-3 animate-spin" />{' '}
+              {t('timeline.generatingCount', { count: inFlightCount })}
             </span>
           )}
 
@@ -1275,8 +1340,39 @@ export function TimelineV2({
                 / <Timecode seconds={engine.total} dimAll />
               </span>
             </span>
+            <button
+              onClick={() => setMuted(!muted)}
+              className={`ml-1 rounded p-1 hover:bg-neutral-800 ${muted ? 'text-warning' : 'text-neutral-400 hover:text-neutral-100'}`}
+              title={muted ? t('timeline.unmute') : t('timeline.mute')}
+              data-timeline-mute
+            >
+              {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            </button>
           </div>
 
+          <button
+            onClick={() => setInputStills(!inputStills)}
+            className={`rounded p-1 hover:bg-neutral-800 ${inputStills ? 'text-accent-soft hover:text-accent-soft' : 'text-neutral-500 hover:text-neutral-200'}`}
+            title={inputStills ? t('timeline.inputStillsOn') : t('timeline.inputStillsOff')}
+            data-timeline-input-stills
+          >
+            {inputStills ? (
+              <ImageIcon className="h-3.5 w-3.5" />
+            ) : (
+              <ImageOff className="h-3.5 w-3.5" />
+            )}
+          </button>
+          <button
+            ref={noteButtonRef}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              openNotePopover({ x: r.left + r.width / 2, y: r.top - 6 })
+            }}
+            className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+            title={t('timeline.addNote')}
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+          </button>
           <button
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect()
@@ -1354,6 +1450,7 @@ export function TimelineV2({
               ref={engine.videoARef}
               onEnded={engine.advance}
               playsInline
+              muted={muted}
               style={{ filter: lookFilter, ...videoFadeStyle }}
               className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'A' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
             />
@@ -1361,7 +1458,7 @@ export function TimelineV2({
               ref={engine.videoBRef}
               onEnded={engine.advance}
               playsInline
-              muted={engine.activeSlot === 'A'}
+              muted={muted || engine.activeSlot === 'A'}
               style={{ filter: lookFilter, ...videoFadeStyle }}
               className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
             />
@@ -1375,6 +1472,13 @@ export function TimelineV2({
                 style={{ filter: lookFilter }}
                 className="absolute inset-0 z-[5] h-full w-full bg-black object-contain"
               />
+            )}
+            {/* Animatic badge: this frame is the clip's INPUT image, not a result. */}
+            {activeClip?.placeholder && activeClip.url && (
+              <div className="absolute bottom-2 left-2 z-[6] flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-neutral-300 backdrop-blur">
+                <ImageIcon className="h-3 w-3 text-accent-soft" />
+                {t('timeline.inputStillBadge')}
+              </div>
             )}
             {!activeClip?.url && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-[11px] text-neutral-500">
@@ -1691,7 +1795,9 @@ export function TimelineV2({
                         </div>
                         {!clip.url && (
                           <div className="absolute inset-0 flex items-center justify-center text-[9px] text-neutral-600">
-                            {anyRunning ? t('timeline.clipGenerating') : t('timeline.clipEmpty')}
+                            {inFlightCount > 0
+                              ? t('timeline.clipGenerating')
+                              : t('timeline.clipEmpty')}
                           </div>
                         )}
                         <button
@@ -1718,12 +1824,20 @@ export function TimelineV2({
                           <>
                             <EdgeHandle
                               side="left"
-                              title={t(clip.still ? 'timeline.resizeStill' : 'timeline.trimIn')}
+                              title={t(
+                                clip.still && !clip.placeholder
+                                  ? 'timeline.resizeStill'
+                                  : 'timeline.trimIn'
+                              )}
                               onPointerDown={beginClipResize(clip, 'left')}
                             />
                             <EdgeHandle
                               side="right"
-                              title={t(clip.still ? 'timeline.resizeStill' : 'timeline.trimOut')}
+                              title={t(
+                                clip.still && !clip.placeholder
+                                  ? 'timeline.resizeStill'
+                                  : 'timeline.trimOut'
+                              )}
                               onPointerDown={beginClipResize(clip, 'right')}
                             />
                           </>
@@ -2073,7 +2187,7 @@ export function TimelineV2({
               splitAtMediaSec={splitPointOf(editClip.idx)}
               onClose={() => setEditClip(null)}
               onRemoveStill={
-                clip.still
+                clip.still && !clip.placeholder
                   ? () => {
                       setEditClip(null)
                       void invoke('nodes:setTimelineOrder', {
@@ -2138,6 +2252,94 @@ export function TimelineV2({
             />
           ) : null
         })()}
+      {notePopover && (
+        <FeedbackNotePopover
+          videoId={videoId}
+          note={notePopover}
+          onClose={() => setNotePopover(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Quick feedback note (§6.13) on the frame under the playhead: the timecode
+ * and the node identity were frozen when the popover opened — the user only
+ * types the comment. Lands in the feedback bucket (FeedbackPanel + the MCP
+ * feedback tools).
+ */
+function FeedbackNotePopover({
+  videoId,
+  note,
+  onClose
+}: {
+  videoId: string
+  note: {
+    x: number
+    y: number
+    timecodeSec: number
+    nodeId: string | null
+    nodeLabel: string | null
+  }
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const ref = useRef<HTMLDivElement | null>(null)
+  useDismissable(true, onClose, ref)
+  const [comment, setComment] = useState('')
+
+  const save = (): void => {
+    const trimmed = comment.trim()
+    if (!trimmed) return
+    void invoke('feedback:create', {
+      videoId,
+      comment: trimmed,
+      timecodeSec: note.timecodeSec,
+      ...(note.nodeId ? { nodeId: note.nodeId } : {}),
+      ...(note.nodeLabel ? { nodeLabel: note.nodeLabel } : {})
+    })
+    onClose()
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="island fixed z-50 w-72 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
+      style={{ left: popoverLeft(note.x, 288), top: note.y }}
+    >
+      <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
+        <MessageSquarePlus className="h-3 w-3 text-accent" /> {t('timeline.addNoteTitle')}
+        <span className="ml-auto font-mono font-normal text-neutral-400">
+          {formatTimecode(note.timecodeSec)}
+          {note.nodeLabel ? ` · ${note.nodeLabel}` : ''}
+        </span>
+      </div>
+      <textarea
+        autoFocus
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            save()
+          }
+          if (e.key === 'Escape') onClose()
+        }}
+        placeholder={t('timeline.notePlaceholder')}
+        rows={2}
+        className="w-full resize-none rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-accent"
+      />
+      <div className="mt-1.5 flex items-center justify-between">
+        <span className="text-[10px] text-neutral-500">{t('timeline.noteHint')}</span>
+        <button
+          onClick={save}
+          disabled={!comment.trim()}
+          className="rounded bg-accent px-2 py-1 text-[11px] font-semibold text-neutral-900 hover:bg-accent-hover disabled:opacity-40"
+        >
+          {t('timeline.noteSave')}
+        </button>
+      </div>
     </div>
   )
 }

@@ -1,4 +1,14 @@
-import { Check, Copy, Image as ImageIcon, Music, Palette, Pencil, Trash2, X } from 'lucide-react'
+import {
+  Check,
+  Copy,
+  Download,
+  Image as ImageIcon,
+  Music,
+  Palette,
+  Pencil,
+  Trash2,
+  X
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AssetWithUrl } from '@shared/ipc/contracts'
@@ -15,6 +25,7 @@ export function AssetCard({
   asset,
   isDuplicate = false,
   onSave,
+  onDownload,
   onDelete
 }: {
   asset: AssetWithUrl
@@ -26,6 +37,7 @@ export function AssetCard({
     tags: string[]
     designSubject: string | null
   }) => void
+  onDownload: () => void
   onDelete: () => void
 }): React.JSX.Element {
   const { t } = useTranslation()
@@ -100,6 +112,13 @@ export function AssetCard({
             title={t('assetsPage.edit')}
           >
             <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => onDownload()}
+            className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-neutral-300 backdrop-blur hover:text-neutral-100"
+            title={t('assetsPage.download')}
+          >
+            <Download className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => onDelete()}

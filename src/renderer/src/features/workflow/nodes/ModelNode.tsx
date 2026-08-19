@@ -4,8 +4,10 @@ import {
   Play,
   AlertCircle,
   Anchor,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
   RefreshCw,
   Replace,
   Trash2,
@@ -137,6 +139,7 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
   const model = useMemo(() => getModel(node.modelId), [node.modelId])
   const removeNode = useIpcMutation('nodes:remove', [graphKeys.graph(node.videoId)])
   const [refreshing, setRefreshing] = useState(false)
+  const [nameCopied, setNameCopied] = useState(false)
   const graph = useWorkflowGraph()
   const connections = useMemo(() => incomingConnectionsFor(node.id, graph), [node.id, graph])
   // Always subscribe — we need to know about `running` generations even before
@@ -263,8 +266,26 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
               </span>
             )}
           </div>
-          <div className="truncate text-sm font-semibold text-neutral-100">
-            {node.label ?? model.label}
+          <div className="flex items-center gap-1">
+            <span className="truncate text-sm font-semibold text-neutral-100">
+              {node.label ?? model.label}
+            </span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                void navigator.clipboard.writeText(node.label ?? model.label)
+                setNameCopied(true)
+                setTimeout(() => setNameCopied(false), 1500)
+              }}
+              className="shrink-0 rounded p-0.5 text-neutral-500 opacity-0 transition hover:bg-neutral-800 hover:text-neutral-200 group-hover:opacity-100"
+              title={t('editor.copyNodeName')}
+            >
+              {nameCopied ? (
+                <Check className="h-3 w-3 text-success" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+            </button>
           </div>
           <div className="truncate font-mono text-[10px] text-neutral-500" title={model.id}>
             {model.id}

@@ -26,6 +26,7 @@ import { useCollapsed } from './timelineHooks'
 import { TimelineV2 } from './TimelineV2'
 import { HistoryPanel } from './HistoryPanel'
 import { CheckpointsPanel } from './CheckpointsPanel'
+import { FeedbackPanel } from './FeedbackPanel'
 import { ScenarioPanel } from './ScenarioPanel'
 import {
   Anchor,
@@ -36,6 +37,7 @@ import {
   Flag,
   History,
   Image as ImageIcon,
+  MessageSquareText,
   PanelBottom,
   PanelBottomClose,
   Play,
@@ -184,6 +186,8 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   const [checkpointsOpen, setCheckpointsOpen] = useState(false)
   /** §6.7 — the scenario island: the shot list this graph realizes. */
   const [scenarioOpen, setScenarioOpen] = useState(false)
+  /** §6.13 — the feedback bucket island (review notes + mark done). */
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   /** "Fix with the assistant" buttons → global sidebar with a prepared draft. */
   const askAssistant = useCallback((text: string) => {
     openAssistant(text)
@@ -537,10 +541,11 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
     }
   }, [videoId, queryClient, toast, t])
 
-  // Copy/paste nodes on the canvas. Copy stands aside when the user is copying
-  // selected TEXT, so the native behaviour keeps working.
+  // Copy/paste nodes on the canvas. Copy stands aside (returns false, so the
+  // keystroke is NOT preventDefault'ed) when the user is copying selected
+  // TEXT, so the native ⌘C keeps working anywhere in the window.
   useShortcut('copyNodes', () => {
-    if (window.getSelection()?.toString()) return
+    if (window.getSelection()?.toString()) return false
     copySelection()
   })
   useShortcut('pasteNodes', () => void pasteClipboard())
@@ -805,6 +810,14 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
           <Flag className="h-4 w-4" />
         </Button>
         <Button
+          variant={feedbackOpen ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setFeedbackOpen((v) => !v)}
+          title={t('editor.feedback.open')}
+        >
+          <MessageSquareText className="h-4 w-4" />
+        </Button>
+        <Button
           variant={historyOpen ? 'secondary' : 'ghost'}
           size="sm"
           onClick={() => setHistoryOpen((v) => !v)}
@@ -814,7 +827,15 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
         </Button>
       </>
     ),
-    [t, timelineCollapsed, setTimelineCollapsed, historyOpen, checkpointsOpen, scenarioOpen]
+    [
+      t,
+      timelineCollapsed,
+      setTimelineCollapsed,
+      historyOpen,
+      checkpointsOpen,
+      scenarioOpen,
+      feedbackOpen
+    ]
   )
   useHeaderActions(headerActions)
 
@@ -931,7 +952,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
             </div>
           )}
 
-          {(selectedNode || historyOpen || checkpointsOpen || scenarioOpen) && (
+          {(selectedNode || historyOpen || checkpointsOpen || scenarioOpen || feedbackOpen) && (
             <div className="absolute top-16 right-3 bottom-3 z-30 flex flex-col items-stretch gap-3">
               {selectedNode && (
                 <NodeParamsPanel
@@ -953,6 +974,16 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
               )}
               {checkpointsOpen && (
                 <CheckpointsPanel videoId={videoId} onClose={() => setCheckpointsOpen(false)} />
+              )}
+              {feedbackOpen && (
+                <FeedbackPanel
+                  videoId={videoId}
+                  onClose={() => setFeedbackOpen(false)}
+                  onFocusNode={(nodeId) => {
+                    setSelectedNodeId(nodeId)
+                    focusNode(nodeId)
+                  }}
+                />
               )}
               {historyOpen && (
                 <HistoryPanel

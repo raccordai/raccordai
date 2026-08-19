@@ -37,6 +37,7 @@ function SettingsPage(): React.JSX.Element {
             <AssistantRunApprovalSwitcher />
           </div>
           <NotificationsToggle />
+          <ConcurrencySelect />
         </div>
       </Section>
 
@@ -229,6 +230,56 @@ function NotificationsToggle(): React.JSX.Element {
         onChange={(e) => setEnabled.mutate(e.target.checked)}
         className="h-4 w-4 flex-shrink-0 rounded border-neutral-600 bg-neutral-900"
       />
+    </div>
+  )
+}
+
+/** Levels offered for the in-flight generation cap (schema allows 1–16). */
+const CONCURRENCY_CHOICES = [1, 2, 3, 4, 6, 8, 12, 16]
+
+/**
+ * Settings → General: how many kie.ai generations run at once. Read live by
+ * the queue on every dispatch, so a change applies to already-queued runs.
+ */
+function ConcurrencySelect(): React.JSX.Element {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const value = useQuery({
+    queryKey: ['settings', 'generationConcurrency'],
+    queryFn: () => invoke('settings:getGenerationConcurrency')
+  })
+  const setValue = useMutation({
+    mutationFn: (next: number) => invoke('settings:setGenerationConcurrency', { value: next }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ['settings', 'generationConcurrency'] })
+  })
+
+  // A value set outside the UI (MCP, older builds) may not be in the preset
+  // list — keep it selectable instead of showing a lying dropdown.
+  const current = value.data ?? 2
+  const choices = CONCURRENCY_CHOICES.includes(current)
+    ? CONCURRENCY_CHOICES
+    : [...CONCURRENCY_CHOICES, current].sort((a, b) => a - b)
+
+  return (
+    <div className="island flex items-center justify-between gap-4 px-4 py-3">
+      <div>
+        <div className="text-sm text-neutral-200">{t('settings.generationConcurrency')}</div>
+        <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">
+          {t('settings.generationConcurrencyHint')}
+        </p>
+      </div>
+      <select
+        value={current}
+        onChange={(e) => setValue.mutate(Number(e.target.value))}
+        className="flex-shrink-0 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 focus:border-accent focus:outline-none"
+      >
+        {choices.map((n) => (
+          <option key={n} value={n}>
+            {n}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }

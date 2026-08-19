@@ -38,6 +38,29 @@ export async function probeVideoDimensions(blob: Blob): Promise<VideoDimensions 
   }
 }
 
+/**
+ * Read an audio file's real duration from its metadata (used by the FCPXML
+ * export to place and chain the audio lanes). Null when undecodable.
+ */
+export async function probeAudioDuration(blob: Blob): Promise<number | null> {
+  if (typeof document === 'undefined') return null
+  const url = URL.createObjectURL(blob)
+  const audio = document.createElement('audio')
+  audio.preload = 'metadata'
+  audio.src = url
+  try {
+    await new Promise<void>((resolve, reject) => {
+      audio.onloadedmetadata = () => resolve()
+      audio.onerror = () => reject(new Error('probeAudioDuration: metadata error'))
+    })
+    return Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : null
+  } catch {
+    return null
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 const COMMON_FPS = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60]
 
 /** Snap a measured rate to the nearest standard fps when it's close enough. */

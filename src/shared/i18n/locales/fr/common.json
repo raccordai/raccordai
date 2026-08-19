@@ -142,7 +142,10 @@
     "empty": "Ajoute des nœuds vidéo pour remplir la timeline.",
     "clipCount_one": "{{count}} clip",
     "clipCount_other": "{{count}} clips",
-    "generating": "génération",
+    "generatingCount_one": "{{count}} génération en cours",
+    "generatingCount_other": "{{count}} générations en cours",
+    "mute": "Couper le son de l'aperçu",
+    "unmute": "Rétablir le son de l'aperçu",
     "clipGenerating": "génération…",
     "clipEmpty": "vide",
     "prevClip": "Clip précédent",
@@ -192,6 +195,14 @@
     "zoomIn": "Zoomer la timeline",
     "zoomOut": "Dézoomer la timeline",
     "addText": "Ajouter un texte à la position de lecture",
+    "inputStillsOn": "Animatique activée : les clips non générés jouent leur image d'entrée (cliquer pour désactiver)",
+    "inputStillsOff": "Animatique désactivée : les clips non générés restent vides (cliquer pour activer)",
+    "inputStillBadge": "image d'entrée",
+    "addNote": "Ajouter un retour sur cette frame (N)",
+    "addNoteTitle": "Retour",
+    "notePlaceholder": "Votre retour sur cette frame…",
+    "noteHint": "↵ pour enregistrer",
+    "noteSave": "Ajouter",
     "addImage": "Ajouter une image fixe",
     "addImageEmpty": "Aucune image disponible dans le graphe (génère une image ou importe un asset d'abord).",
     "removeFromTimeline": "Retirer de la timeline (le nœud reste dans le graphe)",
@@ -530,7 +541,9 @@
       "error": "Erreur : {{error}}"
     },
     "notifyOnCompletion": "Notifications de fin",
-    "notifyOnCompletionHint": "Afficher une notification système quand une génération se termine pendant que l’app est en arrière-plan."
+    "notifyOnCompletionHint": "Afficher une notification système quand une génération se termine pendant que l’app est en arrière-plan.",
+    "generationConcurrency": "Générations simultanées",
+    "generationConcurrencyHint": "Nombre de générations kie.ai lancées en parallèle. Un changement s’applique immédiatement, y compris aux générations déjà en file. Attention : plus de parallélisme = les crédits partent plus vite."
   },
   "time": {
     "justNow": "à l'instant",
@@ -571,7 +584,9 @@
     "designBadgeHint": "Planche de design publiée — à brancher en référence, jamais en frame anchor",
     "deleteReferencedConfirm": "Supprimer l'asset « {{name}} » ? {{count}} nœud(s) l'utilisent dans : {{videos}}. Ces nœuds perdront leur média.",
     "tabCasting": "Casting",
-    "tabInstructions": "Instructions"
+    "tabInstructions": "Instructions",
+    "download": "Télécharger",
+    "downloaded": "Asset enregistré dans {{path}}"
   },
   "instructionsPage": {
     "hint": "La méthodologie du projet, en markdown libre. L'assistant la lit en priorité à chaque tour, sur chaque vidéo du projet — écris ici ta façon de faire (structure des plans, ton, règles de montage) plutôt que de la répéter conversation après conversation.",
@@ -706,6 +721,16 @@
       "edges": "recâbler {{count}} connexion(s)",
       "selections": "changer la sortie sélectionnée sur {{count}} nœud(s)"
     },
+    "feedback": {
+      "title": "Retours",
+      "open": "Retours — les notes prises en regardant la timeline",
+      "empty": "Aucun retour. Mets la timeline en pause et appuie sur N pour noter la frame sous la tête de lecture.",
+      "copyAll": "Copier la liste (markdown, prête pour une to-do)",
+      "markDone": "Marquer comme traité",
+      "markOpen": "Rouvrir",
+      "delete": "Supprimer ce retour",
+      "deleteConfirm": "Supprimer ce retour ? Une note utilisateur est irrécupérable."
+    },
     "scenario": {
       "title": "Scénario",
       "open": "Scénario — le découpage écrit avant le graphe",
@@ -766,6 +791,7 @@
     "redo": "Rétablir la modification annulée",
     "replaceConfirm": "Remplacer les nœuds existants, ou fusionner l’import dans le graphe actuel ?",
     "deleteNodeConfirm": "Supprimer ce nœud et toutes ses générations ?",
+    "copyNodeName": "Copier le nom du nœud",
     "estimatedCost": "~{{credits}} crédits (estimation)",
     "historyPanel": {
       "title": "Historique",
@@ -866,6 +892,7 @@
     "recipePreviewHide": "Masquer le prompt",
     "recipeMore": "Options",
     "promptGuide": "Guide de prompt du modèle",
+    "promptingNotes": "Conseils du modèle (prompting, entrées, références)",
     "promptGuideShow": "Lire le guide de prompt",
     "promptGuideHide": "Masquer le guide"
   },

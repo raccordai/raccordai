@@ -60,6 +60,8 @@ describe('AGENT_TOOLS registry', () => {
       'delete_asset',
       // The captured state can never be restored again.
       'delete_checkpoint',
+      // §6.13 — a user's review note is unrecoverable (prefer marking it done).
+      'delete_feedback',
       // §7 — takes every tracked channel, video and transcript with it.
       'delete_niche',
       'delete_project',

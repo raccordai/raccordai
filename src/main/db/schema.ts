@@ -273,6 +273,35 @@ export const textLayers = sqliteTable(
 )
 
 /**
+ * Feedback bucket (§6.13): review notes taken while watching the timeline —
+ * a comment anchored to a FINAL-timeline timecode and to the node the user
+ * was looking at. The node reference is a plain id + a LABEL SNAPSHOT (no FK):
+ * the note is the user's words about a moment, and must survive the node being
+ * deleted or renamed. Managed via IPC and the MCP feedback tools (an agent
+ * works through the list and marks items done); not in the graph journal —
+ * same doctrine as text_layers.
+ */
+export const feedbackItems = sqliteTable(
+  'feedback_items',
+  {
+    id: text('id').primaryKey(),
+    videoId: text('video_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    /** Node under the playhead when the note was taken (no FK — see above). */
+    nodeId: text('node_id'),
+    /** The node's display name at note time — the name the user talks in. */
+    nodeLabel: text('node_label'),
+    /** FINAL-timeline seconds (transitions subtracted), null = general note. */
+    timecodeSec: real('timecode_sec'),
+    comment: text('comment').notNull(),
+    status: text('status', { enum: ['open', 'done'] }).notNull(),
+    createdAt: integer('created_at').notNull()
+  },
+  (table) => [index('feedback_items_by_video').on(table.videoId)]
+)
+
+/**
  * Sticker track (§6.12d): image overlays composited over the film at render
  * time, in absolute FINAL-timeline seconds like text_layers. The image comes
  * from an image NODE's output or a project ASSET (exactly one of the two; no
