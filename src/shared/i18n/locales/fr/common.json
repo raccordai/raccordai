@@ -799,6 +799,13 @@
       "loading": "Chargement…",
       "empty": "Aucune génération pour le moment.",
       "jumpToNode": "Aller au nœud sur le canvas",
+      "filter": {
+        "all": "Tout",
+        "video": "Vidéos",
+        "image": "Images",
+        "audio": "Audio"
+      },
+      "noMatch": "Aucune génération de ce type.",
       "deleted": "supprimé",
       "active": "Actif",
       "statusOk": "OK",

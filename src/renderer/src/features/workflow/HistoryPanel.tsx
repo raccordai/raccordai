@@ -1,6 +1,7 @@
 import { AlertCircle, CheckCircle2, History, Loader2, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getModel } from '@shared/models'
+import { getModel, type MediaKind } from '@shared/models'
 import { relativeTime } from '@renderer/lib/relativeTime'
 import { VideoThumb } from '@renderer/components/VideoThumb'
 import { useGenerationHistory } from './data'
@@ -12,17 +13,46 @@ interface Props {
   onSelectNode: (nodeId: string) => void
 }
 
+type KindFilter = 'all' | MediaKind
+const KIND_FILTERS: KindFilter[] = ['all', 'video', 'image', 'audio']
+const FILTER_LABEL_KEYS = {
+  all: 'editor.historyPanel.filter.all',
+  video: 'editor.historyPanel.filter.video',
+  image: 'editor.historyPanel.filter.image',
+  audio: 'editor.historyPanel.filter.audio'
+} as const
+
+/**
+ * The media kind of a history row: the model registry knows, and rows whose
+ * model was removed (or replaced without an alias) fall back to the stored
+ * result mime type — image being the safest default for a still-unknown row.
+ */
+function historyKindOf(row: { modelId: string; resultMimeType?: string | null }): MediaKind {
+  const kind = getModel(row.modelId)?.kind
+  if (kind === 'video' || kind === 'image' || kind === 'audio') return kind
+  if (row.resultMimeType?.startsWith('video')) return 'video'
+  if (row.resultMimeType?.startsWith('audio')) return 'audio'
+  return 'image'
+}
+
 export function HistoryPanel({ videoId, onClose, onSelectNode }: Props) {
   const { t } = useTranslation()
   const history = useGenerationHistory(videoId).data
+  const [filter, setFilter] = useState<KindFilter>('all')
+  const filtered = useMemo(
+    () => (filter === 'all' ? history : history?.filter((g) => historyKindOf(g) === filter)),
+    [history, filter]
+  )
 
   return (
     <aside className="island flex min-h-0 w-96 flex-1 flex-shrink-0 flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold text-neutral-100">
           <History className="h-4 w-4 text-accent" /> {t('editor.historyPanel.title')}
-          {history && (
-            <span className="text-xs font-normal text-neutral-500">({history.length})</span>
+          {history && filtered && (
+            <span className="text-xs font-normal text-neutral-500">
+              ({filter === 'all' ? history.length : `${filtered.length}/${history.length}`})
+            </span>
           )}
         </h2>
         <button
@@ -34,18 +64,40 @@ export function HistoryPanel({ videoId, onClose, onSelectNode }: Props) {
         </button>
       </div>
 
+      {history && history.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 border-b border-neutral-800 px-3 py-2">
+          {KIND_FILTERS.map((key) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className={`rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                filter === key
+                  ? 'bg-accent font-medium text-neutral-900'
+                  : 'bg-neutral-800/80 text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              {t(FILTER_LABEL_KEYS[key])}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-2">
-        {history === undefined ? (
+        {history === undefined || filtered === undefined ? (
           <div className="p-2 text-xs text-neutral-500">{t('editor.historyPanel.loading')}</div>
         ) : history.length === 0 ? (
           <div className="p-2 text-xs italic text-neutral-500">
             {t('editor.historyPanel.empty')}
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-2 text-xs italic text-neutral-500">
+            {t('editor.historyPanel.noMatch')}
+          </div>
         ) : (
           <ul className="space-y-1.5">
-            {history.map((g) => {
+            {filtered.map((g) => {
               const model = getModel(g.modelId)
-              const isVideo = g.resultMimeType?.startsWith('video') || model?.kind === 'video'
+              const isVideo = historyKindOf(g) === 'video'
               return (
                 <li key={g.id}>
                   <button

@@ -799,6 +799,13 @@
       "loading": "Loading…",
       "empty": "No generations yet.",
       "jumpToNode": "Jump to the node on the canvas",
+      "filter": {
+        "all": "All",
+        "video": "Videos",
+        "image": "Images",
+        "audio": "Audio"
+      },
+      "noMatch": "No generation of this type.",
       "deleted": "deleted",
       "active": "Active",
       "statusOk": "OK",
