@@ -14,6 +14,11 @@ export function cancelGeneration(args: { nodeId: string }): Promise<{ cancelled:
   return invoke('generations:cancel', args)
 }
 
+/** Removes ONE queued-but-unsubmitted generation (row deleted — nothing was spent). */
+export function dequeueGeneration(args: { generationId: string }): Promise<{ removed: boolean }> {
+  return invoke('generations:dequeue', args)
+}
+
 export function refineImagePrompt(args: {
   currentPrompt: string
   imageUrl: string

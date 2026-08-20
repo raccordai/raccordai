@@ -1029,6 +1029,34 @@ export function cancelGeneration(nodeId: string): { cancelled: boolean } {
 }
 
 /**
+ * Removes ONE queued-but-unsubmitted generation from the run queue and deletes
+ * its row: nothing reached kie.ai, no credits were engaged and no media
+ * exists, so a "failed / cancelled" tombstone would only clutter the history.
+ * A generation already holding a slot (running, or pending on a smart retry)
+ * is NOT touched — `cancelGeneration` (per node) is the tool for those. The
+ * settle event still fires (status 'failed') so a watching assistant thread
+ * and a run_batch bookkeeping both move on instead of waiting forever; the
+ * queue release it triggers is a no-op by then.
+ */
+export function dequeueGeneration(generationId: string): { removed: boolean } {
+  const db = getDb()
+  const gen = db.select().from(generations).where(eq(generations.id, generationId)).get()
+  if (!gen || gen.status !== 'pending' || gen.kieTaskId) return { removed: false }
+  if (!queue.snapshot().queued.includes(generationId)) return { removed: false }
+  queue.release(generationId)
+  db.delete(generations).where(eq(generations.id, generationId)).run()
+  broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
+  emitGenerationSettled({
+    generationId,
+    videoId: gen.videoId,
+    nodeId: gen.nodeId,
+    status: 'failed',
+    errorMessage: 'Removed from queue by user.'
+  })
+  return { removed: true }
+}
+
+/**
  * Attach the client-extracted last frame (JPEG) to a generation. Since the
  * ffmpeg extraction moved into main this is a BACKFILL path only (rows that
  * predate it); the lastFramePath guard makes the two writers race-safe.

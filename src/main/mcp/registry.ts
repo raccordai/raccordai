@@ -78,7 +78,13 @@ import {
   ratioSignal,
   SP_PRESETS
 } from '@shared/niches'
-import { cancelGeneration, queueState, refreshStatus, runNode } from '../services/runEngine'
+import {
+  cancelGeneration,
+  dequeueGeneration,
+  queueState,
+  refreshStatus,
+  runNode
+} from '../services/runEngine'
 import { clampVariants } from '../services/runPlanner'
 import { reviewGeneration } from '../services/qc'
 import * as videos from '../services/videos'
@@ -1897,6 +1903,15 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'write',
     execute: ({ nodeId }) => cancelGeneration(String(nodeId))
+  },
+  {
+    name: 'dequeue_generation',
+    description:
+      'Remove ONE queued-but-unsubmitted generation from the run queue (row deleted — nothing was spent). Ids via queue_state/get_generations; a running generation needs cancel_generation.',
+    inputSchema: obj({ generationId: str() }, ['generationId']),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ generationId }) => dequeueGeneration(String(generationId))
   },
   {
     name: 'refresh_generation_status',

@@ -321,6 +321,7 @@ export function registerIpcHandlers(): void {
   handle('generations:finalizeVideo', ({ videoId }) => runBatchService.finalizeVideo(videoId).done)
   handle('generations:refreshStatus', ({ nodeId }) => runEngine.refreshStatus(nodeId))
   handle('generations:cancel', ({ nodeId }) => runEngine.cancelGeneration(nodeId))
+  handle('generations:dequeue', ({ generationId }) => runEngine.dequeueGeneration(generationId))
   handle('generations:setLastFrame', ({ generationId, jpegBase64 }) =>
     runEngine.setLastFrame(generationId, jpegBase64)
   )

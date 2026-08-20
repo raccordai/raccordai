@@ -864,6 +864,10 @@
     "deleteAssetNodeConfirm": "Supprimer le nœud d’asset « {{label}} » ?",
     "retry": "Relancer",
     "renderDone": "MP4 exporté : {{path}}",
+    "queue": {
+      "remove": "Retirer de la file",
+      "removeTitle": "Retire cette génération de la file d’attente (rien n’a été dépensé — la ligne est supprimée)"
+    },
     "queueBadge": {
       "queued": "En file (n°{{position}})",
       "generating": "Génération…",

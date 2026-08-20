@@ -545,6 +545,8 @@ const CHAT_LABELS: Record<string, (args: Record<string, unknown>, result: unknow
   select_generation: () => 'Generation selected',
   cancel_generation: (_a, r) =>
     (r as { cancelled?: boolean }).cancelled ? 'Generation cancelled' : 'Nothing to cancel',
+  dequeue_generation: (_a, r) =>
+    (r as { removed?: boolean }).removed ? 'Removed from queue' : 'Nothing to remove',
   refresh_generation_status: (_a, r) => `Status · ${(r as { status?: string }).status ?? '?'}`,
   render_video: (_a, r) => `MP4 rendered · ${(r as { path?: string }).path ?? ''}`,
   list_assets: () => 'Read assets',

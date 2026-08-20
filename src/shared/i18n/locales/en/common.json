@@ -864,6 +864,10 @@
     "deleteAssetNodeConfirm": "Delete asset node “{{label}}”?",
     "retry": "Retry",
     "renderDone": "MP4 exported: {{path}}",
+    "queue": {
+      "remove": "Remove from queue",
+      "removeTitle": "Pulls this generation out of the run queue (nothing was spent — the row is deleted)"
+    },
     "queueBadge": {
       "queued": "Queued (#{{position}})",
       "generating": "Generating…",

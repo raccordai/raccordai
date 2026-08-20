@@ -1397,6 +1397,10 @@ export const ipcContracts = {
     input: z.object({ nodeId: z.string() }),
     output: z.object({ cancelled: z.boolean() })
   },
+  'generations:dequeue': {
+    input: z.object({ generationId: z.string() }),
+    output: z.object({ removed: z.boolean() })
+  },
   'generations:setLastFrame': {
     input: z.object({ generationId: z.string(), jpegBase64: z.string() }),
     output: z.void()

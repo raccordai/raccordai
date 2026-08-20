@@ -40,8 +40,16 @@ import { AnnotateModal } from './AnnotateModal'
 import { incomingConnectionsFor, useWorkflowGraph } from './workflowContext'
 import { downloadMedia } from '@renderer/lib/downloadMedia'
 import { invoke } from '@renderer/lib/ipc'
-import { graphKeys, useIpcMutation, useNodeGenerations, useProjectAssets, useVideo } from './data'
-import { promoteGeneration, refineImagePrompt } from './generationRuntime'
+import {
+  graphKeys,
+  runStateFor,
+  useIpcMutation,
+  useNodeGenerations,
+  useProjectAssets,
+  useQueueState,
+  useVideo
+} from './data'
+import { dequeueGeneration, promoteGeneration, refineImagePrompt } from './generationRuntime'
 
 /** Sensible extension fallback per media kind when the URL/MIME doesn't reveal one. */
 const FALLBACK_EXT: Record<string, string> = { image: 'png', video: 'mp4', audio: 'mp3' }
@@ -1450,6 +1458,23 @@ function GenerationCard({
   const [zoomed, setZoomed] = useState(false)
   /** §6.3 — the "select + fix" modal for this output. */
   const [annotating, setAnnotating] = useState(false)
+  // Only queued-but-unsubmitted runs can be pulled back out of the queue —
+  // the queue snapshot (not the row status) is what says which ones those are.
+  const queue = useQueueState().data
+  const runState = g.status === 'pending' ? runStateFor(g, queue) : null
+  const [dequeuing, setDequeuing] = useState(false)
+
+  async function handleDequeue() {
+    setError(null)
+    setDequeuing(true)
+    try {
+      await dequeueGeneration({ generationId: g.id })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDequeuing(false)
+    }
+  }
 
   async function handleDownload() {
     if (!g.url) return
@@ -1554,7 +1579,23 @@ function GenerationCard({
             </div>
           </div>
         ) : (
-          <div className="p-3 text-xs text-neutral-500">Pending…</div>
+          <div className="flex items-center justify-between gap-2 p-3">
+            <span className="text-xs text-neutral-500">
+              {runState?.kind === 'queued'
+                ? t('editor.queueBadge.queued', { position: runState.position })
+                : 'Pending…'}
+            </span>
+            {runState?.kind === 'queued' && (
+              <button
+                onClick={handleDequeue}
+                disabled={dequeuing}
+                className="flex flex-shrink-0 items-center gap-1 rounded-md border border-neutral-700 px-2 py-1 text-[11px] text-neutral-300 transition hover:border-danger/50 hover:text-danger disabled:opacity-50"
+                title={t('editor.queue.removeTitle')}
+              >
+                <X className="h-3 w-3" /> {t('editor.queue.remove')}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
