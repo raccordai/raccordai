@@ -236,7 +236,7 @@ appends the identity sentence to each prompt, in ONE undo step:
     the canvas rather than adding a second one.
   - It is IDEMPOTENT. Calling it twice reports the shots in "alreadyCast" with the alias they
     already answer to; it never double-wires and never appends a second sentence.
-  - It skips rather than overruns: a shot whose reference handle is full (Seedance 2: 9 images), or
+  - It skips rather than overruns: a shot whose reference handle is full (Seedance 2.0: 9 images, 2.5: 30), or
     whose model has no reference input at all (Seedance 1.5, Grok — there a role stays consistent
     by re-anchoring every shot on the same clean still), comes back in "skipped" with a reason.
   - Default targets are the video's shots. Name nodeIds explicitly to cast onto a still — a
@@ -347,7 +347,7 @@ last one costs generation time.
    them to the user before proposing it:
      - the batch SERIALIZES — shot N cannot start before N-1 has settled;
      - re-rolling a shot invalidates every shot chained after it;
-     - the handle has a budget (Seedance 2: 3 files, 15 s combined) — link_shots skips the links
+     - the handle has a budget (Seedance 2.0: 3 files / 15 s combined, 2.5: 10 files / 30 s) — link_shots skips the links
        that would overrun it rather than sending a run the provider will refuse.
    Reach for it on the cuts that matter (a continuous action across two clips, a character seen
    twice in a row), not on every pair of a long sequence.
@@ -359,7 +359,9 @@ the seam pops — warping faces, sliding backgrounds, a visible hitch. Between s
 instead of becoming a frame.
 
 SHOT LENGTH, before any of this: every video model has a floor (docs "model:<id>" prints the
-allowed range — Seedance 2 refuses anything under 4 s). A script beat shorter than the floor is
+allowed range — Seedance 2 refuses anything under 4 s) and a ceiling (Seedance 2.0 tops out at
+15 s; Seedance 2.5 reaches 30 s, so a whole 2-3-shot scene can be ONE generation there — but ~3
+cuts per generation is still the consistency limit). A script beat shorter than the floor is
 MERGED with its neighbour, or covered by a longer shot that contains it. Never round it down into
 a clip the API refuses, and never silently stretch every 2-3 s beat to 4 s without saying what it
 does to the total: seven 4 s shots is a 28 s film, not the 20 s the script asked for. State the

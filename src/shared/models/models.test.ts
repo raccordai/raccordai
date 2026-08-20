@@ -308,7 +308,12 @@ describe('buildPayload shapes', () => {
 })
 
 describe('seedance 2 family', () => {
-  const FAMILY = ['bytedance/seedance-2', 'bytedance/seedance-2-fast', 'bytedance/seedance-2-mini']
+  const FAMILY = [
+    'bytedance/seedance-2',
+    'bytedance/seedance-2-fast',
+    'bytedance/seedance-2-mini',
+    'bytedance/seedance-2-5'
+  ]
 
   for (const id of FAMILY) {
     it(`${id} declares first/last frame handles as single-connection frame anchors`, () => {
@@ -341,7 +346,7 @@ describe('seedance 2 family', () => {
     })
   }
 
-  it('resolution tiers match kie.ai: mini/fast cap at 720p, seedance-2 reaches 4k', () => {
+  it('resolution tiers match kie.ai: mini/fast cap at 720p, 2.5 at 1080p, seedance-2 reaches 4k', () => {
     const full = getModelOrThrow('bytedance/seedance-2')
     expect(full.paramsSchema.safeParse({ resolution: '4k' }).success).toBe(true)
     for (const id of ['bytedance/seedance-2-fast', 'bytedance/seedance-2-mini']) {
@@ -349,6 +354,49 @@ describe('seedance 2 family', () => {
       expect(model.paramsSchema.safeParse({ resolution: '1080p' }).success).toBe(false)
       expect(model.paramsSchema.safeParse({ resolution: '720p' }).success).toBe(true)
     }
+    const v25 = getModelOrThrow('bytedance/seedance-2-5')
+    expect(v25.paramsSchema.safeParse({ resolution: '1080p' }).success).toBe(true)
+    expect(v25.paramsSchema.safeParse({ resolution: '4k' }).success).toBe(false)
+  })
+
+  it('2.5 spans 4-30 s, pins mp4 output and never sends return_last_frame', () => {
+    const model = getModelOrThrow('bytedance/seedance-2-5')
+    expect(model.paramsSchema.safeParse({ duration: 30 }).success).toBe(true)
+    expect(model.paramsSchema.safeParse({ duration: 31 }).success).toBe(false)
+    expect(model.paramsSchema.safeParse({ duration: 3 }).success).toBe(false)
+    // duration=-1 (API auto-length) is deliberately not exposed — the timeline
+    // and the credit estimate need a declared duration.
+    expect(model.paramsSchema.safeParse({ duration: -1 }).success).toBe(false)
+    const params = model.paramsSchema.parse({ prompt: 'a cat', duration: 30 })
+    const payload = model.buildPayload({ params, inputs: {} })
+    expect(payload).toMatchObject({ duration: 30, output_format: 'mp4' })
+    expect(payload).not.toHaveProperty('return_last_frame')
+  })
+
+  it('2.5 widens the reference budget (30 images, 10 videos/audios, 30 s combined)', () => {
+    const model = getModelOrThrow('bytedance/seedance-2-5')
+    const images = model.inputs.find((i) => i.key === 'reference_image_urls')
+    const videos = model.inputs.find((i) => i.key === 'reference_video_urls')
+    const audios = model.inputs.find((i) => i.key === 'reference_audio_urls')
+    expect(images?.maxCount).toBe(30)
+    expect(videos?.maxCount).toBe(10)
+    expect(videos?.maxTotalSeconds).toBe(30)
+    expect(audios?.maxCount).toBe(10)
+    expect(audios?.maxTotalSeconds).toBe(30)
+  })
+
+  it('each generation gets its own prompt guide budgets (2.0 unchanged, 2.5 widened)', () => {
+    const v20 = getModelOrThrow('bytedance/seedance-2-fast')
+    const v25 = getModelOrThrow('bytedance/seedance-2-5')
+    expect(v20.promptGuide).toContain('@Image1-@Image9')
+    expect(v20.promptGuide).toContain('≤12 files total')
+    expect(v25.promptGuide).toContain('@Image1-@Image30')
+    expect(v25.promptGuide).toContain('@Video1-@Video10')
+    expect(v25.promptGuide).toContain('LONG TAKES')
+    expect(v25.promptGuide).not.toContain('≤12 files total')
+    // The handle declarations mirror the guide's budgets — same source of truth.
+    const budget = v25.inputs.find((i) => i.key === 'reference_video_urls')
+    expect(v25.promptGuide).toContain(`≤${budget!.maxTotalSeconds} s total`)
   })
 })
 

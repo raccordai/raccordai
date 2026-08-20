@@ -4,6 +4,7 @@ import { gptImage2I2I } from './gpt-image-2-i2i'
 import { nanoBananaPro } from './nano-banana-pro'
 import { nanoBanana2 } from './nano-banana-2'
 import { nanoBanana2Lite } from './nano-banana-2-lite'
+import { seedance25 } from './seedance-2-5'
 import { seedance2 } from './seedance-2'
 import { seedance2Fast } from './seedance-2-fast'
 import { seedance2Mini } from './seedance-2-mini'
@@ -29,6 +30,7 @@ export const MODELS: ModelDefinition[] = [
   nanoBananaPro,
   nanoBanana2,
   nanoBanana2Lite,
+  seedance25,
   seedance2,
   seedance2Fast,
   seedance2Mini,

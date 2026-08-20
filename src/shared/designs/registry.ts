@@ -556,8 +556,13 @@ const F = RECIPE_FIELDS
 const IMAGE_T2I = 'gpt-image-2-text-to-image'
 const IMAGE_I2I = 'gpt-image-2-image-to-image'
 const SHOT_MODEL = 'bytedance/seedance-2-fast'
-/** Seedance 2 tiers share one schema and one @ reference system. */
-const SEEDANCE2 = ['bytedance/seedance-2-fast', 'bytedance/seedance-2', 'bytedance/seedance-2-mini']
+/** Seedance 2.x tiers (2.0 + 2.5) share one schema and one @ reference system. */
+const SEEDANCE2 = [
+  'bytedance/seedance-2-fast',
+  'bytedance/seedance-2',
+  'bytedance/seedance-2-mini',
+  'bytedance/seedance-2-5'
+]
 
 /** The two image modes every reference recipe offers, unless it needs a source. */
 const imageModes: RecipeMode[] = [
@@ -1383,8 +1388,8 @@ export function getRecipeMode(recipe: Recipe, modeId?: string): RecipeMode | und
  * The models offered for a given mode: its own, plus the supported models that
  * are not another mode's model and can actually carry the mode's source handle.
  * A design recipe switches model by switching mode, so it offers exactly one; a
- * shot preset reads the same across the Seedance 2 tiers, so it offers all
- * three. The form, the creation service and the registry test share this rule.
+ * shot preset reads the same across the Seedance 2.x tiers, so it offers them
+ * all. The form, the creation service and the registry test share this rule.
  */
 export function recipeModelChoices(recipe: Recipe, mode: RecipeMode): string[] {
   const modeModels = new Set(recipe.modes.map((m) => m.modelId))

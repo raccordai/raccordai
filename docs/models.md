@@ -110,8 +110,8 @@ before the spend, `list_models` and `docs "model:<id>"` publish the range so an
 agent never plans a clip the API refuses, and `describeParamsError` turns a run
 failure into "Duration (s) must be between 4 and 15" instead of a zod dump.
 Same idea for handles: `maxCount` bounds the connections and `maxTotalSeconds`
-declares a combined-length budget (Seedance 2: 15 s of reference video), which
-the lint checks against the sources' declared durations. A prompt
+declares a combined-length budget (Seedance 2.0: 15 s of reference video,
+2.5: 30 s), which the lint checks against the sources' declared durations. A prompt
 that is required at run time still gets `.default('')` + a UI default of `''`
 — use `.min(1)` so the run fails validation with a clear message instead of
 burning credits (see `gpt-image-2-t2i.ts`).
@@ -121,10 +121,10 @@ burning credits (see `gpt-image-2-t2i.ts`).
 Video models take images in one of two modes, and confusing them is the #1
 workflow bug (a storyboard visibly leaking into a clip's opening frames):
 
-| Mode             | Models/handles                                                                                              | Behavior                                                                                                                           | What to wire                                                                |
-| ---------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| **Frame anchor** | seedance-1.5-pro `input_urls`, grok `image_urls`, seedance-2/-fast/-mini `first_frame_url`+`last_frame_url` | The image **appears in the video** (first frame, or first+last)                                                                    | Clean scene stills and hero shots — **never** a previous clip's `lastFrame` |
-| **Reference**    | seedance-2/-fast/-mini `reference_image_urls` (+video/audio)                                                | The source **guides** identity/style/motion, never shown — unless the prompt assigns a frame role (`"@Image1 as the first frame"`) | Character sheets, storyboards, style boards, camera-movement videos         |
+| Mode             | Models/handles                                                                                                   | Behavior                                                                                                                           | What to wire                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **Frame anchor** | seedance-1.5-pro `input_urls`, grok `image_urls`, seedance-2/-fast/-mini/-2-5 `first_frame_url`+`last_frame_url` | The image **appears in the video** (first frame, or first+last)                                                                    | Clean scene stills and hero shots — **never** a previous clip's `lastFrame` |
+| **Reference**    | seedance-2/-fast/-mini/-2-5 `reference_image_urls` (+video/audio)                                                | The source **guides** identity/style/motion, never shown — unless the prompt assigns a frame role (`"@Image1 as the first frame"`) | Character sheets, storyboards, style boards, camera-movement videos         |
 
 On the Seedance 2.x family, kie.ai documents **three mutually exclusive modes
 per run**: first frame only, first + last frame, and multimodal @ references.

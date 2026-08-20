@@ -52,6 +52,21 @@ describe('resolveDraftRun', () => {
     )
   })
 
+  it('seedance-2-5 drafts to itself at 480p, so 30 s durations survive draft mode', () => {
+    const sub = resolveDraftRun('bytedance/seedance-2-5', {
+      prompt: 'x',
+      resolution: '1080p',
+      duration: 30
+    })
+    expect(sub!.modelId).toBe('bytedance/seedance-2-5')
+    expect(sub!.params.resolution).toBe('480p')
+    expect(sub!.params.duration).toBe(30)
+    // Already at draft cost → never stamped draft.
+    expect(
+      resolveDraftRun('bytedance/seedance-2-5', { prompt: 'x', resolution: '480p' })
+    ).toBeNull()
+  })
+
   it('carries marker params through untouched (stripped later by the target schema)', () => {
     const sub = resolveDraftRun('nano-banana-pro', {
       prompt: 'x',

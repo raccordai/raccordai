@@ -1,12 +1,17 @@
 /**
- * Shared prompting knowledge for the Seedance 2.0 family (seedance-2,
- * seedance-2-fast, seedance-2-mini): identical @-reference system, prompt
- * syntax and pitfalls — the tiers only differ in speed and resolution.
+ * Shared prompting knowledge for the Seedance 2.x family — the 2.0 tiers
+ * (seedance-2, seedance-2-fast, seedance-2-mini) and seedance-2-5: identical
+ * @-reference system, prompt syntax and pitfalls. What changes per generation
+ * is the BUDGET (slots, per-file and combined durations) and the duration
+ * ceiling, so the guide is built from one template parameterized by
+ * `Seedance2ReferenceLimits` — the numbers can never drift between tiers and
+ * doctrine text stays single-source.
  *
  * Distilled from ByteDance's official Seedance 2.0 prompt guide
  * (BytePlus/Volcengine doc 2222480) and the "Top 10 Seedance 2.0 Tricks"
- * e-book (Framer), cross-checked with kie.ai docs. Notably: the official
- * guide flags exact timestamps as UNSTABLE — shot-numbered structure is the
+ * e-book (Framer), cross-checked with kie.ai docs (2.5 limits from
+ * docs.kie.ai/market/bytedance/seedance-2.5). Notably: the official guide
+ * flags exact timestamps as UNSTABLE — shot-numbered structure is the
  * supported long-clip syntax.
  */
 import { TRANSITION_CONTRACT } from '../shotContinuity'
@@ -21,11 +26,92 @@ import { TRANSITION_CONTRACT } from '../shotContinuity'
 export const ANTI_GRID_GUARD =
   'Render one single full-frame shot: no storyboard grid of any kind (no 3x3 grid, no 2x2 grid), no panel borders, no panel numbers, no split-screen or comic-panel layout.'
 
-export const SEEDANCE2_PROMPT_GUIDE = `READ FIRST: the app's prompting doctrine — docs "doctrine" (§6.9,
+/**
+ * The per-generation API budgets that vary inside the Seedance 2.x family —
+ * kie.ai-documented bounds, mirrored on the model files' handle declarations
+ * (`maxCount`/`maxTotalSeconds`). Keep the two in sync.
+ */
+export interface Seedance2ReferenceLimits {
+  generation: '2.0' | '2.5'
+  imageSlots: number
+  videoSlots: number
+  audioSlots: number
+  /** Per-file reference video/audio length window, e.g. '2-15 s'. */
+  videoSecondsEach: string
+  videoTotalSeconds: number
+  videoMaxMb: number
+  audioSecondsEach: string
+  audioTotalSeconds: number
+  /** Output duration window, e.g. '4-15 s'. */
+  outputSeconds: string
+  /** 2.0 caps combined uploads at 12 files; 2.5 documents no combined cap. */
+  combinedFilesCap?: number
+}
+
+export const SEEDANCE20_LIMITS: Seedance2ReferenceLimits = {
+  generation: '2.0',
+  imageSlots: 9,
+  videoSlots: 3,
+  audioSlots: 3,
+  videoSecondsEach: '2-15 s',
+  videoTotalSeconds: 15,
+  videoMaxMb: 50,
+  audioSecondsEach: '2-15 s',
+  audioTotalSeconds: 15,
+  outputSeconds: '4-15 s',
+  combinedFilesCap: 12
+}
+
+export const SEEDANCE25_LIMITS: Seedance2ReferenceLimits = {
+  generation: '2.5',
+  imageSlots: 30,
+  videoSlots: 10,
+  audioSlots: 10,
+  videoSecondsEach: '2-30 s',
+  videoTotalSeconds: 30,
+  videoMaxMb: 200,
+  audioSecondsEach: '2-30 s',
+  audioTotalSeconds: 30,
+  outputSeconds: '4-30 s'
+}
+
+function buildSeedance2Guide(l: Seedance2ReferenceLimits): string {
+  const filesCap = l.combinedFilesCap
+    ? `, ≤${l.combinedFilesCap} files total`
+    : ' — no combined-files cap documented, only the per-handle maxima'
+  const longTakes =
+    l.generation === '2.5'
+      ? `
+
+LONG TAKES & DURATION (2.5 only — the headline difference):
+  - Output duration is ${l.outputSeconds} per generation: a whole 2-3-shot scene, or a single
+    unbroken 30 s take, fits in ONE run. This removes most of the reasons to stitch clips —
+    prefer one well-structured 20-30 s generation over three chained 8 s ones when the beats
+    belong to the same scene.
+  - The consistency ceiling has not moved: ~3 cuts per generation stay coherent. A 30 s run is
+    either ONE continuous take (a oner: state "one continuous shot, no cuts" and give the camera
+    a full path to travel) or 2-3 numbered shots — not 6.
+  - Long generations amplify prompt structure: give the timeline beats in order (numbered shots
+    or "[cut]" lines), each with its own camera mode, and state what the FINAL frame is — on a
+    30 s run an unspecified ending drifts.
+  - The API's duration=-1 (auto-length) is NOT exposed in this app: the timeline, the render and
+    the credit estimate all need a declared duration.`
+      : ''
+  const costTrick =
+    l.generation === '2.5'
+      ? `  - The 2-second black-video billing trick reported on 2.0 (below) is UNVERIFIED on 2.5 —
+    do not rely on it here.
+  - Community-reported on 2.0: a 2-second BLACK, SILENT video connected as a @Video reference
+    lowers kie.ai billing by 20-35%. Unofficial and may be patched.`
+      : `  - A 2-second BLACK, SILENT video connected as a @Video reference reportedly lowers kie.ai billing
+    by 20-35% (bigger discount on pricier runs). Unofficial and may be patched; never spend a
+    reference slot on it that a real reference needs.`
+
+  return `READ FIRST: the app's prompting doctrine — docs "doctrine" (§6.9,
   \`src/shared/prompting/seedance.ts\`). It governs HOW a clip prompt is shaped: the opening capture
   declaration (added from the video's style at payload time), the camera's ontology (a body or a
   ghost, never both), the bracketed timeline with one camera mode per beat, imperfection, and the
-  closing booster stack. What follows is the MODEL-SPECIFIC half — Seedance 2.0's own syntax.
+  closing booster stack. What follows is the MODEL-SPECIFIC half — Seedance ${l.generation}'s own syntax.
 
 ANATOMY (official ByteDance order):
   Precise subject + action detail + scene/environment + lighting & color tone + camera movement
@@ -39,19 +125,25 @@ MODEL TIERS (same syntax — pick by job):
     an external upscaler beats paying for native 1080p.
   - Seedance 2: the only tier with 1080p/4k — live-action realism and final masters that must not
     go through an upscaler.
+  - Seedance 2.5: the newest generation — 4-30 s per run (long takes, whole scenes in one
+    generation), stronger motion/physics, and a much larger reference budget (30 images,
+    10 videos, 10 audios, 30 s of reference video). Caps at 1080p: a 4k master still means
+    Seedance 2, or an external upscaler.
+${longTakes}
 
-@ REFERENCES (the core of Seedance 2.0 — every connected source needs an explicit ROLE):
-  - Slots: @Image1-@Image9, @Video1-@Video3, @Audio1-@Audio3 (numbered by connection order, ≤12 files total).
+@ REFERENCES (the core of Seedance 2.x — every connected source needs an explicit ROLE):
+  - Slots: @Image1-@Image${l.imageSlots}, @Video1-@Video${l.videoSlots}, @Audio1-@Audio${l.audioSlots} (numbered by connection order${filesCap}).
   - Media limits (kie.ai): images jpeg/png/webp/bmp/tiff/gif, aspect ratio 0.4-2.5, 300-6000 px,
-    ≤30 MB each. Videos mp4/mov, 480p or 720p, 2-15 s each, ≤3 files and ≤15 s total. Audio wav/mp3,
-    2-15 s each, ≤3 files and ≤15 s total.
+    ≤30 MB each. Videos mp4/mov, 480p or 720p, ${l.videoSecondsEach} each, ≤${l.videoSlots} files and ≤${l.videoTotalSeconds} s total,
+    ≤${l.videoMaxMb} MB each. Audio wav/mp3, ${l.audioSecondsEach} each, ≤${l.audioSlots} files and ≤${l.audioTotalSeconds} s total.
   - Assign roles verbatim: "@Image1 as the first frame", "@Image2 as the last frame",
     "reference @Video1 for camera movement and pacing", "use @Audio1 as background music",
     "Replace the woman in @Video1 with @Image1", "Extend @Video1 by 5 seconds".
   - Subject binding: define each subject ONCE with 2-3 stable traits ("the woman in the red dress from
     @Image1"), then reuse the same @ImageN on every mention. Contradictory traits cause identity drift.
   - Budget: 4-5 references is the sweet spot (1-2 character images, 1 scene, 1 camera video, 1 audio);
-    more causes style collision and subject-recognition blur.
+    more causes style collision and subject-recognition blur. The slot ceiling is an API bound,
+    not a recommendation — a pile of ${l.imageSlots} references degrades, it does not enrich.
   - Omni-reference recipe: build the scene from THREE separate labeled references — environment
     (@Image1), character(s) (@Image2…), prop (@Image3) — then describe the scene with the tags.
     Explicit role-per-reference beats an unlabeled pile of images.
@@ -115,7 +207,7 @@ TRANSITIONS (shared references are NOT enough — this is what makes two clips o
     expensive — it serializes generation and a re-roll invalidates the shots after it. Role:
     "@Video1 is the PREVIOUS shot — match its lighting, grade, wardrobe, set and character
     appearance; do NOT continue its action or camera: this shot is a CUT to a new setup." Mind the
-    handle budget (3 files, 15s combined). Use it on the cuts that matter, not on every pair.
+    handle budget (${l.videoSlots} files, ${l.videoTotalSeconds}s combined). Use it on the cuts that matter, not on every pair.
   - SHOT LENGTH: the API floor is 4s. A script beat shorter than that is MERGED with its
     neighbour or covered by a longer shot — never rounded down, and never silently stretched
     without saying what it does to the film's total length.
@@ -171,9 +263,7 @@ PITFALLS (official troubleshooting):
   - Adjective stacking ("stunning, gorgeous") does nothing — spend words on verbs and physics.
 
 COST (kie.ai-specific, community-reported — verify on the account before relying on it):
-  - A 2-second BLACK, SILENT video connected as a @Video reference reportedly lowers kie.ai billing
-    by 20-35% (bigger discount on pricier runs). Unofficial and may be patched; never spend a
-    reference slot on it that a real reference needs.
+${costTrick}
   - For animation, iterate on Fast/Mini at 720p and upscale rather than paying for native 1080p.
 
 FULL EXAMPLE (official pattern):
@@ -182,3 +272,10 @@ FULL EXAMPLE (official pattern):
   Shot 2: Cut to indoor medium shot, roommates look up, one asks: 'How did the exam go?', camera pans.
   Shot 3: Close-up, she lowers her head, then looks up laughing: 'Just kidding!', camera pulls back wide.
   HD cinematic documentary style, warm tone, soft lighting; faces stable, smooth motion, no subtitles."`
+}
+
+/** The 2.0-family guide (seedance-2, seedance-2-fast, seedance-2-mini). */
+export const SEEDANCE2_PROMPT_GUIDE = buildSeedance2Guide(SEEDANCE20_LIMITS)
+
+/** The seedance-2-5 guide — same doctrine, 2.5 budgets + the long-take section. */
+export const SEEDANCE25_PROMPT_GUIDE = buildSeedance2Guide(SEEDANCE25_LIMITS)
