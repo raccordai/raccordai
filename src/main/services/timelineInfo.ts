@@ -43,7 +43,7 @@ async function probeDurationSeconds(path: string): Promise<number | null> {
 }
 
 /** Local file of the node's best successful output (never downloads). */
-function localMediaPath(node: GraphNode): string | null {
+export function localMediaPath(node: GraphNode): string | null {
   const rows = listGenerationsForNode(node.id)
   const best = bestGeneration(
     node,

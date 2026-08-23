@@ -507,3 +507,25 @@ export function clipResolution(node: GraphNode): string | undefined {
   if (typeof a === 'string') return a
   return undefined
 }
+
+/**
+ * Locates the timeline entry under a FINAL-timeline timecode and maps it back
+ * to MEDIA time (trim window + speed applied) — what a frame grab must seek.
+ * The film's exact end resolves to the last entry's final frame; outside the
+ * film → null. Media time is clamped inside the entry's trim window.
+ */
+export function entryAtTimecode(
+  entries: ResolvedTimelineEntry[],
+  atSec: number
+): { entry: ResolvedTimelineEntry; mediaSec: number } | null {
+  if (atSec < 0) return null
+  const last = entries.at(-1)
+  const entry =
+    entries.find((e) => atSec >= e.startSec && atSec < e.endSec) ??
+    (last && atSec <= last.endSec + 1e-6 ? last : null)
+  if (!entry) return null
+  const along = Math.max(0, Math.min(atSec, entry.endSec) - entry.startSec)
+  const mediaSec = entry.still ? 0 : entry.trimStartSec + along * entry.speed
+  const mediaEnd = entry.trimEndSec ?? Number.POSITIVE_INFINITY
+  return { entry, mediaSec: Math.min(mediaSec, Math.max(entry.trimStartSec, mediaEnd - 0.05)) }
+}

@@ -56,8 +56,12 @@ import {
 } from '../services/feedback'
 import { getTimelineInfo } from '../services/timelineInfo'
 import { waitForGenerations } from '../services/generationWait'
-import { generationMediaPreview } from '../services/mediaPreview'
 
+import {
+  generationMediaPreview,
+  timelineContactSheet,
+  timelineFrame
+} from '../services/mediaPreview'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -578,6 +582,33 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'video',
     risk: 'read',
     execute: ({ videoId }) => getTimelineInfo(String(videoId))
+  },
+  {
+    name: 'get_frame_at',
+    description:
+      'SEE the final timeline at a timecode: returns the frame under at_sec (trims, speed and transition overlaps applied) as inline image content, plus which clip it lands in. Use it to check a cut, a text/sticker placement or a feedback item’s timecode.',
+    inputSchema: obj({ videoId: str(), at_sec: { type: 'number' } }, ['videoId', 'at_sec']),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId, at_sec }) => timelineFrame(String(videoId), Number(at_sec))
+  },
+  {
+    name: 'get_timeline_contact_sheet',
+    description:
+      'Watch the film at a glance: one small frame per timeline entry (its midpoint, in cut order) as inline images, with each entry’s timecodes in the text part. The cheapest way to spot a broken shot, a wrong order or a continuity break before rendering. Entries without local media are listed as missing.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        max_entries: { type: 'number', description: 'Frames to include (default 12, max 16).' }
+      },
+      ['videoId']
+    ),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId, max_entries }) =>
+      timelineContactSheet(String(videoId), {
+        ...(typeof max_entries === 'number' ? { maxEntries: max_entries } : {})
+      })
   },
   {
     name: 'write_scenario',

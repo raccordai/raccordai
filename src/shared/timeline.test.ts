@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { GraphNode } from './ipc/contracts'
+import type { ResolvedTimelineEntry } from './timeline'
 import {
   CROSSFADE_SECONDS,
   DEFAULT_CLIP_SECONDS,
   DEFAULT_STILL_SECONDS,
   audioLaneStarts,
+  entryAtTimecode,
   bestGeneration,
   clipDuration,
   clipResolution,
@@ -407,5 +409,56 @@ describe('clipDuration / clipResolution', () => {
     expect(clipResolution(node({ params: { resolution: '720p' } }))).toBe('720p')
     expect(clipResolution(node({ params: { aspect_ratio: '9:16' } }))).toBe('9:16')
     expect(clipResolution(node({ params: {} }))).toBeUndefined()
+  })
+})
+
+describe('entryAtTimecode', () => {
+  const entry = (over: Partial<ResolvedTimelineEntry>): ResolvedTimelineEntry => ({
+    nodeId: 'n1',
+    nodeKey: 'node_1',
+    label: null,
+    modelId: 'bytedance/seedance-2-fast',
+    segmentIndex: 0,
+    still: false,
+    startSec: 0,
+    endSec: 5,
+    durationSec: 5,
+    trimStartSec: 0,
+    trimEndSec: null,
+    speed: 1,
+    transitionAfter: null,
+    transitionSec: 0,
+    durationSource: 'measured',
+    ...over
+  })
+
+  it('maps a final timecode into the right entry and media time', () => {
+    const entries = [
+      entry({ nodeId: 'a', startSec: 0, endSec: 4, durationSec: 4, trimStartSec: 1 }),
+      entry({ nodeId: 'b', startSec: 4, endSec: 9, durationSec: 5 })
+    ]
+    expect(entryAtTimecode(entries, 2)).toMatchObject({
+      entry: { nodeId: 'a' },
+      mediaSec: 3
+    })
+    expect(entryAtTimecode(entries, 4)).toMatchObject({ entry: { nodeId: 'b' }, mediaSec: 0 })
+  })
+
+  it('applies speed and clamps inside the trim window', () => {
+    const entries = [
+      entry({ trimStartSec: 2, trimEndSec: 6, speed: 2, startSec: 0, endSec: 2, durationSec: 2 })
+    ]
+    // 1.5s of timeline at 2x = 3s of media past the 2s in-point.
+    expect(entryAtTimecode(entries, 1.5)?.mediaSec).toBeCloseTo(5)
+    // The exact end clamps just short of the out-point instead of past it.
+    expect(entryAtTimecode(entries, 2)?.mediaSec).toBeCloseTo(5.95)
+  })
+
+  it('resolves stills to media time 0 and rejects timecodes outside the film', () => {
+    const entries = [entry({ still: true, startSec: 0, endSec: 3, durationSec: 3 })]
+    expect(entryAtTimecode(entries, 1)).toMatchObject({ mediaSec: 0 })
+    expect(entryAtTimecode(entries, -1)).toBeNull()
+    expect(entryAtTimecode(entries, 3.5)).toBeNull()
+    expect(entryAtTimecode([], 0)).toBeNull()
   })
 })
