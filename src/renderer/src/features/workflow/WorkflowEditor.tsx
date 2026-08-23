@@ -58,6 +58,7 @@ import { useLastFrameExtractor } from './useLastFrameExtractor'
 import { graphKeys, useGraph, useIpcMutation, useProjectAssets } from './data'
 import { useNodeCreation } from './useNodeCreation'
 import { MODELS, getModel } from '@shared/models'
+import { collectTimelineClips } from '@shared/timeline'
 import { getDesignRecipe } from '@shared/designs/registry'
 
 const NODE_TYPES = {
@@ -226,6 +227,20 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
    * making `serverNodes` re-build every time the closure is recreated.
    */
   const handleRunNodeRef = useRef<((nodeId: string) => Promise<void>) | null>(null)
+  /**
+   * Canvas → timeline seek channel (mirror of the timeline's `onFocusNode`):
+   * TimelineV2 registers its seek-to-node handler here, and a video node's
+   * "see in timeline" button invokes it through `data.onJumpToTimeline`.
+   */
+  const timelineJumpRef = useRef<((nodeId: string) => void) | null>(null)
+
+  // Which nodes actually hold a clip on the timeline — the SHARED resolution
+  // (collectTimelineClips: video nodes + explicitly placed stills), so the
+  // jump button only appears on nodes the timeline will land on.
+  const timelineNodeIds = useMemo(
+    () => new Set(collectTimelineClips(graph?.nodes ?? []).map((n) => n.id)),
+    [graph]
+  )
 
   // Build the store-derived node data once per server update.
   // Belt-and-suspenders: we wire BOTH `onNodeClick` (RF canonical path) AND a
@@ -240,10 +255,14 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
       data: {
         node: n,
         onOpenPanel: () => setSelectedNodeId(n.id),
-        onRun: () => handleRunNodeRef.current?.(n.id)
+        onRun: () => handleRunNodeRef.current?.(n.id),
+        // Only when the node holds a timeline clip — absent = no jump button.
+        onJumpToTimeline: timelineNodeIds.has(n.id)
+          ? () => timelineJumpRef.current?.(n.id)
+          : undefined
       }
     })) satisfies Node[]
-  }, [graph])
+  }, [graph, timelineNodeIds])
 
   const serverEdges = useMemo(() => {
     if (!graph) return []
@@ -1003,6 +1022,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
           graph={graphValue}
           videoId={videoId}
           onFocusNode={focusNode}
+          jumpToNodeRef={timelineJumpRef}
           collapsed={timelineCollapsed}
           setCollapsed={setTimelineCollapsed}
         />

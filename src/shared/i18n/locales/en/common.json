@@ -829,6 +829,7 @@
     "replaceConfirm": "Replace the existing nodes, or merge the import into the current graph?",
     "deleteNodeConfirm": "Delete this node and all its generations?",
     "copyNodeName": "Copy the node name",
+    "jumpToTimelineClip": "See this clip in the timeline",
     "estimatedCost": "~{{credits}} credits (estimate)",
     "historyPanel": {
       "title": "History",

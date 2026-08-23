@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Clock,
   Copy,
+  Film,
   RefreshCw,
   Replace,
   Trash2,
@@ -52,6 +53,12 @@ export type ModelNodeData = {
   onOpenPanel?: () => void
   /** Smart run: auto-runs missing upstream dependencies in topo order, then this node. */
   onRun?: () => void
+  /**
+   * Seeks the timeline preview to this node's clip. Present ONLY when the node
+   * holds a timeline slot (shared collectTimelineClips membership) — absent,
+   * the jump button doesn't render.
+   */
+  onJumpToTimeline?: () => void
 }
 
 export type ModelRFNode = RFNode<ModelNodeData, 'modelNode'>
@@ -312,6 +319,20 @@ export function ModelNode({ data, selected }: NodeProps<ModelRFNode>) {
                 <X className="h-3.5 w-3.5" />
               </button>
             </>
+          )}
+          {data.onJumpToTimeline && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                data.onJumpToTimeline?.()
+              }}
+              className={`flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition hover:bg-accent/10 hover:text-accent ${
+                selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              }`}
+              title={t('editor.jumpToTimelineClip')}
+            >
+              <Film className="h-3.5 w-3.5" />
+            </button>
           )}
           <ReplaceModelMenu node={node} model={model} />
           <button

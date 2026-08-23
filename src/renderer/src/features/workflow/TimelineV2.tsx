@@ -29,6 +29,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -706,12 +707,19 @@ export function TimelineV2({
   graph,
   videoId,
   onFocusNode,
+  jumpToNodeRef,
   collapsed,
   setCollapsed
 }: {
   graph: WorkflowGraph
   videoId: string
   onFocusNode?: (nodeId: string) => void
+  /**
+   * Canvas → timeline command channel (mirror of `onFocusNode`): the editor
+   * holds the ref, the timeline registers its seek-to-node handler in it —
+   * same latest-handler-in-a-ref pattern as the editor's handleRunNodeRef.
+   */
+  jumpToNodeRef?: MutableRefObject<((nodeId: string) => void) | null>
   collapsed: boolean
   setCollapsed: (v: boolean) => void
 }) {
@@ -1252,6 +1260,23 @@ export function TimelineV2({
     const r = button.getBoundingClientRect()
     openNotePopover({ x: r.left + r.width / 2, y: r.top - 6 })
   })
+
+  // Seek-to-node handler for the canvas (a video node's "see in timeline"
+  // button): jump the playhead to the node's FIRST entry through the engine's
+  // own starts — the exact final-timeline resolution the preview clock plays
+  // (trims, speed and transition overlaps already applied). Registered above
+  // the collapsed early-return so a jump always lands, even while hidden.
+  const { seek, starts } = engine
+  useEffect(() => {
+    if (!jumpToNodeRef) return
+    jumpToNodeRef.current = (nodeId: string) => {
+      const idx = clips.findIndex((c) => c.node.id === nodeId)
+      if (idx >= 0) seek(starts[idx] ?? 0)
+    }
+    return () => {
+      jumpToNodeRef.current = null
+    }
+  }, [jumpToNodeRef, clips, seek, starts])
 
   /** Magnetic drag targets: every entry boundary (the playhead joins at drag time). */
   const snapTargets = useMemo(() => {

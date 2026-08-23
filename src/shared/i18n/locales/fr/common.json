@@ -829,6 +829,7 @@
     "replaceConfirm": "Remplacer les nœuds existants, ou fusionner l’import dans le graphe actuel ?",
     "deleteNodeConfirm": "Supprimer ce nœud et toutes ses générations ?",
     "copyNodeName": "Copier le nom du nœud",
+    "jumpToTimelineClip": "Voir ce clip dans la timeline",
     "estimatedCost": "~{{credits}} crédits (estimation)",
     "historyPanel": {
       "title": "Historique",
