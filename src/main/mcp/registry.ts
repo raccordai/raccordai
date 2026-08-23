@@ -64,6 +64,7 @@ import {
 } from '../services/mediaPreview'
 
 import { feedPreview, nicheThumbnails } from '../services/nicheVisuals'
+import { refineNodeImagePrompt } from '../services/ai'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -872,6 +873,18 @@ export const AGENT_TOOLS: AgentTool[] = [
       if (params !== undefined) graph.updateNodeParams(id, params)
       return { ok: true }
     }
+  },
+  {
+    name: 'refine_image_prompt',
+    description:
+      'Rewrite an image node’s prompt from what its current output actually shows: pass the adjustment ("fix the hands", "warmer light") and get back a full new prompt that keeps style, language and @references — then apply it with update_node. Uses the node’s selected output image; costs a small amount of credits.',
+    inputSchema: obj({ nodeId: str(), instruction: str('The adjustment to incorporate.') }, [
+      'nodeId',
+      'instruction'
+    ]),
+    scope: 'global',
+    risk: 'spending',
+    execute: ({ nodeId, instruction }) => refineNodeImagePrompt(String(nodeId), String(instruction))
   },
   {
     name: 'update_node_position',

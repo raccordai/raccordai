@@ -85,6 +85,7 @@ describe('AGENT_TOOLS registry', () => {
     expect(spending.sort()).toEqual([
       'finalize_video',
       'review_clip',
+      'refine_image_prompt',
       'review_generation',
       'run_batch',
       'run_node'

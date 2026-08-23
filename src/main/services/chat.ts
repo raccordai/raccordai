@@ -623,6 +623,8 @@ function creditSuffix(credits: number | null | undefined): string {
 /** Human-readable summary shown on an approval action card. */
 function describeAction(name: string, args: Record<string, unknown>): string {
   switch (name) {
+    case 'refine_image_prompt':
+      return 'Rewrite the prompt from the current output (small credit cost)'
     case 'run_node': {
       const nodeId = String(args['nodeId'] ?? '')
       const ref = graph.getNodeRef(nodeId)

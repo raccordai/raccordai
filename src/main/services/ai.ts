@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../db/client'
-import { assets, generations } from '../db/schema'
+import { assets, generations, nodes } from '../db/schema'
 import { mimeTypeFor } from '../media/files'
 import { kieClaudeMessage } from './kie'
+import { resolveSelectedOutputUrl } from './generations'
 
 /** Claude model used for prompt refinement (via kie.ai's Anthropic proxy). */
 const REFINE_MODEL = 'claude-opus-4-8'
@@ -63,4 +64,30 @@ export async function refineImagePrompt(args: {
     content: [imageBlockFor(args.imageUrl), { type: 'text', text: userText }]
   })
   return { prompt }
+}
+
+/**
+ * refine_image_prompt for agents: same rewrite as the IPC surface, addressed
+ * by NODE — the current prompt comes from the node's params and the image from
+ * its selected output, so the agent only supplies the adjustment.
+ */
+export async function refineNodeImagePrompt(
+  nodeId: string,
+  instruction: string
+): Promise<{ prompt: string }> {
+  const db = getDb()
+  const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
+  if (!node) throw new Error('Node not found')
+  const imageUrl = resolveSelectedOutputUrl(node, 'output')
+  if (!imageUrl) {
+    throw new Error(
+      'The node has no output image yet — run it first, or just edit the prompt with update_node.'
+    )
+  }
+  const prompt = (node.params as { prompt?: unknown } | null)?.prompt
+  return refineImagePrompt({
+    currentPrompt: typeof prompt === 'string' ? prompt : '',
+    imageUrl,
+    instruction
+  })
 }
