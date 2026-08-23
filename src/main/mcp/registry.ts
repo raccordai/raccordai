@@ -74,6 +74,8 @@ import { formatTranscript, type SpeechTranscript } from '@shared/speech'
 import * as scenarioGraph from '../services/scenarioGraph'
 import * as projects from '../services/projects'
 import { kieGetCredits } from '../services/kie'
+import { app } from 'electron'
+import { elevenLabsKeyStatus, kieApiKeyStatus, nicheKeysStatus } from '../services/settings'
 import * as renderService from '../services/render'
 import { finalizeVideo, planFinalize, startBatch, videoNodeTargets } from '../services/runBatch'
 import * as niches from '../services/niches'
@@ -257,6 +259,25 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'read',
     execute: async () => ({ credits: await kieGetCredits() })
+  },
+  {
+    name: 'get_app_status',
+    description:
+      'App health for agents: version, which integrations are configured (kie.ai, ElevenLabs, YouTube, DataForSEO — booleans only, never key values), the generation concurrency limit and the queue occupancy. Read it FIRST when runs fail unexpectedly — a missing key explains more than a stack trace.',
+    inputSchema: obj({}),
+    scope: 'global',
+    risk: 'read',
+    execute: () => {
+      const queue = queueState()
+      return {
+        appVersion: app.getVersion(),
+        kieConfigured: kieApiKeyStatus().configured,
+        elevenLabsConfigured: elevenLabsKeyStatus().configured,
+        ...nicheKeysStatus(),
+        maxConcurrentGenerations: queue.limit,
+        queue: { running: queue.running.length, queued: queue.queued.length }
+      }
+    }
   },
   {
     name: 'project_credits_usage',
