@@ -2,6 +2,7 @@ import { Captions } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   channelRatioSignal,
+  engagementRate,
   HIDDEN_SUBSCRIBERS,
   nicheRatio,
   ratioSignal,
@@ -85,6 +86,15 @@ export interface VideoRowData {
   channelRatio?: number | null
   /** Velocity in views/day (measured over snapshots, lifetime fallback). */
   viewsPerDay?: number | null
+  /** Engagement counts — null on rows tracked before they were persisted. */
+  likeCount?: number | null
+  commentCount?: number | null
+}
+
+/** "4.2%" — the row's engagement figure ((likes+comments)/views). */
+export function formatEngagement(rate: number): string {
+  const pct = rate * 100
+  return `${pct >= 10 ? Math.round(pct) : pct.toFixed(1)}%`
 }
 
 export function VideoRow({
@@ -98,6 +108,10 @@ export function VideoRow({
   trailing?: React.ReactNode
 }): React.JSX.Element {
   const { t } = useTranslation()
+  const engagement =
+    video.likeCount !== undefined || video.commentCount !== undefined
+      ? engagementRate(video.likeCount ?? null, video.commentCount ?? null, video.views)
+      : null
   return (
     <div className="flex items-center gap-3 border-b border-neutral-800/60 px-3 py-2 last:border-b-0">
       {video.thumbnail ? (
@@ -146,6 +160,14 @@ export function VideoRow({
           ))}
         {video.durationSeconds > 0 && (
           <span className="tabular-nums">{formatSeconds(video.durationSeconds)}</span>
+        )}
+        {engagement !== null && (
+          <span
+            className="hidden w-12 text-right tabular-nums text-neutral-500 md:inline"
+            title={t('niches.engagementTitle')}
+          >
+            {formatEngagement(engagement)}
+          </span>
         )}
         {video.viewsPerDay !== null && video.viewsPerDay !== undefined && (
           <span

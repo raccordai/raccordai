@@ -924,7 +924,9 @@ export function channelAggregates(nicheId: string): Record<string, ChannelAggreg
         videos.map((v) => ({
           views: v.views,
           durationSeconds: v.durationSeconds,
-          publishedAt: v.publishedAt ?? null
+          publishedAt: v.publishedAt ?? null,
+          likeCount: v.likeCount ?? null,
+          commentCount: v.commentCount ?? null
         }))
       )
     ])

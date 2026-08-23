@@ -72,6 +72,7 @@ import { finalizeVideo, planFinalize, startBatch, videoNodeTargets } from '../se
 import * as niches from '../services/niches'
 import { fetchSearchSuggestions } from '../services/youtubeApi'
 import {
+  analyzeSerpOpportunity,
   channelRatioSignal,
   combineSignals,
   nicheRatio,
@@ -2490,6 +2491,8 @@ export const AGENT_TOOLS: AgentTool[] = [
       })
       return {
         ...result,
+        /** The SERP landscape at a glance — approachable/contested/saturated. */
+        opportunity: analyzeSerpOpportunity(result.videos, new Date()),
         videos: result.videos.map((v) => {
           const ratio = nicheRatio(v.views, v.channelSubscribers)
           return {

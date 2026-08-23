@@ -727,12 +727,18 @@ THE HUNT (niche_keyword_search). DataForSEO scrapes the real YouTube SERP — na
 included via search_param presets: relevance, views, date, viewsThisYear, viewsMonthLong, and
 nicheHunt (sort by views + 4-20 min + this year — the good default). It is billed per 20 results;
 the YouTube enrichment behind it is nearly free (1 quota unit per 50 ids). Pass save=true to keep
-the hits in the niche (source "search", keyword recorded).
+the hits in the niche (source "search", keyword recorded). The result also carries "opportunity":
+the SERP landscape at a glance — tier approachable/contested/saturated from the competitive
+pressure (median views of the ranking videos + share of the page owned by ≥100k-sub channels),
+plus freshness (median age, share <90 days) and the dominant format (short <60 s / mid / long).
+Prefer approachable queries with real views for a new channel; a saturated page needs an angle
+the incumbents don't cover.
 
 THE ITERATION LOOP. (1) refresh_niche — fresh channel stats, latest uploads, updated view counts
 (free, do it at the start of a session). (2) fetch_niche_transcripts — captions of the tracked
 videos, most-viewed first. (3) Read: get_niche for per-channel aggregates (avg/median views, upload
-cadence), list_niche_videos for the scored list, get_niche_video for full description + transcript.
+cadence per month AND per week, engagement rate (likes+comments)/views, outlier count at ≥3× the
+channel's median), list_niche_videos for the scored list, get_niche_video for description + transcript.
 (4) Compare is_mine channels against the rest: which topics/titles/formats outperform, where the
 user's own videos sit against the niche median. (5) Write conclusions into the brief (update_niche).
 

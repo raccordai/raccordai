@@ -4,6 +4,7 @@ import { ChevronRight, Loader2, Plus, Search, Telescope } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  analyzeSerpOpportunity,
   DATAFORSEO_LOCATIONS,
   filterNicheVideos,
   NICHE_FILTER_LANGUAGES,
@@ -13,6 +14,7 @@ import {
 } from '@shared/niches'
 import type { NicheOverview } from '@shared/ipc/contracts'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
+import { OpportunitySummary } from '@renderer/features/niches/OpportunitySummary'
 import { compactNumber, VideoRow } from '@renderer/features/niches/VideoRow'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
@@ -199,6 +201,13 @@ function KeywordSearch({
 
   const setFilter = (patch: Partial<SearchFilters>): void => setFilters({ ...filters, ...patch })
 
+  // SERP landscape analysis over the FULL result set (the query's reality),
+  // not the filtered view — refining filters never moves the opportunity read.
+  const opportunity = useMemo(
+    () => (search.data ? analyzeSerpOpportunity(search.data.videos, new Date()) : null),
+    [search.data]
+  )
+
   return (
     <>
       <form
@@ -273,6 +282,7 @@ function KeywordSearch({
 
       {!search.isPending && search.data && (
         <>
+          {opportunity && <OpportunitySummary opportunity={opportunity} />}
           <div className="flex flex-wrap items-center gap-1.5">
             <select
               value={filters.format}
@@ -368,7 +378,9 @@ function KeywordSearch({
                     views: video.views,
                     durationSeconds: video.durationSeconds,
                     publishedAt: video.publishedAt,
-                    channelSubscribers: video.channelSubscribers
+                    channelSubscribers: video.channelSubscribers,
+                    likeCount: video.likeCount,
+                    commentCount: video.commentCount
                   }}
                   trailing={
                     trackedChannels.has(video.channelId) ? (

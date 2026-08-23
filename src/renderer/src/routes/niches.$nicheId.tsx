@@ -14,7 +14,12 @@ import type {
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { RoadmapSection } from '@renderer/features/niches/RoadmapSection'
 import { VoicePersonasSection } from '@renderer/features/niches/VoicePersonasSection'
-import { compactNumber, formatSubscribers, VideoRow } from '@renderer/features/niches/VideoRow'
+import {
+  compactNumber,
+  formatEngagement,
+  formatSubscribers,
+  VideoRow
+} from '@renderer/features/niches/VideoRow'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
 
@@ -352,6 +357,8 @@ function NicheDetailPage(): React.JSX.Element {
             </div>
           </>
         )}
+
+        <ChannelComparisonTable channels={channels} aggregates={aggregates} />
       </section>
 
       {/* ── Tracked videos ── */}
@@ -437,7 +444,9 @@ function NicheDetailPage(): React.JSX.Element {
                   channelSubscribers: video.channelSubscribers,
                   hasTranscript: video.hasTranscript,
                   channelRatio: video.channelRatio,
-                  viewsPerDay: video.viewsPerDay
+                  viewsPerDay: video.viewsPerDay,
+                  likeCount: video.likeCount,
+                  commentCount: video.commentCount
                 }}
                 onTranscript={setTranscriptOf}
               />
@@ -554,6 +563,122 @@ function ChannelCard({
             {t('niches.delete')}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The competitor comparison (SEOTube-style): one row per channel with the
+ * aggregates computed over the videos tracked in THIS niche — median views,
+ * engagement, upload cadence, outlier count — my channels grouped above the
+ * competitors so the gaps read at a glance.
+ */
+function ChannelComparisonTable({
+  channels,
+  aggregates
+}: {
+  channels: NicheChannel[]
+  aggregates: Record<string, NicheChannelAggregates>
+}): React.JSX.Element | null {
+  const { t } = useTranslation()
+  const rows = channels.filter((c) => (aggregates[c.channelId]?.videosTracked ?? 0) > 0)
+  if (rows.length === 0) return null
+  const groups: Array<{ key: string; label: string; channels: NicheChannel[] }> = [
+    { key: 'mine', label: t('niches.myChannels'), channels: rows.filter((c) => c.isMine) },
+    { key: 'competitors', label: t('niches.competitors'), channels: rows.filter((c) => !c.isMine) }
+  ].filter((g) => g.channels.length > 0)
+  const dash = '—'
+  return (
+    <div className="flex flex-col gap-2">
+      <h2 className="text-sm font-medium text-neutral-300" title={t('niches.compare.hint')}>
+        {t('niches.compare.title')}
+      </h2>
+      <div className="island overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-neutral-800/60 text-left text-[10px] uppercase tracking-wide text-neutral-500">
+              <th className="px-3 py-2 font-medium">{t('niches.compare.colChannel')}</th>
+              <th className="px-3 py-2 text-right font-medium">{t('niches.compare.colSubs')}</th>
+              <th className="px-3 py-2 text-right font-medium">{t('niches.compare.colTracked')}</th>
+              <th className="px-3 py-2 text-right font-medium">
+                {t('niches.compare.colMedianViews')}
+              </th>
+              <th className="px-3 py-2 text-right font-medium" title={t('niches.engagementTitle')}>
+                {t('niches.compare.colEngagement')}
+              </th>
+              <th className="px-3 py-2 text-right font-medium">{t('niches.compare.colCadence')}</th>
+              <th
+                className="px-3 py-2 text-right font-medium"
+                title={t('niches.compare.outliersHint')}
+              >
+                {t('niches.compare.colOutliers')}
+              </th>
+            </tr>
+          </thead>
+          {groups.map((group) => (
+            <tbody key={group.key}>
+              {groups.length > 1 && (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-wide text-neutral-600"
+                  >
+                    {group.label}
+                  </td>
+                </tr>
+              )}
+              {group.channels.map((channel) => {
+                const agg = aggregates[channel.channelId] as NicheChannelAggregates
+                return (
+                  <tr key={channel.id} className="border-b border-neutral-800/40 last:border-b-0">
+                    <td className="px-3 py-2">
+                      <span className="flex items-center gap-1.5">
+                        <a
+                          href={channel.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="line-clamp-1 max-w-52 text-neutral-200 hover:text-accent"
+                        >
+                          {channel.title}
+                        </a>
+                        {channel.isMine && (
+                          <span className="shrink-0 rounded-full bg-highlight-soft px-1.5 py-0.5 text-[10px] font-medium text-neutral-900">
+                            {t('niches.mineBadge')}
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-neutral-400">
+                      {formatSubscribers(channel.subscribers, t('niches.subsHidden'))}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-neutral-400">
+                      {agg.videosTracked}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-neutral-200">
+                      {compactNumber.format(Math.round(agg.medianViews))}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-neutral-200">
+                      {agg.engagementRate !== null ? formatEngagement(agg.engagementRate) : dash}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-neutral-400">
+                      {agg.uploadsPerWeek !== null ? agg.uploadsPerWeek.toFixed(1) : dash}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-neutral-400">
+                      {agg.outlierCount > 0 ? (
+                        <span className="rounded-full bg-success/20 px-2 py-0.5 font-medium text-success">
+                          {agg.outlierCount}
+                        </span>
+                      ) : (
+                        dash
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          ))}
+        </table>
       </div>
     </div>
   )

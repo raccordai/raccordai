@@ -486,7 +486,13 @@ export const nicheChannelAggregatesSchema = z.object({
   avgViews: z.number(),
   medianViews: z.number(),
   avgDurationSeconds: z.number(),
-  uploadsPerMonth: z.number().nullable()
+  uploadsPerMonth: z.number().nullable(),
+  /** Same cadence in videos/week — the competitor-comparison unit. */
+  uploadsPerWeek: z.number().nullable(),
+  /** (likes + comments) / views over the videos with tracked counts. */
+  engagementRate: z.number().nullable(),
+  /** Videos at ≥3× the channel's own median views. */
+  outlierCount: z.number()
 })
 export type NicheChannelAggregates = z.infer<typeof nicheChannelAggregatesSchema>
 

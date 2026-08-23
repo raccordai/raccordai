@@ -453,7 +453,43 @@
     "searchCost": "coût {{cost}} $",
     "viewsPerDayTitle": "Vélocité : vues par jour (mesurée entre les refreshs, sinon moyenne depuis la publication)",
     "viewsPerDaySuffix": "/j",
-    "channelRatioTitle": "Vues vs la médiane de la chaîne — un ×5 est un outlier quelle que soit la taille de la chaîne"
+    "channelRatioTitle": "Vues vs la médiane de la chaîne — un ×5 est un outlier quelle que soit la taille de la chaîne",
+    "engagementTitle": "Taux d'engagement : (likes + commentaires) / vues",
+    "opportunity": {
+      "title": "Opportunité",
+      "hint": "Calculé sur cette page de résultats, zéro appel API en plus : pression concurrentielle = les vues de la vidéo type qui se positionne + la part de la page occupée par de grosses chaînes.",
+      "tier": {
+        "approachable": "Abordable",
+        "contested": "Disputée",
+        "saturated": "Saturée"
+      },
+      "medianViews": "Vues médianes",
+      "largeShare": "Grosses chaînes",
+      "largeShareHint": "Part des résultats venant de chaînes à ≥ 100k abonnés (compteurs masqués exclus)",
+      "medianAge": "Âge médian",
+      "fresh": "< 90 jours",
+      "format": "Format dominant",
+      "medianDuration": "Durée médiane",
+      "days_one": "{{count}} j",
+      "days_other": "{{count}} j",
+      "bucket": {
+        "short": "Shorts (<1 min)",
+        "mid": "1–10 min",
+        "long": "10 min+"
+      }
+    },
+    "compare": {
+      "title": "Comparatif des chaînes",
+      "hint": "Agrégats calculés sur les vidéos suivies dans cette niche — mes chaînes vs les concurrents.",
+      "colChannel": "Chaîne",
+      "colSubs": "Abonnés",
+      "colTracked": "Suivies",
+      "colMedianViews": "Vues médianes",
+      "colEngagement": "Engagement",
+      "colCadence": "Vidéos/sem",
+      "colOutliers": "Outliers",
+      "outliersHint": "Vidéos à ≥3× la médiane de vues de la chaîne"
+    }
   },
   "project": {
     "back": "Retour aux projets",

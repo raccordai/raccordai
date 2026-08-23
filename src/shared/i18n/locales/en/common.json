@@ -453,7 +453,43 @@
     "searchCost": "cost ${{cost}}",
     "viewsPerDayTitle": "Velocity: views per day (measured between refreshes, lifetime average as fallback)",
     "viewsPerDaySuffix": "/d",
-    "channelRatioTitle": "Views vs the channel's own median — a ×5 is an outlier whatever the channel size"
+    "channelRatioTitle": "Views vs the channel's own median — a ×5 is an outlier whatever the channel size",
+    "engagementTitle": "Engagement rate: (likes + comments) / views",
+    "opportunity": {
+      "title": "Opportunity",
+      "hint": "Computed from this page of results, zero extra API calls: competitive pressure = the typical ranking video's views + the share of the page owned by large channels.",
+      "tier": {
+        "approachable": "Approachable",
+        "contested": "Contested",
+        "saturated": "Saturated"
+      },
+      "medianViews": "Median views",
+      "largeShare": "Large channels",
+      "largeShareHint": "Share of results from channels with ≥ 100k subscribers (hidden counts excluded)",
+      "medianAge": "Median age",
+      "fresh": "< 90 days",
+      "format": "Dominant format",
+      "medianDuration": "Median duration",
+      "days_one": "{{count}} d",
+      "days_other": "{{count}} d",
+      "bucket": {
+        "short": "Shorts (<1 min)",
+        "mid": "1–10 min",
+        "long": "10 min+"
+      }
+    },
+    "compare": {
+      "title": "Channel comparison",
+      "hint": "Aggregates computed over the videos tracked in this niche — my channels vs the competitors.",
+      "colChannel": "Channel",
+      "colSubs": "Subscribers",
+      "colTracked": "Tracked",
+      "colMedianViews": "Median views",
+      "colEngagement": "Engagement",
+      "colCadence": "Vids/week",
+      "colOutliers": "Outliers",
+      "outliersHint": "Videos at ≥3× the channel's own median views"
+    }
   },
   "project": {
     "back": "Back to projects",

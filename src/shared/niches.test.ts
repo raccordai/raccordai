@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  analyzeSerpOpportunity,
   batchIds,
   channelAgeMonths,
   channelOutlierRatio,
@@ -8,6 +9,7 @@ import {
   combineSignals,
   computeChannelAggregates,
   DEFAULT_NICHE_FILTERS,
+  engagementRate,
   extractCaptionTracks,
   extractPlayerResponse,
   extractSerpVideos,
@@ -29,6 +31,7 @@ import {
   parseYoutubeVideoUrl,
   pickCaptionTrack,
   ratioSignal,
+  serpDurationBucket,
   serpTaskCost,
   serpTaskError,
   serpTaskItems,
@@ -787,6 +790,188 @@ describe('computeChannelAggregates', () => {
     ])
     expect(out.medianViews).toBe(7)
     expect(out.uploadsPerMonth).toBeNull()
+  })
+
+  it('empty and untracked engagement stay null; outliers default to 0', () => {
+    const empty = computeChannelAggregates([])
+    expect(empty.engagementRate).toBeNull()
+    expect(empty.uploadsPerWeek).toBeNull()
+    expect(empty.outlierCount).toBe(0)
+    // likeCount/commentCount omitted entirely (pre-tracking rows).
+    const out = computeChannelAggregates([{ views: 100, durationSeconds: 0, publishedAt: null }])
+    expect(out.engagementRate).toBeNull()
+  })
+
+  it('engagement sums only the videos with tracked counts', () => {
+    const out = computeChannelAggregates([
+      // 40 likes + 10 comments over 1000 views.
+      { views: 1000, durationSeconds: 0, publishedAt: null, likeCount: 40, commentCount: 10 },
+      // Comments unknown — the known likes still count, comments read as 0.
+      { views: 1000, durationSeconds: 0, publishedAt: null, likeCount: 50, commentCount: null },
+      // Both null: excluded from numerator AND denominator.
+      {
+        views: 1_000_000,
+        durationSeconds: 0,
+        publishedAt: null,
+        likeCount: null,
+        commentCount: null
+      }
+    ])
+    expect(out.engagementRate).toBeCloseTo(100 / 2000)
+  })
+
+  it('engagement is null when the only tracked video has zero views', () => {
+    const out = computeChannelAggregates([
+      { views: 0, durationSeconds: 0, publishedAt: null, likeCount: 5, commentCount: 0 }
+    ])
+    expect(out.engagementRate).toBeNull()
+  })
+
+  it('counts outliers at ≥3× the channel median', () => {
+    const out = computeChannelAggregates([
+      { views: 100, durationSeconds: 0, publishedAt: null },
+      { views: 100, durationSeconds: 0, publishedAt: null },
+      { views: 100, durationSeconds: 0, publishedAt: null },
+      { views: 300, durationSeconds: 0, publishedAt: null }, // exactly 3× → counted
+      { views: 900, durationSeconds: 0, publishedAt: null }
+    ])
+    expect(out.medianViews).toBe(100)
+    expect(out.outlierCount).toBe(2)
+  })
+
+  it('no outliers when every view count is zero (null ratio)', () => {
+    const out = computeChannelAggregates([
+      { views: 0, durationSeconds: 0, publishedAt: null },
+      { views: 0, durationSeconds: 0, publishedAt: null }
+    ])
+    expect(out.outlierCount).toBe(0)
+  })
+
+  it('uploadsPerWeek follows the same span as uploadsPerMonth', () => {
+    const out = computeChannelAggregates([
+      { views: 1, durationSeconds: 0, publishedAt: '2026-01-01T00:00:00Z' },
+      { views: 1, durationSeconds: 0, publishedAt: '2026-01-15T00:00:00Z' }
+    ])
+    // 2 uploads over 14 days = 1 video/week.
+    expect(out.uploadsPerWeek).toBeCloseTo(1)
+    // Same-day uploads: cadence degrades to the raw count, like per-month.
+    const sameDay = computeChannelAggregates([
+      { views: 1, durationSeconds: 0, publishedAt: '2026-01-01T00:00:00Z' },
+      { views: 1, durationSeconds: 0, publishedAt: '2026-01-01T00:00:00Z' }
+    ])
+    expect(sameDay.uploadsPerWeek).toBe(2)
+    expect(sameDay.uploadsPerMonth).toBe(2)
+  })
+})
+
+describe('engagementRate', () => {
+  it('relates likes + comments to views', () => {
+    expect(engagementRate(40, 10, 1000)).toBeCloseTo(0.05)
+  })
+
+  it('one known count is enough — the other reads as zero', () => {
+    expect(engagementRate(50, null, 1000)).toBeCloseTo(0.05)
+    expect(engagementRate(null, 20, 1000)).toBeCloseTo(0.02)
+  })
+
+  it('null when both counts are untracked or views are zero', () => {
+    expect(engagementRate(null, null, 1000)).toBeNull()
+    expect(engagementRate(40, 10, 0)).toBeNull()
+  })
+})
+
+describe('serpDurationBucket / analyzeSerpOpportunity', () => {
+  const serpHit = (
+    views: number,
+    subs: number,
+    publishedAt: string | null,
+    durationSeconds: number
+  ): Pick<
+    NicheScoredVideo,
+    'views' | 'channelSubscribers' | 'publishedAt' | 'durationSeconds'
+  > => ({ views, channelSubscribers: subs, publishedAt, durationSeconds })
+
+  it('buckets durations short <60 s / mid / long ≥10 min', () => {
+    expect(serpDurationBucket(45)).toBe('short')
+    expect(serpDurationBucket(60)).toBe('mid')
+    expect(serpDurationBucket(599)).toBe('mid')
+    expect(serpDurationBucket(600)).toBe('long')
+  })
+
+  it('returns null on an empty result set', () => {
+    expect(analyzeSerpOpportunity([], NOW)).toBeNull()
+  })
+
+  it('low views + small channels = approachable', () => {
+    const out = analyzeSerpOpportunity(
+      [
+        serpHit(5_000, 2_000, '2026-07-01T00:00:00Z', 700),
+        serpHit(20_000, 8_000, '2026-05-01T00:00:00Z', 800),
+        serpHit(1_000, 500, '2025-08-01T00:00:00Z', 900)
+      ],
+      NOW
+    )
+    expect(out).not.toBeNull()
+    expect(out!.tier).toBe('approachable')
+    expect(out!.resultCount).toBe(3)
+    expect(out!.medianViews).toBe(5_000)
+    expect(out!.largeChannelShare).toBe(0)
+    expect(out!.dominantFormat).toBe('long')
+    expect(out!.medianDurationSeconds).toBe(800)
+  })
+
+  it('big typical views alone make the query contested', () => {
+    const out = analyzeSerpOpportunity(
+      [serpHit(150_000, 2_000, null, 0), serpHit(200_000, 8_000, null, 0)],
+      NOW
+    )
+    expect(out!.tier).toBe('contested')
+    // No dated result, no known duration: those lenses stay null.
+    expect(out!.medianAgeDays).toBeNull()
+    expect(out!.freshShare).toBeNull()
+    expect(out!.dominantFormat).toBeNull()
+    expect(out!.dominantFormatShare).toBeNull()
+    expect(out!.medianDurationSeconds).toBeNull()
+  })
+
+  it('millions of views on a page owned by large channels = saturated', () => {
+    const out = analyzeSerpOpportunity(
+      [
+        serpHit(2_000_000, 900_000, '2026-07-20T00:00:00Z', 30),
+        serpHit(1_500_000, 2_000_000, '2026-07-25T00:00:00Z', 45),
+        serpHit(1_000_000, 500_000, '2024-01-01T00:00:00Z', 900)
+      ],
+      NOW
+    )
+    expect(out!.tier).toBe('saturated')
+    expect(out!.largeChannelShare).toBe(1)
+    expect(out!.dominantFormat).toBe('short')
+    expect(out!.dominantFormatShare).toBeCloseTo(2 / 3)
+    expect(out!.freshShare).toBeCloseTo(2 / 3)
+    expect(out!.medianAgeDays).toBeCloseTo(12)
+  })
+
+  it('hidden subscribers and deleted channels stay out of the pressure share', () => {
+    const out = analyzeSerpOpportunity(
+      [
+        serpHit(10_000, HIDDEN_SUBSCRIBERS, null, 0),
+        serpHit(10_000, 0, null, 0),
+        serpHit(10_000, 500_000, null, 0)
+      ],
+      NOW
+    )
+    // The only KNOWN channel is large → share 1 over a denominator of 1.
+    expect(out!.largeChannelShare).toBe(1)
+    // All-unknown page adds no channel pressure at all.
+    const unknown = analyzeSerpOpportunity([serpHit(10_000, HIDDEN_SUBSCRIBERS, null, 0)], NOW)
+    expect(unknown!.largeChannelShare).toBeNull()
+    expect(unknown!.tier).toBe('approachable')
+  })
+
+  it('format ties resolve toward the longer bucket', () => {
+    const out = analyzeSerpOpportunity([serpHit(1, 1, null, 30), serpHit(1, 1, null, 700)], NOW)
+    expect(out!.dominantFormat).toBe('long')
+    expect(out!.dominantFormatShare).toBeCloseTo(0.5)
   })
 })
 

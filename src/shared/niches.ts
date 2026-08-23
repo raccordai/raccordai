@@ -493,6 +493,32 @@ export function combineSignals(...signals: RatioSignal[]): RatioSignal {
 }
 
 const MS_PER_MONTH = 30.44 * 24 * 3600 * 1000
+const MS_PER_WEEK = 7 * 24 * 3600 * 1000
+
+function medianOf(values: readonly number[]): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1
+    ? (sorted[mid] ?? 0)
+    : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
+}
+
+/**
+ * Engagement rate: (likes + comments) / views. Null when the counts were
+ * never tracked (both null — rows ingested before they were persisted) or
+ * when there are no views to relate them to. A single known count is enough:
+ * the other is treated as zero rather than voiding the signal.
+ */
+export function engagementRate(
+  likeCount: number | null,
+  commentCount: number | null,
+  views: number
+): number | null {
+  if (views <= 0) return null
+  if (likeCount === null && commentCount === null) return null
+  return ((likeCount ?? 0) + (commentCount ?? 0)) / views
+}
 
 export function channelAgeMonths(createdAt: string | null, now: Date): number | null {
   if (!createdAt) return null
@@ -667,6 +693,9 @@ export interface ChannelVideoLite {
   views: number
   durationSeconds: number
   publishedAt: string | null
+  /** Optional engagement counts — null/omitted on rows tracked before them. */
+  likeCount?: number | null
+  commentCount?: number | null
 }
 
 export interface ChannelAggregates {
@@ -677,6 +706,15 @@ export interface ChannelAggregates {
   avgDurationSeconds: number
   /** Upload cadence estimated from the tracked videos' date span. */
   uploadsPerMonth: number | null
+  /** Same cadence in videos/week — the competitor-comparison unit. */
+  uploadsPerWeek: number | null
+  /**
+   * (likes + comments) / views over the videos whose counts are tracked;
+   * null when no tracked video carries engagement data.
+   */
+  engagementRate: number | null
+  /** Videos at ≥3× the channel's own median views (the outlier lens). */
+  outlierCount: number
 }
 
 export function computeChannelAggregates(videos: readonly ChannelVideoLite[]): ChannelAggregates {
@@ -687,14 +725,14 @@ export function computeChannelAggregates(videos: readonly ChannelVideoLite[]): C
       avgViews: 0,
       medianViews: 0,
       avgDurationSeconds: 0,
-      uploadsPerMonth: null
+      uploadsPerMonth: null,
+      uploadsPerWeek: null,
+      engagementRate: null,
+      outlierCount: 0
     }
   }
-  const views = videos.map((v) => v.views).sort((a, b) => a - b)
-  const totalViews = views.reduce((sum, v) => sum + v, 0)
-  const mid = Math.floor(views.length / 2)
-  const medianViews =
-    views.length % 2 === 1 ? (views[mid] ?? 0) : ((views[mid - 1] ?? 0) + (views[mid] ?? 0)) / 2
+  const totalViews = videos.reduce((sum, v) => sum + v.views, 0)
+  const medianViews = medianOf(videos.map((v) => v.views))
   const durations = videos.filter((v) => v.durationSeconds > 0)
   const avgDurationSeconds =
     durations.length === 0
@@ -704,17 +742,157 @@ export function computeChannelAggregates(videos: readonly ChannelVideoLite[]): C
     .map((v) => (v.publishedAt ? Date.parse(v.publishedAt) : NaN))
     .filter((t) => !Number.isNaN(t))
   let uploadsPerMonth: number | null = null
+  let uploadsPerWeek: number | null = null
   if (dates.length >= 2) {
-    const spanMonths = (Math.max(...dates) - Math.min(...dates)) / MS_PER_MONTH
-    uploadsPerMonth = spanMonths > 0 ? dates.length / spanMonths : dates.length
+    const spanMs = Math.max(...dates) - Math.min(...dates)
+    uploadsPerMonth = spanMs > 0 ? dates.length / (spanMs / MS_PER_MONTH) : dates.length
+    uploadsPerWeek = spanMs > 0 ? dates.length / (spanMs / MS_PER_WEEK) : dates.length
   }
+  // Channel-wide engagement: sums over the videos with tracked counts (a
+  // per-video average would let tiny videos dominate).
+  const withEngagement = videos.filter(
+    (v) => v.views > 0 && ((v.likeCount ?? null) !== null || (v.commentCount ?? null) !== null)
+  )
+  const engagementViews = withEngagement.reduce((sum, v) => sum + v.views, 0)
+  const aggregateEngagementRate =
+    engagementViews > 0
+      ? withEngagement.reduce((sum, v) => sum + (v.likeCount ?? 0) + (v.commentCount ?? 0), 0) /
+        engagementViews
+      : null
+  const outlierCount = videos.filter((v) => {
+    const ratio = channelOutlierRatio(v.views, medianViews)
+    return ratio !== null && ratio >= 3
+  }).length
   return {
     videosTracked: videos.length,
     totalViews,
     avgViews: totalViews / videos.length,
     medianViews,
     avgDurationSeconds,
-    uploadsPerMonth
+    uploadsPerMonth,
+    uploadsPerWeek,
+    engagementRate: aggregateEngagementRate,
+    outlierCount
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SERP opportunity (the keyword-search landscape at a glance)
+// ---------------------------------------------------------------------------
+
+/** Same threshold as the "small channels" filter chip — one shared vocabulary. */
+export const LARGE_CHANNEL_SUBSCRIBERS = 100_000
+
+/** "Fresh" window for the SERP freshness lens. */
+export const SERP_FRESH_WINDOW_DAYS = 90
+
+export type SerpOpportunityTier = 'approachable' | 'contested' | 'saturated'
+
+export type SerpDurationBucket = 'short' | 'mid' | 'long'
+
+/** <60 s = Shorts territory, ≥10 min = long-form, in between = mid. */
+export function serpDurationBucket(durationSeconds: number): SerpDurationBucket {
+  if (durationSeconds < 60) return 'short'
+  if (durationSeconds < 600) return 'mid'
+  return 'long'
+}
+
+export interface SerpOpportunity {
+  resultCount: number
+  /** approachable / contested / saturated — from competitive pressure. */
+  tier: SerpOpportunityTier
+  /** Median views across every SERP result (the "typical" ranking video). */
+  medianViews: number
+  /**
+   * Share of results from channels ≥ LARGE_CHANNEL_SUBSCRIBERS, over the
+   * results whose subscriber count is KNOWN (hidden-subs sentinel and
+   * deleted-channel zeros are excluded from both sides). Null when no
+   * result has a known count.
+   */
+  largeChannelShare: number | null
+  /** Median age in days of the dated results; null when none carries a date. */
+  medianAgeDays: number | null
+  /** Share of dated results published in the last SERP_FRESH_WINDOW_DAYS. */
+  freshShare: number | null
+  /** Dominant duration bucket over results with a known duration. */
+  dominantFormat: SerpDurationBucket | null
+  dominantFormatShare: number | null
+  medianDurationSeconds: number | null
+}
+
+type SerpOpportunityInput = Pick<
+  NicheScoredVideo,
+  'views' | 'channelSubscribers' | 'publishedAt' | 'durationSeconds'
+>
+
+/**
+ * The SEOTube-style read of one keyword's SERP: how hard the query is
+ * (competitive pressure = the typical ranking video's views + how much of
+ * the page belongs to large channels), how fresh the page is, and what
+ * format dominates. Pure and in-memory — computed on the already-fetched
+ * search results, zero extra API calls. Null on an empty result set.
+ *
+ * Tier: views pressure (median ≥1M → 2, ≥100k → 1) + channel pressure
+ * (large share ≥60% → 2, ≥30% → 1); total ≥3 = saturated, ≥1 = contested,
+ * 0 = approachable. Unknown subscriber counts add no pressure.
+ */
+export function analyzeSerpOpportunity(
+  videos: readonly SerpOpportunityInput[],
+  now: Date
+): SerpOpportunity | null {
+  if (videos.length === 0) return null
+  const medianViews = medianOf(videos.map((v) => v.views))
+
+  // Hidden subscribers (sentinel −1) and deleted channels (zeros from the
+  // merge) are unknown, not small — they stay out of the share entirely.
+  const knownSubs = videos.filter((v) => v.channelSubscribers > 0)
+  const largeChannelShare =
+    knownSubs.length > 0
+      ? knownSubs.filter((v) => v.channelSubscribers >= LARGE_CHANNEL_SUBSCRIBERS).length /
+        knownSubs.length
+      : null
+
+  const ages = videos
+    .map((v) => (v.publishedAt ? Date.parse(v.publishedAt) : NaN))
+    .filter((t) => !Number.isNaN(t))
+    .map((t) => Math.max(0, (now.getTime() - t) / MS_PER_DAY))
+  const medianAgeDays = ages.length > 0 ? medianOf(ages) : null
+  const freshShare =
+    ages.length > 0 ? ages.filter((a) => a <= SERP_FRESH_WINDOW_DAYS).length / ages.length : null
+
+  const durations = videos.map((v) => v.durationSeconds).filter((d) => d > 0)
+  let dominantFormat: SerpDurationBucket | null = null
+  let dominantFormatShare: number | null = null
+  if (durations.length > 0) {
+    const counts: Record<SerpDurationBucket, number> = { short: 0, mid: 0, long: 0 }
+    for (const d of durations) counts[serpDurationBucket(d)] += 1
+    // Ties resolve toward the longer bucket — the more committal format read.
+    for (const bucket of ['short', 'mid', 'long'] as const) {
+      if (dominantFormat === null || counts[bucket] >= counts[dominantFormat]) {
+        dominantFormat = bucket
+      }
+    }
+    dominantFormatShare = counts[dominantFormat as SerpDurationBucket] / durations.length
+  }
+  const medianDurationSeconds = durations.length > 0 ? medianOf(durations) : null
+
+  const viewsPressure = medianViews >= 1_000_000 ? 2 : medianViews >= 100_000 ? 1 : 0
+  const channelPressure =
+    largeChannelShare === null ? 0 : largeChannelShare >= 0.6 ? 2 : largeChannelShare >= 0.3 ? 1 : 0
+  const pressure = viewsPressure + channelPressure
+  const tier: SerpOpportunityTier =
+    pressure >= 3 ? 'saturated' : pressure >= 1 ? 'contested' : 'approachable'
+
+  return {
+    resultCount: videos.length,
+    tier,
+    medianViews,
+    largeChannelShare,
+    medianAgeDays,
+    freshShare,
+    dominantFormat,
+    dominantFormatShare,
+    medianDurationSeconds
   }
 }
 
