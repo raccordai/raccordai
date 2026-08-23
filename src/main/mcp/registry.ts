@@ -69,6 +69,7 @@ import { searchAll, SEARCH_HIT_TYPES, type SearchHitType } from '../services/sea
 import { createVideoFromTemplate } from '../services/templates'
 import { exportPublishKit } from '../services/publishKit'
 import { exportFcpxmlBundle } from '../services/fcpxmlExport'
+import { getChanges } from '../services/changeFeed'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -259,6 +260,25 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
 
   // ── Account ────────────────────────────────────────────────────────────────
+  {
+    name: 'get_changes',
+    description:
+      'Change feed with a cursor: pass the previous call’s latestSeq as `since` to get only what moved — workflow, generations, queue, credits, render progress, niches, voice personas — with videoId/nodeId when applicable. `gapped: true` means the buffer rotated past your cursor: do one full re-read (get_workflow / get_generations) instead. Per app run; a restart resets the sequence.',
+    inputSchema: obj({
+      since: {
+        type: 'number',
+        description: 'The latestSeq of your previous call (omit to subscribe from now).'
+      },
+      limit: { type: 'number', description: 'Max events (default 200, max 500).' }
+    }),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ since, limit }) =>
+      getChanges(
+        typeof since === 'number' ? since : undefined,
+        typeof limit === 'number' ? limit : undefined
+      )
+  },
   {
     name: 'get_credits',
     description: 'Remaining kie.ai account credits (each generation consumes some).',

@@ -4,6 +4,7 @@ import type {
   NavigatePayload,
   RenderProgressPayload
 } from '@shared/ipc/contracts'
+import { recordChange } from './services/changeFeed'
 
 /**
  * Main→renderer push events. The desktop replacement for Convex's reactive
@@ -17,6 +18,7 @@ export interface GenerationsChangedEvent {
 }
 
 export function broadcastGenerationsChanged(payload: GenerationsChangedEvent): void {
+  recordChange('generations', payload)
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:generationsChanged', payload)
   }
@@ -24,6 +26,7 @@ export function broadcastGenerationsChanged(payload: GenerationsChangedEvent): v
 
 /** The assistant (or any main-side actor) mutated the graph — renderer refetches. */
 export function broadcastWorkflowChanged(videoId: string): void {
+  recordChange('workflow', { videoId })
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:workflowChanged', { videoId })
   }
@@ -31,6 +34,7 @@ export function broadcastWorkflowChanged(videoId: string): void {
 
 /** A generation settled — the kie.ai balance likely moved; the toolbar refetches it. */
 export function broadcastCreditsChanged(): void {
+  recordChange('credits')
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:creditsChanged', {})
   }
@@ -44,6 +48,7 @@ export function broadcastChatUpdate(threadId: string): void {
 
 /** MP4 render progress (see RenderProgressPayload in the shared contracts). */
 export function broadcastRenderProgress(payload: RenderProgressPayload): void {
+  recordChange('render-progress', { videoId: payload.videoId })
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:renderProgress', payload)
   }
@@ -51,6 +56,7 @@ export function broadcastRenderProgress(payload: RenderProgressPayload): void {
 
 /** The run queue moved (enqueue/start/settle/retry) — refetch generations:queueState. */
 export function broadcastQueueChanged(): void {
+  recordChange('queue')
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:queueChanged', {})
   }
@@ -72,6 +78,7 @@ export function broadcastNavigate(payload: NavigatePayload): void {
 
 /** Niche research data changed (any actor) — the Niches pages refetch. */
 export function broadcastNichesChanged(): void {
+  recordChange('niches')
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:nichesChanged', {})
   }
@@ -79,6 +86,7 @@ export function broadcastNichesChanged(): void {
 
 /** Voice personas changed (any actor) — persona pickers and lists refetch. */
 export function broadcastVoicePersonasChanged(): void {
+  recordChange('voice-personas')
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:voicePersonasChanged', {})
   }
