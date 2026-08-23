@@ -70,6 +70,7 @@ import { CLIP_TRANSITION_IDS } from '@shared/transitions'
 import { useInputStills, useMuted, useResizableHeight } from './timelineHooks'
 import { Waveform } from './Waveform'
 import { formatSeconds } from '../../lib/formatSeconds'
+import { nextShuttleRate } from '../../lib/shuttle'
 import { snapSpan, snapTolerance } from '../../lib/timelineSnap'
 import { invoke } from '../../lib/ipc'
 import { useDismissable } from '../../components/ui/useDismissable'
@@ -180,6 +181,14 @@ function usePlaybackEngine(
   const [activeSlot, setActiveSlot] = useState<'A' | 'B'>('A')
   const [activeIdx, setActiveIdx] = useState(0)
   const [playing, setPlaying] = useState(false)
+  /**
+   * FCP-style shuttle (the L key): preview-only rate MULTIPLIER applied on top
+   * of each clip's baked `speed` — every element plays at
+   * `clipSpeed × shuttleRate`, so the render-parity speed logic stays intact.
+   */
+  const [shuttleRate, setShuttleRate] = useState(1)
+  /** Mirror for the tick/advance/seek callbacks (state would be a stale closure). */
+  const shuttleRateRef = useRef(1)
   const [globalTime, setGlobalTime] = useState(0)
   /** Real media durations, keyed by node id (probed from metadata). */
   const [mediaDurations, setMediaDurations] = useState<Record<string, number>>({})
@@ -303,6 +312,11 @@ function usePlaybackEngine(
       // cannot amplify, so gains above 1 only apply to the exported MP4).
       const volume = Math.min(1, clipVolume(clip.node))
       if (element.volume !== volume) element.volume = volume
+      // Shuttle: the lanes are slaved to the playhead clock — without the same
+      // multiplier the drift corrector would fight a fast playhead every 600 ms.
+      if (element.playbackRate !== shuttleRateRef.current) {
+        element.playbackRate = shuttleRateRef.current
+      }
       const offset = t - (laneStarts[idx] ?? 0) + trimOf(clip).start
       if (!element.src.endsWith(clip.url)) {
         element.src = clip.url
@@ -394,8 +408,11 @@ function usePlaybackEngine(
       active.src = clip.url
       active.load()
     }
-    // Preview parity with the render's setpts/atempo retime.
-    if (active && clip && !clip.still) active.playbackRate = clipSpeed(clip.node)
+    // Preview parity with the render's setpts/atempo retime — times the
+    // preview-only shuttle multiplier (L key).
+    if (active && clip && !clip.still) {
+      active.playbackRate = clipSpeed(clip.node) * shuttleRateRef.current
+    }
     const nextIdx = nextVideoFrom(activeIdx + 1)
     const standby = standbyVideo()
     const nextUrl = nextIdx >= 0 ? clips[nextIdx]?.url : null
@@ -417,6 +434,28 @@ function usePlaybackEngine(
   useEffect(() => {
     globalTimeRef.current = globalTime
   }, [globalTime])
+
+  // Apply a shuttle change live: re-anchor the still clock (wall time elapsed
+  // BEFORE the change must not be retroactively rescaled) and bump the playing
+  // video's rate — the audio lanes pick the new rate up on the next syncLane
+  // pass, and freshly loaded clips read the ref at load time.
+  useEffect(() => {
+    shuttleRateRef.current = shuttleRate
+    stillAnchorRef.current = null
+    const clip = clips[activeIdx]
+    const video = activeVideo()
+    if (video && clip && !clip.still) video.playbackRate = clipSpeed(clip.node) * shuttleRate
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shuttleRate])
+
+  // EVERY pause path (Space, transport button, end of the edit, a failed
+  // play()) lands on `playing: false` — resuming always restarts at 1×.
+  useEffect(() => {
+    if (!playing) setShuttleRate(1)
+  }, [playing])
+
+  /** L key while playing: one step up the shuttle ladder (1×→2×→4×→8×). */
+  const cycleShuttle = useCallback(() => setShuttleRate((rate) => nextShuttleRate(rate)), [])
 
   /**
    * Transition preview: opacity crossfade between the two stacked videos at
@@ -466,13 +505,17 @@ function usePlaybackEngine(
       // The standby already holds the next clip: swap slots and play instantly.
       const transition = current && !current.still ? segmentTransitionAfter(current.segment) : null
       if (transition !== null && current) {
-        const ms = Math.round(segmentTransitionSeconds(current.segment) * 1000)
+        // The crossfade preview runs on the wall clock: at a shuttled rate the
+        // overlap passes shuttleRate× faster, so the fade must shorten too.
+        const ms = Math.round(
+          (segmentTransitionSeconds(current.segment) * 1000) / shuttleRateRef.current
+        )
         setFadeMs(ms)
         if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current)
         fadeTimer.current = window.setTimeout(() => setFadeMs(null), ms + 80)
       }
       standby.currentTime = nextStart
-      if (next) standby.playbackRate = clipSpeed(next.node)
+      if (next) standby.playbackRate = clipSpeed(next.node) * shuttleRateRef.current
       setActiveSlot((s) => (s === 'A' ? 'B' : 'A'))
       setActiveIdx(nextIdx)
       void standby.play()
@@ -483,7 +526,7 @@ function usePlaybackEngine(
       if (active && expected) {
         active.src = expected
         active.currentTime = nextStart
-        if (next) active.playbackRate = clipSpeed(next.node)
+        if (next) active.playbackRate = clipSpeed(next.node) * shuttleRateRef.current
         void active.play()
       }
     }
@@ -507,7 +550,9 @@ function usePlaybackEngine(
           anchor = { idx: activeIdx, wall: now, offset: Math.max(0, globalTimeRef.current - base) }
           stillAnchorRef.current = anchor
         }
-        const elapsed = anchor.offset + (now - anchor.wall) / 1000
+        // Stills run on the wall clock — the shuttle multiplies it (the rate
+        // effect re-anchors on every change, so past seconds keep their rate).
+        const elapsed = anchor.offset + ((now - anchor.wall) / 1000) * shuttleRateRef.current
         const hold = slotDurationOf(clip, activeIdx)
         setGlobalTime(base + Math.min(elapsed, hold))
         if (elapsed >= hold) {
@@ -619,7 +664,7 @@ function usePlaybackEngine(
           // The timeline offset is inside the TRIMMED clip — shift into media
           // time (timeline seconds × speed).
           video.currentTime = offset * clipSpeed(clip.node) + trimOf(clip).start
-          video.playbackRate = clipSpeed(clip.node)
+          video.playbackRate = clipSpeed(clip.node) * shuttleRateRef.current
           if (playing) void video.play().catch(() => setPlaying(false))
         }
         syncAudio(clamped, playing)
@@ -644,6 +689,8 @@ function usePlaybackEngine(
     pause,
     seek,
     advance,
+    shuttleRate,
+    cycleShuttle,
     globalTime,
     starts,
     total,
@@ -1120,6 +1167,16 @@ export function TimelineV2({
     else play()
   })
 
+  // L = FCP-style shuttle: play forward; repeated presses step the preview
+  // rate 1× → 2× → 4× → 8×. Any pause path resets the rate to 1×.
+  useShortcut('shuttleForward', (event) => {
+    if (event.repeat) return
+    // Same carve-out as Space: a focused <video> owns its own transport keys.
+    if ((event.target as HTMLElement | null)?.tagName === 'VIDEO') return
+    if (playing) engine.cycleShuttle()
+    else play()
+  })
+
   /** Split point (MEDIA seconds) of entry idx at the playhead, or null when
    *  the playhead sits outside it / too close to an edge / it's a still. */
   const splitPointOf = useCallback(
@@ -1340,6 +1397,15 @@ export function TimelineV2({
                 / <Timecode seconds={engine.total} dimAll />
               </span>
             </span>
+            {engine.shuttleRate > 1 && (
+              <span
+                className="ml-1 rounded bg-accent/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent"
+                title={t('timeline.shuttleRate', { rate: engine.shuttleRate })}
+                data-timeline-shuttle
+              >
+                {engine.shuttleRate}×
+              </span>
+            )}
             <button
               onClick={() => setMuted(!muted)}
               className={`ml-1 rounded p-1 hover:bg-neutral-800 ${muted ? 'text-warning' : 'text-neutral-400 hover:text-neutral-100'}`}

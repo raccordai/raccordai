@@ -153,6 +153,7 @@
     "play": "Play",
     "pause": "Pause",
     "playPause": "Play / pause (click)",
+    "shuttleRate": "Fast playback \u00d7{{rate}} \u2014 press L to speed up, pause to reset to \u00d71",
     "noOutput": "No output for this clip yet",
     "clipSettings": "Clip settings (trim, transition, text)",
     "trimIn": "In (s)",
