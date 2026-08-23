@@ -10,7 +10,7 @@ import {
 } from '@shared/ipc/contracts'
 import { onGenerationSettled } from '../bus'
 import { broadcastChatUpdate, broadcastWorkflowChanged } from '../events'
-import { AGENT_TOOLS } from '../mcp/registry'
+import { AGENT_TOOLS, isToolMediaResult } from '../mcp/registry'
 import { diffAgainstCurrent } from './checkpoints'
 import { finalizeVideo, planBatch, planFinalize, startBatch, videoNodeTargets } from './runBatch'
 import { clampVariants } from './runPlanner'
@@ -292,6 +292,12 @@ async function executeTool(
   ctx: ToolCtx
 ): Promise<{
   result: string
+  /**
+   * Vision tool results (ToolMediaResult): the full Anthropic content blocks
+   * for the tool_result — images the model can see. `result` stays the text
+   * summary (transcript display, OpenAI-translator fallback).
+   */
+  resultBlocks?: Anthropic.ToolResultBlockParam['content']
   mutatedVideoId: string | null
   label: string
   /** Rich transcript entry replacing the default tool chip (e.g. plan cards). */
@@ -482,6 +488,29 @@ async function executeTool(
         const session = sessionFor(ctx.sessionKey)
         for (const id of (result as { generationIds: string[] }).generationIds) {
           session.watched.add(id)
+        }
+      }
+      // Media results ride as real vision blocks: the assistant SEES what it
+      // generated. The base64 lands in the persisted history (compaction will
+      // eventually trim old turns); the OpenAI translator degrades each image
+      // to an "[image]" note instead of stringifying it.
+      if (isToolMediaResult(result)) {
+        return {
+          result: result.text,
+          resultBlocks: [
+            ...result.images.map((image) => ({
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: image.mediaType as
+                  'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+                data: image.base64
+              }
+            })),
+            { type: 'text' as const, text: result.text }
+          ],
+          mutatedVideoId: null,
+          label: (CHAT_LABELS[name] ?? (() => name.replace(/_/g, ' ')))(args, result)
         }
       }
       return {
@@ -1116,7 +1145,7 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
           continue
         }
         try {
-          const { result, mutatedVideoId, label, item } = await executeTool(
+          const { result, resultBlocks, mutatedVideoId, label, item } = await executeTool(
             toolUse.name,
             (toolUse.input ?? {}) as Record<string, unknown>,
             // The bound video comes from the thread, never from the key: the
@@ -1124,7 +1153,11 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
             { sessionKey, videoId: session.videoId }
           )
           session.items.push(item ?? { type: 'tool', name: toolUse.name, label, ok: true })
-          results.push({ type: 'tool_result', tool_use_id: toolUse.id, content: result })
+          results.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: resultBlocks ?? result
+          })
           if (mutatedVideoId !== null) {
             lastMutatedVideoId = mutatedVideoId
             broadcastWorkflowChanged(mutatedVideoId)

@@ -55,6 +55,7 @@ import {
   updateFeedbackItem
 } from '../services/feedback'
 import { getTimelineInfo } from '../services/timelineInfo'
+import { generationMediaPreview } from '../services/mediaPreview'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -135,6 +136,27 @@ export interface AgentTool {
   scope: ToolScope
   risk: ToolRisk
   execute(args: Record<string, unknown>): Promise<unknown> | unknown
+}
+
+/**
+ * Rich tool result: a text summary plus inline images, so agents can SEE what
+ * they generate. The MCP server maps it to image content blocks and the chat
+ * loop to Anthropic vision blocks (the OpenAI-Responses translator degrades
+ * each image to an "[image]" note — that path has no image tool results).
+ */
+export interface ToolMediaResult {
+  kind: 'tool-media'
+  text: string
+  images: { mediaType: string; base64: string }[]
+}
+
+export function isToolMediaResult(value: unknown): value is ToolMediaResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === 'tool-media' &&
+    Array.isArray((value as { images?: unknown }).images)
+  )
 }
 
 const str = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) })
@@ -1864,7 +1886,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'get_generations',
     description:
-      'List a node’s generations: status (pending/running/success/failed), media URL, draft flag, vision-QC verdict, error.',
+      'List a node’s generations: status (pending/running/success/failed), media URL, local file path, draft flag, vision-QC verdict, error. Look at a result with get_generation_media (or read localPath directly when you run on this machine).',
     inputSchema: obj({ nodeId: str() }, ['nodeId']),
     scope: 'global',
     risk: 'read',
@@ -1873,6 +1895,9 @@ export const AGENT_TOOLS: AgentTool[] = [
         id: g.id,
         status: g.status,
         url: g.resultUrl,
+        // Absolute path of the cached media on this machine — a local agent
+        // can open it with its own file tools instead of fetching the URL.
+        localPath: g.resultPath,
         draft: g.draft ?? false,
         qcVerdict: g.qcVerdict,
         qcNotes: g.qcNotes,
@@ -1881,6 +1906,33 @@ export const AGENT_TOOLS: AgentTool[] = [
         error: g.errorMessage,
         createdAt: g.createdAt
       }))
+  },
+  {
+    name: 'get_generation_media',
+    description:
+      'Look at a generation with your own eyes: returns a downscaled JPEG of the result as inline image content (for a video: one frame — position first|middle|last, or at_sec in media time). Judge results before spending more credits.',
+    inputSchema: obj(
+      {
+        generationId: str(),
+        position: {
+          type: 'string',
+          enum: ['first', 'middle', 'last'],
+          description: 'Video only: which frame to grab (default middle).'
+        },
+        at_sec: { type: 'number', description: 'Video only: grab the frame at this media time.' }
+      },
+      ['generationId']
+    ),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ generationId, position, at_sec }) =>
+      generationMediaPreview(String(generationId), {
+        position:
+          position === 'first' || position === 'middle' || position === 'last'
+            ? position
+            : undefined,
+        atSec: typeof at_sec === 'number' ? at_sec : undefined
+      })
   },
   {
     name: 'select_generation',

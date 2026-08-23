@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AGENT_TOOLS } from './registry'
+import { AGENT_TOOLS, isToolMediaResult } from './registry'
 import { DOC_TOPICS, getDoc } from './docs'
 
 /**
@@ -129,5 +129,21 @@ describe('agent-facing model documentation', () => {
     expect(doc).toMatch(/screen direction/i)
     expect(doc).toContain('link_shots')
     expect(doc).toContain('shotboard')
+  })
+})
+
+describe('isToolMediaResult', () => {
+  it('recognizes only the tool-media shape', () => {
+    expect(
+      isToolMediaResult({
+        kind: 'tool-media',
+        text: '{}',
+        images: [{ mediaType: 'image/jpeg', base64: 'AAAA' }]
+      })
+    ).toBe(true)
+    expect(isToolMediaResult({ kind: 'tool-media', text: '{}' })).toBe(false)
+    expect(isToolMediaResult({ credits: 12 })).toBe(false)
+    expect(isToolMediaResult('a plain string result')).toBe(false)
+    expect(isToolMediaResult(null)).toBe(false)
   })
 })

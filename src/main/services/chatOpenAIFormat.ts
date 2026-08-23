@@ -55,13 +55,31 @@ export function toResponsesInput(messages: Anthropic.MessageParam[]): unknown[] 
         items.push({
           type: 'function_call_output',
           call_id: block.tool_use_id,
-          output:
-            typeof block.content === 'string' ? block.content : JSON.stringify(block.content ?? '')
+          output: toolResultOutput(block.content)
         })
       }
     }
   }
   return items
+}
+
+/**
+ * Tool results may carry Anthropic vision blocks (get_generation_media). The
+ * Responses API's function_call_output is text-only, so each image degrades to
+ * an "[image]" note instead of a JSON.stringify of its base64 payload — which
+ * would blow the context on every following turn.
+ */
+function toolResultOutput(content: Anthropic.ToolResultBlockParam['content'] | undefined): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((block) =>
+        block.type === 'text' ? block.text : block.type === 'image' ? '[image]' : ''
+      )
+      .filter(Boolean)
+      .join('\n')
+  }
+  return JSON.stringify(content ?? '')
 }
 
 function textItem(role: 'user' | 'assistant', text: string): unknown {

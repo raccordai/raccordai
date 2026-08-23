@@ -881,6 +881,57 @@ export function buildLastFrameArgs(inputPath: string, outputPath: string): strin
   ]
 }
 
+/** Where get_generation_media grabs a video's preview frame. */
+export type PreviewPosition = 'first' | 'middle' | 'last'
+
+/**
+ * Seek options for a preview frame. 'middle' needs the probed duration; when
+ * the probe failed (null) it degrades to the first frame rather than erroring
+ * — a preview must stay best-effort.
+ */
+export function resolvePreviewSeek(
+  position: PreviewPosition,
+  durationSec: number | null
+): { atSec?: number; fromEnd?: boolean } {
+  if (position === 'last') return { fromEnd: true }
+  if (position === 'middle' && durationSec !== null) return { atSec: durationSec / 2 }
+  return { atSec: 0 }
+}
+
+/**
+ * ffmpeg argv for a downscaled single-frame JPEG preview of an image or a
+ * video — small enough to inline as base64 image content in an agent tool
+ * result. The scale filter fits within maxDim×maxDim without ever upscaling.
+ */
+export function buildPreviewArgs(
+  inputPath: string,
+  outputPath: string,
+  opts: { atSec?: number; fromEnd?: boolean; maxDim?: number } = {}
+): string[] {
+  const maxDim = opts.maxDim ?? 1024
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    ...(opts.fromEnd
+      ? ['-sseof', '-0.1']
+      : opts.atSec !== undefined && opts.atSec > 0
+        ? ['-ss', opts.atSec.toFixed(3)]
+        : []),
+    '-i',
+    inputPath,
+    '-frames:v',
+    '1',
+    '-vf',
+    `scale=w='min(${maxDim},iw)':h='min(${maxDim},ih)':force_original_aspect_ratio=decrease`,
+    '-update',
+    '1',
+    '-q:v',
+    '4',
+    outputPath
+  ]
+}
+
 /** One audio-lane track: its file plus the node's journaled trim window. */
 export interface MusicTrack {
   path: string

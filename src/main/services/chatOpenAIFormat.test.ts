@@ -78,6 +78,34 @@ describe('toResponsesInput', () => {
       { type: 'function_call_output', call_id: 'call_1', output: '{"projectId":"p1"}' }
     ])
   })
+
+  it('degrades vision blocks in a tool_result to text notes (never base64)', () => {
+    const items = toResponsesInput([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call_1',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' }
+              },
+              { type: 'text', text: '{"generationId":"g1","mediaKind":"image"}' }
+            ]
+          }
+        ]
+      }
+    ] as Anthropic.MessageParam[])
+    expect(items).toEqual([
+      {
+        type: 'function_call_output',
+        call_id: 'call_1',
+        output: '[image]\n{"generationId":"g1","mediaKind":"image"}'
+      }
+    ])
+  })
 })
 
 describe('fromResponsesOutput', () => {
