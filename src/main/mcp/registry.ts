@@ -176,6 +176,24 @@ export function isToolMediaResult(value: unknown): value is ToolMediaResult {
   )
 }
 
+/** Write tools that still must not run inside batch_edit (long-running,
+ * navigation, or history-manipulating — grouping them makes no sense). */
+const BATCH_EXCLUDED = new Set([
+  'batch_edit',
+  'undo',
+  'redo',
+  'render_video',
+  'cancel_render',
+  'cancel_generation',
+  'dequeue_generation',
+  'open_video',
+  'export_image',
+  'export_fcpxml',
+  'export_publish_kit',
+  'import_workflow',
+  'restore_checkpoint'
+])
+
 const str = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) })
 const obj = (
   properties: Record<string, unknown>,
@@ -1786,6 +1804,54 @@ export const AGENT_TOOLS: AgentTool[] = [
     execute: ({ nodeId }) => {
       graph.removeNode(String(nodeId))
       return { ok: true }
+    }
+  },
+  {
+    name: 'batch_edit',
+    description:
+      'Run several WRITE tool calls as ONE undo step on a video — the user undoes your gesture, not its 10 implementation details. Only risk "write" graph/timeline tools are allowed (no reads, deletes, spending, undo/redo, renders or exports). Calls run in order; the first failure stops the batch (already-applied calls stay, still one undo step). Every call must target this same video.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        calls: {
+          type: 'array',
+          items: obj({ tool: str(), args: { type: 'object' } }, ['tool']),
+          description: 'Tool calls in execution order (1-20).'
+        }
+      },
+      ['videoId', 'calls']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: async ({ videoId, calls }) => {
+      const list = Array.isArray(calls) ? calls : []
+      if (list.length < 1 || list.length > 20) {
+        throw new Error('batch_edit takes 1 to 20 calls.')
+      }
+      const resolved = list.map((raw) => {
+        const call = raw as { tool?: unknown; args?: unknown }
+        const tool = AGENT_TOOLS.find((t) => t.name === String(call.tool))
+        if (!tool) throw new Error(`Unknown tool: ${String(call.tool)}`)
+        if (tool.risk !== 'write' || BATCH_EXCLUDED.has(tool.name)) {
+          throw new Error(
+            `"${tool.name}" cannot run inside batch_edit — only plain write tools can.`
+          )
+        }
+        return {
+          tool,
+          args: (call.args && typeof call.args === 'object' ? call.args : {}) as Record<
+            string,
+            unknown
+          >
+        }
+      })
+      return graphHistory.withGraphHistoryGroupAsync(String(videoId), async () => {
+        const results: Array<{ tool: string; result: unknown }> = []
+        for (const { tool, args } of resolved) {
+          results.push({ tool: tool.name, result: await tool.execute(args) })
+        }
+        return { ok: true, results }
+      })
     }
   },
   {

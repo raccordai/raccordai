@@ -157,10 +157,37 @@ export function withGraphHistoryGroup<T>(videoId: string, mutation: () => T): T 
   })
 }
 
+/**
+ * Async twin of withGraphHistoryGroup, for agent batches (batch_edit) whose
+ * steps may be async tool executes. Same contract — ONE before/after entry —
+ * with the single-user caveat that a concurrent mutation of the same video
+ * during the await would fold into the entry.
+ */
+export async function withGraphHistoryGroupAsync<T>(
+  videoId: string,
+  mutation: () => Promise<T>
+): Promise<T> {
+  if (replaying || grouping > 0) return mutation()
+  const before = snapshotGraph(videoId)
+  grouping++
+  try {
+    return await mutation()
+  } finally {
+    grouping--
+    // Committed even when a step threw: the applied prefix of the gesture
+    // stays a single undoable entry instead of vanishing from the journal.
+    commitEntry(videoId, before, snapshotGraph(videoId))
+  }
+}
+
 function journaled<T>(videoId: string, mutation: () => T): T {
   const before = snapshotGraph(videoId)
   const result = mutation()
-  const after = snapshotGraph(videoId)
+  commitEntry(videoId, before, snapshotGraph(videoId))
+  return result
+}
+
+function commitEntry(videoId: string, before: GraphSnapshot, after: GraphSnapshot): void {
   if (!snapshotsEqual(before, after)) {
     const stacks = stacksFor(videoId)
     stacks.undo.push({ before, after })
@@ -171,7 +198,6 @@ function journaled<T>(videoId: string, mutation: () => T): T {
     // side (IPC, MCP, assistant) performed the mutation.
     broadcastWorkflowChanged(videoId)
   }
-  return result
 }
 
 export interface HistoryState {

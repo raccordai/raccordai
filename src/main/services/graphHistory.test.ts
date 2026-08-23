@@ -13,7 +13,8 @@ import {
   historyDetails,
   historyState,
   redoGraph,
-  undoGraph
+  undoGraph,
+  withGraphHistoryGroupAsync
 } from './graphHistory'
 import {
   connectNodes,
@@ -226,5 +227,31 @@ describe('historyDetails', () => {
     const details = historyDetails(videoId, 2)
     expect(details.undoDepth).toBe(4)
     expect(details.nextUndo).toHaveLength(2)
+  })
+})
+
+describe('withGraphHistoryGroupAsync', () => {
+  it('journals several awaited mutations as ONE undo step', async () => {
+    await withGraphHistoryGroupAsync(videoId, async () => {
+      createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+      await Promise.resolve()
+      createNode({ videoId, modelId: SEEDANCE, position: { x: 50, y: 0 } })
+    })
+    expect(listGraph(videoId).nodes).toHaveLength(2)
+    undoGraph(videoId)
+    expect(listGraph(videoId).nodes).toHaveLength(0)
+    expect(historyState(videoId)).toEqual({ canUndo: false, canRedo: true })
+  })
+
+  it('still journals the applied prefix when a later step throws', async () => {
+    await expect(
+      withGraphHistoryGroupAsync(videoId, async () => {
+        createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+        throw new Error('boom')
+      })
+    ).rejects.toThrow('boom')
+    // The half-applied gesture is still one undoable entry.
+    expect(listGraph(videoId).nodes).toHaveLength(1)
+    expect(historyState(videoId).canUndo).toBe(true)
   })
 })
