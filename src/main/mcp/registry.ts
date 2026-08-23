@@ -65,6 +65,7 @@ import {
 
 import { feedPreview, nicheThumbnails } from '../services/nicheVisuals'
 import { refineNodeImagePrompt } from '../services/ai'
+import { searchAll, SEARCH_HIT_TYPES, type SearchHitType } from '../services/search'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -289,6 +290,36 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'project',
     risk: 'read',
     execute: ({ projectId }) => generations.projectCreditsUsage(String(projectId))
+  },
+  {
+    name: 'search',
+    description:
+      'Search the whole app in one call — project/video names, node labels and prompts, assets, castings, feedback notes, roadmap items, niche video titles/transcripts, voice personas. Returns typed hits with ids and a snippet around the match. Case-insensitive (ASCII); accents are not folded.',
+    inputSchema: obj(
+      {
+        query: str('At least 2 characters.'),
+        types: {
+          type: 'array',
+          items: { type: 'string', enum: [...SEARCH_HIT_TYPES] },
+          description: 'Restrict to these hit types (default: all).'
+        },
+        limit_per_type: { type: 'number', description: 'Max hits per type (default 10, max 50).' }
+      },
+      ['query']
+    ),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ query, types, limit_per_type }) =>
+      searchAll(String(query), {
+        ...(Array.isArray(types)
+          ? {
+              types: types.filter((t): t is SearchHitType =>
+                (SEARCH_HIT_TYPES as string[]).includes(String(t))
+              )
+            }
+          : {}),
+        ...(typeof limit_per_type === 'number' ? { limitPerType: limit_per_type } : {})
+      })
   },
 
   // ── Projects & videos ──────────────────────────────────────────────────────
