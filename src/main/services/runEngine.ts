@@ -320,19 +320,30 @@ interface PreparedRun {
   }
 }
 
-async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Promise<PreparedRun> {
-  const db = getDb()
-  const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
-  if (!node) throw new Error('Node not found')
-  if (node.modelId === 'studio/asset') throw new Error('Asset nodes are not runnable')
-
+/**
+ * Draft substitution (§6.1) + params validation + style-at-payload (§6.9): the
+ * exact composition prepareRun persists into the input snapshot, extracted so
+ * preview_run_payload can show agents the FINAL prompt without running.
+ *
+ * Draft mode substitutes the model's declared draftEquivalent — resolved
+ * BEFORE the input snapshot is persisted, so retries and re-queues replay the
+ * substituted run, and the node's stored model/params stay untouched
+ * (finalize passes forceFinal). Style-at-payload composes the video's CURRENT
+ * art direction into the prompt of nodes flagged `applyVideoStyle`: stored
+ * prompts stay business-only and a style change propagates on the next run.
+ * Stills get the bible appended; MOVING IMAGES get the full sandwich (capture
+ * declaration + compressed bible on top, booster stack at the bottom).
+ */
+export function composeRunParams(
+  node: { modelId: string; params: unknown },
+  video: { draftMode?: boolean | null; styleId?: string | null } | undefined,
+  opts?: { forceFinal?: boolean }
+): {
+  model: ReturnType<typeof getModelOrThrow>
+  validatedParams: unknown
+  draftSub: ReturnType<typeof resolveDraftRun>
+} {
   const nodeModel = getModelOrThrow(node.modelId)
-  const video = db.select().from(videos).where(eq(videos.id, node.videoId)).get()
-
-  // Draft mode (§6.1): substitute the model's declared draftEquivalent — same
-  // mechanic as style-at-payload below: resolved BEFORE the input snapshot is
-  // persisted, so retries and re-queues replay the substituted run, and the
-  // node's stored model/params stay untouched. Finalize passes forceFinal.
   const draftSub =
     video?.draftMode && !opts?.forceFinal ? resolveDraftRun(nodeModel.id, node.params ?? {}) : null
   const model = draftSub ? getModelOrThrow(draftSub.modelId) : nodeModel
@@ -346,14 +357,6 @@ async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Prom
     throw new Error(`Invalid params: ${describeParamsError(err, model)}`, { cause: err })
   }
 
-  // Style-at-payload (§6.9): nodes flagged `applyVideoStyle` get the video's
-  // CURRENT art direction composed into their prompt here — before the input
-  // snapshot is persisted, so retries and re-queues replay the exact same
-  // payload. Stored prompts stay business-only; a style change propagates on
-  // the next run. Stills get the bible appended; MOVING IMAGES get the full
-  // sandwich (capture declaration + compressed bible on top, booster stack at
-  // the bottom), because for a clip the opening declaration is what selects the
-  // universe and the closing stack is what keeps it from decaying.
   if (model.kind !== 'audio' && nodeAppliesVideoStyle(node.params)) {
     const style = video?.styleId ? getStyle(video.styleId) : undefined
     const prompt = (validatedParams as { prompt?: unknown }).prompt
@@ -364,6 +367,56 @@ async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Prom
       }
     }
   }
+  return { model, validatedParams, draftSub }
+}
+
+/**
+ * preview_prompt — the free, deterministic look at what a run would
+ * submit: final model id (draft substitution applied) and validated params
+ * with the style sandwich composed in. No input resolution, no side effects:
+ * an unwired upstream must not make the preview fail.
+ */
+export function previewRunPayload(
+  nodeId: string,
+  opts?: { forceFinal?: boolean }
+): {
+  nodeModelId: string
+  submittedModelId: string
+  draft: boolean
+  appliedStyleId: string | null
+  params: unknown
+  prompt: string | null
+} {
+  const db = getDb()
+  const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
+  if (!node) throw new Error('Node not found')
+  if (node.modelId === 'studio/asset') throw new Error('Asset nodes are not runnable')
+  const video = db.select().from(videos).where(eq(videos.id, node.videoId)).get()
+  const { model, validatedParams, draftSub } = composeRunParams(node, video, opts)
+  const styled =
+    model.kind !== 'audio' && nodeAppliesVideoStyle(node.params) && video?.styleId
+      ? getStyle(video.styleId)
+      : undefined
+  const prompt = (validatedParams as { prompt?: unknown }).prompt
+  return {
+    nodeModelId: node.modelId,
+    submittedModelId: model.id,
+    draft: draftSub !== null,
+    appliedStyleId: styled && typeof prompt === 'string' ? styled.id : null,
+    params: validatedParams,
+    prompt: typeof prompt === 'string' ? prompt : null
+  }
+}
+
+async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Promise<PreparedRun> {
+  const db = getDb()
+  const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
+  if (!node) throw new Error('Node not found')
+  if (node.modelId === 'studio/asset') throw new Error('Asset nodes are not runnable')
+
+  const nodeModel = getModelOrThrow(node.modelId)
+  const video = db.select().from(videos).where(eq(videos.id, node.videoId)).get()
+  const { model, validatedParams, draftSub } = composeRunParams(node, video, opts)
 
   const incomingForNode = db
     .select()

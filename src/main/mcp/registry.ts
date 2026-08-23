@@ -85,6 +85,7 @@ import {
 import {
   cancelGeneration,
   dequeueGeneration,
+  previewRunPayload,
   queueState,
   refreshStatus,
   runNode
@@ -1788,6 +1789,25 @@ export const AGENT_TOOLS: AgentTool[] = [
         }))
       }
     }
+  },
+  {
+    name: 'preview_prompt',
+    description:
+      'The EXACT payload a run would submit, without running: final model id (draft-mode substitution applied), validated params, and the prompt with the video’s style sandwich composed in (§6.9). Free and deterministic — read it before spending credits when the wording matters. final: true previews the finalize path (draft substitution off).',
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        final: {
+          type: 'boolean',
+          description: 'Preview the finalize (non-draft) payload.'
+        }
+      },
+      ['nodeId']
+    ),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ nodeId, final }) =>
+      previewRunPayload(String(nodeId), { forceFinal: final === true })
   },
   {
     name: 'run_node',
