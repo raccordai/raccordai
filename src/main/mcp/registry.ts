@@ -1643,6 +1643,25 @@ export const AGENT_TOOLS: AgentTool[] = [
     risk: 'write',
     execute: ({ videoId }) => graphHistory.redoGraph(String(videoId))
   },
+  {
+    name: 'get_history',
+    description:
+      'The video’s undo/redo stacks: depths plus a summary of the next entries on each side (nodes/edges added, removed, changed, and which node labels are touched) — read it before undoing blind. Newest first; free.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        limit: { type: 'number', description: 'Entries summarized per side (default 5).' }
+      },
+      ['videoId']
+    ),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId, limit }) =>
+      graphHistory.historyDetails(
+        String(videoId),
+        typeof limit === 'number' && limit > 0 ? Math.min(20, Math.floor(limit)) : undefined
+      )
+  },
 
   // ── Generation ─────────────────────────────────────────────────────────────
   {

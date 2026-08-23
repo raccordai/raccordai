@@ -184,6 +184,79 @@ export function historyState(videoId: string): HistoryState {
   return { canUndo: stacks.undo.length > 0, canRedo: stacks.redo.length > 0 }
 }
 
+/** Compact summary of one journal entry — what an undo/redo would revert. */
+export interface HistoryEntrySummary {
+  nodesAdded: number
+  nodesRemoved: number
+  nodesChanged: number
+  edgesAdded: number
+  edgesRemoved: number
+  /** Labels (or keys) of the nodes the entry touches, capped at 10. */
+  touched: string[]
+}
+
+/** Ignore updatedAt churn — every mutation bumps it (like snapshotsEqual). */
+const stripNode = ({ updatedAt, ...rest }: NodeRow): string => {
+  void updatedAt
+  return JSON.stringify(rest)
+}
+
+function describeEntry(entry: HistoryEntry): HistoryEntrySummary {
+  const beforeNodes = new Map(entry.before.nodes.map((n) => [n.id, n]))
+  const afterNodes = new Map(entry.after.nodes.map((n) => [n.id, n]))
+  const beforeEdges = new Set(entry.before.edges.map((e) => e.id))
+  const afterEdges = new Set(entry.after.edges.map((e) => e.id))
+
+  const touched: string[] = []
+  let nodesAdded = 0
+  let nodesRemoved = 0
+  let nodesChanged = 0
+  for (const [id, node] of afterNodes) {
+    const before = beforeNodes.get(id)
+    if (!before) nodesAdded++
+    else if (stripNode(before) !== stripNode(node)) nodesChanged++
+    else continue
+    touched.push(node.label ?? node.key)
+  }
+  for (const [id, node] of beforeNodes) {
+    if (afterNodes.has(id)) continue
+    nodesRemoved++
+    touched.push(node.label ?? node.key)
+  }
+  return {
+    nodesAdded,
+    nodesRemoved,
+    nodesChanged,
+    edgesAdded: [...afterEdges].filter((id) => !beforeEdges.has(id)).length,
+    edgesRemoved: [...beforeEdges].filter((id) => !afterEdges.has(id)).length,
+    touched: touched.slice(0, 10)
+  }
+}
+
+/**
+ * The undo/redo stacks made visible (get_history): depths plus a summary of
+ * the next entries on each side, newest-first — so an agent knows what an
+ * undo would actually revert before calling it blind.
+ */
+export function historyDetails(
+  videoId: string,
+  limit = 5
+): HistoryState & {
+  undoDepth: number
+  redoDepth: number
+  nextUndo: HistoryEntrySummary[]
+  nextRedo: HistoryEntrySummary[]
+} {
+  const stacks = stacksFor(videoId)
+  return {
+    ...historyState(videoId),
+    undoDepth: stacks.undo.length,
+    redoDepth: stacks.redo.length,
+    nextUndo: stacks.undo.slice(-limit).reverse().map(describeEntry),
+    nextRedo: stacks.redo.slice(-limit).reverse().map(describeEntry)
+  }
+}
+
 export function undoGraph(videoId: string): HistoryState {
   const stacks = stacksFor(videoId)
   const entry = stacks.undo.pop()

@@ -8,7 +8,13 @@ import { generations } from '../db/schema'
 import { mediaDirFor } from '../media/files'
 import { createProject } from './projects'
 import { createVideo } from './videos'
-import { clearGraphHistory, historyState, redoGraph, undoGraph } from './graphHistory'
+import {
+  clearGraphHistory,
+  historyDetails,
+  historyState,
+  redoGraph,
+  undoGraph
+} from './graphHistory'
 import {
   connectNodes,
   createNode,
@@ -175,5 +181,50 @@ describe('graph history', () => {
     const other = createVideo(createProject('P2').id, 'V2').id
     createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
     expect(historyState(other)).toEqual({ canUndo: false, canRedo: false })
+  })
+})
+
+describe('historyDetails', () => {
+  it('summarizes the next undo entries, newest first', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    updateNodeLabel(node.id, 'Shot 1')
+    const details = historyDetails(videoId)
+    expect(details.canUndo).toBe(true)
+    expect(details.undoDepth).toBe(2)
+    expect(details.redoDepth).toBe(0)
+    // Newest first: the label change, then the creation.
+    expect(details.nextUndo[0]).toMatchObject({
+      nodesAdded: 0,
+      nodesRemoved: 0,
+      nodesChanged: 1,
+      touched: ['Shot 1']
+    })
+    expect(details.nextUndo[1]).toMatchObject({ nodesAdded: 1, nodesChanged: 0 })
+  })
+
+  it('summarizes edges and the redo side after an undo', () => {
+    const a = createNode({ videoId, modelId: 'studio/asset', position: { x: 0, y: 0 } })
+    const b = createNode({ videoId, modelId: SEEDANCE, position: { x: 1, y: 1 } })
+    connectNodes({
+      videoId,
+      sourceNodeId: a.id,
+      sourceHandle: 'output',
+      targetNodeId: b.id,
+      targetHandle: 'reference_image_urls'
+    })
+    undoGraph(videoId)
+    const details = historyDetails(videoId, 2)
+    expect(details.redoDepth).toBe(1)
+    expect(details.nextRedo[0]).toMatchObject({ edgesAdded: 1, edgesRemoved: 0 })
+    expect(details.nextUndo).toHaveLength(2)
+  })
+
+  it('caps the per-side summary at the limit', () => {
+    for (let i = 0; i < 4; i++) {
+      createNode({ videoId, modelId: SEEDANCE, position: { x: i, y: 0 } })
+    }
+    const details = historyDetails(videoId, 2)
+    expect(details.undoDepth).toBe(4)
+    expect(details.nextUndo).toHaveLength(2)
   })
 })
