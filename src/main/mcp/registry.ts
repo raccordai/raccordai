@@ -2142,6 +2142,33 @@ export const AGENT_TOOLS: AgentTool[] = [
     }
   },
   {
+    name: 'plan_render',
+    description:
+      'Free dry run of render_video: per-slot source (video / still / fallback-still / remote / skipped), the sequence spec, lossless-vs-normalize, rendered duration and the audio lanes — the `skipped` list a real render would only reveal after the fact. No download, no ffmpeg run, no credits.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        fps: { type: 'number', description: 'Output frame rate override (default: probed)' },
+        resolution: obj({ width: { type: 'number' }, height: { type: 'number' } }, [
+          'width',
+          'height'
+        ]),
+        codec: { type: 'string', enum: ['h264', 'hevc'] }
+      },
+      ['videoId']
+    ),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId, fps, resolution, codec }) => {
+      const res = resolution as { width?: unknown; height?: unknown } | undefined
+      return renderService.planRender(String(videoId), {
+        ...(fps !== undefined ? { fps: Number(fps) } : {}),
+        ...(res ? { resolution: { width: Number(res.width), height: Number(res.height) } } : {}),
+        ...(codec === 'h264' || codec === 'hevc' ? { codec } : {})
+      })
+    }
+  },
+  {
     name: 'cancel_render',
     description: 'Cancel a video’s in-flight MP4 render. Returns whether one was running.',
     inputSchema: obj({ videoId: str() }, ['videoId']),

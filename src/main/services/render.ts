@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
@@ -67,6 +67,7 @@ import {
   speechActivityWindows,
   type CaptionTrackInput,
   type ClipProbe,
+  type SequenceSpec,
   type MusicTrack,
   type PlannedOverlay,
   type PlannedClip,
@@ -775,5 +776,180 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
   } finally {
     activeRenders.delete(videoId)
     rmSync(workDir, { recursive: true, force: true })
+  }
+}
+
+// ── Plan (free dry run) ──────────────────────────────────────────────────────
+
+export interface RenderPlanEntry {
+  nodeKey: string
+  label: string | null
+  segmentIndex: number
+  /**
+   * What the slot will render from: its video output, a user-placed still, its
+   * input image standing in for a failed shot, a remote-only result (will be
+   * downloaded at render time), or nothing (skipped).
+   */
+  source: 'video' | 'still' | 'fallback-still' | 'remote' | 'skipped'
+  /** Effective slot length when computable (trim + speed applied). */
+  durationSec: number | null
+}
+
+export interface RenderPlanSummary {
+  entries: RenderPlanEntry[]
+  /** Node labels that would be skipped (video slots and audio tracks). */
+  skipped: string[]
+  spec: SequenceSpec
+  /** True when the whole sequence can stream-copy (no re-encode). */
+  lossless: boolean
+  /** The film's rendered length over the slots that have media (transitions subtracted). */
+  durationSeconds: number
+  musicTracks: number
+  speechTracks: number
+}
+
+/** One-shot ffprobe without an ActiveRender (plan only — never cancelled). */
+function probePathQuick(path: string): Promise<ClipProbe | null> {
+  return new Promise((resolve) => {
+    execFile(
+      ffprobePath(),
+      ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', path],
+      { maxBuffer: 4 * 1024 * 1024 },
+      (error, stdout) => {
+        if (error) return resolve(null)
+        try {
+          resolve(parseFfprobeJson(JSON.parse(stdout)))
+        } catch {
+          resolve(null)
+        }
+      }
+    )
+  })
+}
+
+/**
+ * plan_render — everything renderVideo would decide, with no download, no
+ * ffmpeg run and no side effect: per-slot source (video / still / fallback /
+ * remote / skipped), the sequence spec, lossless-vs-normalize and the rendered
+ * duration. What an agent reads before spending minutes on a render — the
+ * `skipped` list here is the one renderVideo would return after the fact.
+ */
+export async function planRender(
+  videoId: string,
+  options: { fps?: number; resolution?: { width: number; height: number }; codec?: string } = {}
+): Promise<RenderPlanSummary> {
+  const video = videosService.getVideo(videoId)
+  if (!video) throw new Error('Video not found')
+  const graph = graphService.listGraph(videoId)
+  const timelineEntries = collectTimelineEntries(graph.nodes)
+  const fallbacks = timelineFallbackImages(videoId, graph)
+
+  const skipped: string[] = []
+  const entries: RenderPlanEntry[] = []
+  const clips: PlannedClip[] = []
+  const probeByPath = new Map<string, ClipProbe | null>()
+  const probeOnce = async (path: string): Promise<ClipProbe | null> => {
+    if (!probeByPath.has(path)) probeByPath.set(path, await probePathQuick(path))
+    return probeByPath.get(path) ?? null
+  }
+
+  for (const entry of timelineEntries) {
+    const node = entry.node
+    const base = {
+      nodeKey: node.key,
+      label: node.label,
+      segmentIndex: entry.segmentIndex ?? 0
+    }
+    if (isStillClip(node)) {
+      const url = resolveSelectedOutputUrl(node, 'output')
+      if (url) {
+        const clip: PlannedClip = {
+          path: url,
+          isStill: true,
+          stillDurationSeconds: stillClipSeconds(node),
+          probe: null
+        }
+        clips.push(clip)
+        entries.push({ ...base, source: 'still', durationSec: clip.stillDurationSeconds })
+      } else {
+        skipped.push(label(node))
+        entries.push({ ...base, source: 'skipped', durationSec: null })
+      }
+      continue
+    }
+    const rows = listGenerationsForNode(node.id)
+    const best = bestGeneration(
+      node,
+      rows.map((r) => ({ id: r.id, status: r.status, url: r.resultPath ?? r.resultUrl }))
+    )
+    const bestRow = best?.status === 'success' ? rows.find((r) => r.id === best.id) : undefined
+    if (bestRow) {
+      const localPath =
+        bestRow.resultPath && existsSync(bestRow.resultPath) ? bestRow.resultPath : null
+      const probe = localPath ? await probeOnce(localPath) : null
+      const clip: PlannedClip = {
+        path: localPath ?? bestRow.resultUrl ?? '',
+        isStill: false,
+        stillDurationSeconds: 0,
+        probe
+      }
+      const { start, end } = segmentTrim(entry.segment, probe?.durationSeconds ?? undefined)
+      if (start > 0) clip.trimStartSec = start
+      if (end !== undefined) clip.trimEndSec = end
+      const speed = clipSpeed(node)
+      if (speed !== 1) clip.speed = speed
+      const look = clipLook(node)
+      if (look) clip.look = look
+      clip.transitionAfter = segmentTransitionAfter(entry.segment)
+      clip.transitionDurationSec = segmentTransitionSeconds(entry.segment)
+      clips.push(clip)
+      const duration = clipEffectiveDuration(clip)
+      entries.push({
+        ...base,
+        source: localPath ? 'video' : 'remote',
+        durationSec: duration > 0 ? Number(duration.toFixed(3)) : null
+      })
+      continue
+    }
+    if (fallbacks[node.id]) {
+      const clip: PlannedClip = {
+        path: fallbacks[node.id]!,
+        isStill: true,
+        stillDurationSeconds: clipDuration(node) ?? DEFAULT_STILL_SECONDS,
+        probe: null
+      }
+      clips.push(clip)
+      entries.push({ ...base, source: 'fallback-still', durationSec: clip.stillDurationSeconds })
+      continue
+    }
+    skipped.push(label(node))
+    entries.push({ ...base, source: 'skipped', durationSec: null })
+  }
+
+  const laneCount = (role: 'music' | 'speech'): number => {
+    let count = 0
+    for (const node of collectAudioNodes(graph.nodes, role)) {
+      const rows = listGenerationsForNode(node.id)
+      const best = bestGeneration(
+        node,
+        rows.map((r) => ({ id: r.id, status: r.status, url: r.resultPath ?? r.resultUrl }))
+      )
+      if (best?.status === 'success') count += 1
+      else skipped.push(label(node))
+    }
+    return count
+  }
+  const musicTracks = laneCount('music')
+  const speechTracks = laneCount('speech')
+
+  const spec = decideSequenceSpec(clips, { fps: options.fps, resolution: options.resolution })
+  return {
+    entries,
+    skipped,
+    spec,
+    lossless: canConcatLosslessly(clips, spec) && options.codec !== 'hevc',
+    durationSeconds: Number(renderedDurationSeconds(clips).toFixed(3)),
+    musicTracks,
+    speechTracks
   }
 }
