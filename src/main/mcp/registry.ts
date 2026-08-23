@@ -62,6 +62,8 @@ import {
   timelineContactSheet,
   timelineFrame
 } from '../services/mediaPreview'
+
+import { feedPreview, nicheThumbnails } from '../services/nicheVisuals'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -2661,6 +2663,44 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'read',
     execute: ({ nicheVideoId }) => niches.getNicheVideoDetail(String(nicheVideoId))
+  },
+  {
+    name: 'get_niche_thumbnails',
+    description:
+      'SEE the niche’s packaging: the strongest tracked videos’ thumbnails as inline images (best outlier signal first), each with its title, channel, views and ratio in the text part. Read it before writing a thumbnail_brief — the visual language the niche actually clicks on.',
+    inputSchema: obj(
+      {
+        nicheId: str(),
+        format: { type: 'string', enum: ['all', 'long', 'short'] },
+        limit: { type: 'number', description: 'Thumbnails to fetch (default 8, max 12).' }
+      },
+      ['nicheId']
+    ),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ nicheId, format, limit }) =>
+      nicheThumbnails(String(nicheId), {
+        ...(format === 'all' || format === 'long' || format === 'short' ? { format } : {}),
+        ...(typeof limit === 'number' ? { limit } : {})
+      })
+  },
+  {
+    name: 'get_feed_preview',
+    description:
+      'The feed test as images: image 1 is the video’s candidate thumbnail (its thumbnail recipe node), followed by the niche’s strongest competitor thumbnails, with the roadmap item’s title variants in the text part. Judge legibility, contrast and differentiation at feed size, then iterate the thumbnail node or the titles. Needs the video assigned to a roadmap item.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        competitors: { type: 'number', description: 'Competitor thumbnails (default 6, max 12).' }
+      },
+      ['videoId']
+    ),
+    scope: 'video',
+    risk: 'read',
+    execute: ({ videoId, competitors }) =>
+      feedPreview(String(videoId), {
+        ...(typeof competitors === 'number' ? { competitors } : {})
+      })
   },
   {
     name: 'fetch_niche_transcripts',
