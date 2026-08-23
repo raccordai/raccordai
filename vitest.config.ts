@@ -25,6 +25,7 @@ export default defineConfig({
         'src/main/services/videos.ts',
         'src/main/services/graph.ts',
         'src/main/services/recipes.ts',
+        'src/main/services/templates.ts',
         'src/main/services/casting.ts',
         'src/main/services/scenarioGraph.ts',
         'src/main/services/graphHistory.ts',

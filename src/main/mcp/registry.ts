@@ -66,6 +66,7 @@ import {
 import { feedPreview, nicheThumbnails } from '../services/nicheVisuals'
 import { refineNodeImagePrompt } from '../services/ai'
 import { searchAll, SEARCH_HIT_TYPES, type SearchHitType } from '../services/search'
+import { createVideoFromTemplate } from '../services/templates'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -403,6 +404,38 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'project',
     risk: 'write',
     execute: ({ projectId, name }) => videos.createVideo(String(projectId), String(name))
+  },
+  {
+    name: 'create_video_from_template',
+    description:
+      'Create a video FROM a workflow template: blueprint imported with its [TOKEN] slots filled and the template’s style applied, in one call. Slots you leave blank keep their token (fill them later with update_node) and come back as unfilledTokens. Template ids, slots and blueprints: docs "templates" / "template:<id>".',
+    inputSchema: obj(
+      {
+        projectId: str(),
+        templateId: str(),
+        name: str('Video name (default: the template’s label).'),
+        slots: {
+          type: 'object',
+          description: 'Literal token → value, e.g. {"[PRODUCT]": "Aurora headphones"}.'
+        }
+      },
+      ['projectId', 'templateId']
+    ),
+    scope: 'project',
+    risk: 'write',
+    execute: ({ projectId, templateId, name, slots }) =>
+      createVideoFromTemplate({
+        projectId: String(projectId),
+        templateId: String(templateId),
+        ...(name !== undefined ? { name: String(name) } : {}),
+        ...(slots && typeof slots === 'object'
+          ? {
+              slots: Object.fromEntries(
+                Object.entries(slots as Record<string, unknown>).map(([k, v]) => [k, String(v)])
+              )
+            }
+          : {})
+      })
   },
   {
     name: 'rename_video',
