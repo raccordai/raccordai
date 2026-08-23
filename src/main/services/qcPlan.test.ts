@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { LintFinding } from '@shared/promptLint'
-import { buildQcUserText, foldLintIntoVerdict, isQcEligible, parseQcVerdict } from './qcPlan'
+import {
+  buildClipQcUserText,
+  imageReferenceUrls,
+  isClipQcEligible,
+  buildQcUserText,
+  foldLintIntoVerdict,
+  isQcEligible,
+  parseQcVerdict
+} from './qcPlan'
 
 describe('isQcEligible', () => {
   it('accepts only image models', () => {
@@ -104,5 +112,64 @@ describe('foldLintIntoVerdict', () => {
     expect(folded.verdict).toBe('warn')
     expect(folded.notes.startsWith('Her left hand has six fingers.')).toBe(true)
     expect(folded.notes).toContain('⚠ No motion described.')
+  })
+})
+
+describe('clip QC helpers', () => {
+  it('is eligible for video models only', () => {
+    expect(isClipQcEligible('video')).toBe(true)
+    expect(isClipQcEligible('image')).toBe(false)
+    expect(isClipQcEligible('audio')).toBe(false)
+    expect(isClipQcEligible(undefined)).toBe(false)
+  })
+
+  it('builds the clip user text with frame count, duration and references', () => {
+    const text = buildClipQcUserText({
+      prompt: 'A tracking shot of Léa',
+      frameCount: 3,
+      referenceCount: 2,
+      durationSec: 8.04
+    })
+    expect(text).toContain('3 images above are frames sampled in playback order of a 8.0s clip')
+    expect(text).toContain('2 following image(s) are the reference sheets')
+    expect(text).toContain('A tracking shot of Léa')
+  })
+
+  it('omits the reference line without references and survives an empty prompt', () => {
+    const text = buildClipQcUserText({ prompt: '', frameCount: 3, referenceCount: 0 })
+    expect(text).not.toContain('reference sheets')
+    expect(text).toContain('(empty prompt)')
+  })
+})
+
+describe('imageReferenceUrls', () => {
+  const model = {
+    inputs: [
+      { key: 'reference_image_urls', accepts: ['image'] as const },
+      { key: 'reference_video_urls', accepts: ['video'] as const },
+      { key: 'first_frame_url', accepts: ['image'] as const }
+    ]
+  }
+
+  it('keeps only urls wired to image-accepting handles, in handle order', () => {
+    const urls = imageReferenceUrls(
+      {
+        reference_video_urls: ['https://kie/video.mp4'],
+        first_frame_url: ['https://kie/frame.png'],
+        reference_image_urls: ['https://kie/sheet1.png', 'https://kie/sheet2.png']
+      },
+      model
+    )
+    expect(urls).toEqual([
+      'https://kie/sheet1.png',
+      'https://kie/sheet2.png',
+      'https://kie/frame.png'
+    ])
+  })
+
+  it('returns nothing without inputs or model, and skips unknown handles', () => {
+    expect(imageReferenceUrls(undefined, model)).toEqual([])
+    expect(imageReferenceUrls({ x: ['u'] }, undefined)).toEqual([])
+    expect(imageReferenceUrls({ mystery_handle: ['u'] }, model)).toEqual([])
   })
 })

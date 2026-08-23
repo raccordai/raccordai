@@ -22,7 +22,7 @@ import type { ToolMediaResult } from '../mcp/registry'
 
 const exec = promisify(execFile)
 
-async function probeDurationSec(path: string): Promise<number | null> {
+export async function probeDurationSec(path: string): Promise<number | null> {
   try {
     const { stdout } = await exec(ffprobePath(), [
       '-v',

@@ -95,7 +95,7 @@ import {
   runNode
 } from '../services/runEngine'
 import { clampVariants } from '../services/runPlanner'
-import { reviewGeneration } from '../services/qc'
+import { reviewClipGeneration, reviewGeneration } from '../services/qc'
 import * as videos from '../services/videos'
 import { DOC_TOPICS, getDoc } from './docs'
 
@@ -1954,6 +1954,15 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'spending',
     execute: ({ generationId }) => reviewGeneration(String(generationId))
+  },
+  {
+    name: 'review_clip',
+    description:
+      'Vision QC on a successful VIDEO generation: first/middle/last frames are sampled locally and judged against the prompt and the wired reference sheets (defects, identity drift, camera move). Verdict pass/warn + notes, persisted on the generation. Costs a small amount of credits.',
+    inputSchema: obj({ generationId: str() }, ['generationId']),
+    scope: 'global',
+    risk: 'spending',
+    execute: ({ generationId }) => reviewClipGeneration(String(generationId))
   },
   {
     name: 'get_generations',

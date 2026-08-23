@@ -84,6 +84,7 @@ describe('AGENT_TOOLS registry', () => {
     const spending = AGENT_TOOLS.filter((t) => t.risk === 'spending').map((t) => t.name)
     expect(spending.sort()).toEqual([
       'finalize_video',
+      'review_clip',
       'review_generation',
       'run_batch',
       'run_node'

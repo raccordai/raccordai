@@ -98,3 +98,67 @@ export function foldLintIntoVerdict(
   const lintBlock = `Prompt lint:\n${formatFindings(findings)}`
   return { verdict, notes: [result.notes, lintBlock].filter(Boolean).join('\n\n') }
 }
+
+/** Clip QC (§6.2 extended): video outputs, judged from sampled frames. */
+export function isClipQcEligible(kind: ModelKind | undefined): boolean {
+  return kind === 'video'
+}
+
+export const CLIP_QC_SYSTEM = `You are a strict visual QA reviewer for AI-generated video clips in a film-making tool.
+You are shown FRAMES SAMPLED from the generated clip in playback order (start → end), then any REFERENCE images (design sheets that guided it), then the prompt that produced it.
+Judge only what matters for production use. Check:
+- Does the clip fulfill the prompt (subject, composition, style, the described action and camera move — infer motion from how the frames differ)?
+- Obvious generation defects: deformed anatomy (hands, faces), morphing between frames, duplicated limbs, garbled on-screen text, watermark artifacts.
+- Identity drift across frames: the same character/décor must stay itself from the first frame to the last.
+- If reference images are provided: is the depicted character/décor/prop consistent with them (identity, outfit, colors)?
+Remember you see samples, not the full motion — flag only what the frames actually show.
+Reply with ONLY a JSON object, no markdown fence, no prose around it:
+{"verdict":"pass","notes":""} or {"verdict":"warn","notes":"<each issue, one short sentence, most severe first>"}
+"pass" = usable as-is. "warn" = anything a director would send back. Write the notes in the prompt's language.`
+
+export interface ClipQcContext {
+  /** The styled prompt that produced the clip (from the input snapshot). */
+  prompt: string
+  /** How many frames were sampled from the clip. */
+  frameCount: number
+  /** Number of reference images attached after the frames. */
+  referenceCount: number
+  /** Measured clip length, when known. */
+  durationSec?: number | null
+}
+
+/** The text block appended after the frame + reference blocks of a clip QC. */
+export function buildClipQcUserText(ctx: ClipQcContext): string {
+  const lines: string[] = []
+  const duration = ctx.durationSec ? ` of a ${ctx.durationSec.toFixed(1)}s clip` : ''
+  lines.push(
+    `The ${ctx.frameCount} images above are frames sampled in playback order${duration} (first frame → last frame).`
+  )
+  if (ctx.referenceCount > 0) {
+    lines.push(
+      `The ${ctx.referenceCount} following image(s) are the reference sheets the clip must stay consistent with.`
+    )
+  }
+  lines.push(`Prompt that produced it:\n${ctx.prompt || '(empty prompt)'}`)
+  lines.push('Give your verdict.')
+  return lines.join('\n\n')
+}
+
+/**
+ * The snapshot input URLs that can ride along as reference IMAGES: only the
+ * handles whose declared `accepts` includes 'image' (a reference VIDEO url
+ * would be rejected by the vision provider), in handle order, capped by the
+ * caller. Unknown handles are skipped — never guessed from the file name.
+ */
+export function imageReferenceUrls(
+  inputs: Record<string, string[]> | undefined,
+  model: { inputs: Array<{ key: string; accepts: readonly string[] }> } | undefined
+): string[] {
+  if (!inputs || !model) return []
+  const urls: string[] = []
+  for (const handle of model.inputs) {
+    if (!handle.accepts.includes('image')) continue
+    for (const url of inputs[handle.key] ?? []) urls.push(url)
+  }
+  return urls
+}

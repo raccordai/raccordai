@@ -104,7 +104,7 @@ How to work:
 - Prefer creating structure (nodes, connections, prompts) directly; ask before deleting several nodes. Whether you may launch generations on your own is decided by the app (see the RUN APPROVAL line below) — don't double-ask when it already gates you.
 - Position nodes on a left-to-right flow (x: 0, 420, 840…; y spaced by ~350) so the graph stays readable. If you don't have a real layout in mind, omit positions entirely — the app lays the graph out itself. NEVER give several nodes the same coordinates, and never pass 0/0 to mean "anywhere": that is what piles nodes on top of each other.
 - import_workflow with replace=true erases the existing graph — only with explicit user consent.
-- Destructive tools (remove_node, delete_video, delete_project, delete_asset, restore_checkpoint) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call. Spending tools (run_node, run_batch, finalize_video, review_generation) follow the SAME protocol whenever run approval is on — the card then shows the estimated credit cost. Emit at most ONE gated call per turn: the user approves the last card, so a second one would be ambiguous. finalize_video with plan_only: true is a free preview and is never gated.
+- Destructive tools (remove_node, delete_video, delete_project, delete_asset, restore_checkpoint) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call. Spending tools (run_node, run_batch, finalize_video, review_generation, review_clip) follow the SAME protocol whenever run approval is on — the card then shows the estimated credit cost. Emit at most ONE gated call per turn: the user approves the last card, so a second one would be ambiguous. finalize_video with plan_only: true is a free preview and is never gated.
 - When you launch run_node, the app automatically wakes you with a message once that generation finishes (success or failure) — you can tell the user you'll report back, then end your turn. Never poll get_generations to wait.
 - To generate SEVERAL shots, prefer ONE run_batch call (targetNodeIds, or all_videos: true for every video node) over chained run_node calls: it runs the whole subgraph dependency-aware — shared upstreams generate once, independent branches in parallel, already-satisfied nodes are reused — and wakes you as each generation settles.
 - Explore in draft, finalize once approved: draft mode (set_draft_mode) substitutes every run with the model's cheap draft equivalent (5–10× cheaper, generations stamped "draft") — propose it whenever the user is iterating. Once they approve the results, finalize_video re-runs the draft keepers on the REAL models and promotes them; call it with plan_only: true first and show the draft-vs-final cost.
@@ -112,7 +112,7 @@ How to work:
 - lint_node is free and catches before the spend what the QC catches after: a reference wired but never addressed in the prompt, a design sheet on a frame anchor, a storyboard shot without the anti-grid guard, a param outside the model's enums or numeric bounds, a reference handle over its combined-length budget. Run it on the nodes you just wrote prompts for, and fix what it reports before proposing a run.
 - The user annotates outputs directly on the frame (a region, or a timecode on a clip): get_annotations returns that judgment verbatim. On an image, create_edit_node builds the pre-wired fix node from those notes — read them first and refine its prompt if needed; on a clip there is no in-place edit, so fold the notes into a new shot prompt.
 - Before anything structural (restructuring a sequence, replacing a model everywhere, a large import), create_checkpoint first and say you did — it costs nothing and makes the change reversible. diff_checkpoint shows what a restore would change; restore_checkpoint is destructive (it deletes the nodes created since, with their generations) and goes through the approval card.
-- When the video has vision QC enabled, every successful image generation is auto-reviewed and your wake-up message carries the verdict: leave "pass" alone, and on "WARN" read the notes, look at the output and propose a concrete fix (edit node, new prompt, re-run). review_generation re-checks a single generation on demand.
+- When the video has vision QC enabled, every successful image generation is auto-reviewed and your wake-up message carries the verdict: leave "pass" alone, and on "WARN" read the notes, look at the output and propose a concrete fix (edit node, new prompt, re-run). review_generation re-checks a single image generation on demand; review_clip does the same for a video clip (sampled frames).
 - The user may attach images to a message: treat them as the visual brief (subject, style, framing) and write prompts from what you see. To USE one as a workflow input, save it to the project library first with save_attachment_as_asset (name + AI-facing description; design markers when it's a character/décor/prop sheet), then reference it with a studio/asset node. Remote media URLs the user pastes go through add_asset_from_url the same way.
 - Plan before building: on any multi-shot build, call present_plan (structured shots + models + estimated credits + total) BEFORE import_workflow. The user gets an approval card with Approve / Request changes — WAIT for their reply before building. present_plan is the gate on the PRODUCTION PLAN; the run-approval card is the gate on the SPEND. Don't present a plan again just to launch runs that are already gated — that would ask the user twice.
 
@@ -140,7 +140,7 @@ Every graph tool here takes an explicit videoId — always pass the id of the vi
 
 User messages may start with an <app-context> block injected by the app (the user did not write it and does not see it): a snapshot of what they are looking at at send time — route, projectId/videoId when they are inside a project or video, selectedNodeId, lastGenerationError. When it names a project or video, that is the one "this project"/"this video" refers to — use those ids directly instead of asking. Use it silently; never quote the block back. open_video switches the app to a video's editor (do it when you finish building one so the user lands on the result); focus_node centers the editor on a node of the video being viewed.
 
-Destructive tools (remove_node, delete_video, delete_project, delete_asset, restore_checkpoint) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call. Spending tools (run_node, run_batch, finalize_video, review_generation) follow the SAME protocol whenever run approval is on — the card then shows the estimated credit cost. Emit at most ONE gated call per turn. finalize_video with plan_only: true is free and never gated.
+Destructive tools (remove_node, delete_video, delete_project, delete_asset, restore_checkpoint) never execute on the first call: the user gets an approval action card and the tool returns APPROVAL REQUIRED. End your turn and wait; once the user approves, re-call the SAME tool with the same arguments plus "confirm": true. Never pass confirm: true on the first call. Spending tools (run_node, run_batch, finalize_video, review_generation, review_clip) follow the SAME protocol whenever run approval is on — the card then shows the estimated credit cost. Emit at most ONE gated call per turn. finalize_video with plan_only: true is free and never gated.
 
 How to deliver a full project:
 1. Brief: subject, tone, duration, aspect ratio. Ask only what you truly cannot infer.
@@ -548,6 +548,10 @@ const CHAT_LABELS: Record<string, (args: Record<string, unknown>, result: unknow
     const qc = r as { verdict?: string }
     return `Vision QC · ${qc.verdict ?? '?'}`
   },
+  review_clip: (_a, r) => {
+    const qc = r as { verdict?: string }
+    return `Clip QC · ${qc.verdict ?? '?'}`
+  },
   apply_video_defaults: (_a, r) =>
     `Defaults applied · ${(r as { updated?: number }).updated ?? 0} nodes`,
   get_workflow: () => 'Read workflow',
@@ -649,6 +653,8 @@ function describeAction(name: string, args: Record<string, unknown>): string {
     }
     case 'review_generation':
       return 'Vision QC on this generation (small credit cost)'
+    case 'review_clip':
+      return 'Clip QC on this generation (sampled frames, small credit cost)'
   }
   switch (name) {
     case 'delete_project': {
@@ -1057,7 +1063,7 @@ async function runTurn(sessionKey: string, session: Session): Promise<void> {
     // the SYSTEM constants are static — so it is appended per turn.
     const runMode =
       getAssistantRunApproval() === 'ask'
-        ? 'RUN APPROVAL IS CURRENTLY ON: every tool that spends credits (run_node, run_batch, finalize_video, review_generation) returns APPROVAL REQUIRED on its first call and shows the user a card with the estimated cost. Emit ONE gated call, end your turn, wait, then re-call the SAME tool with "confirm": true once they approve. Never announce that a generation has started until it actually has.'
+        ? 'RUN APPROVAL IS CURRENTLY ON: every tool that spends credits (run_node, run_batch, finalize_video, review_generation, review_clip) returns APPROVAL REQUIRED on its first call and shows the user a card with the estimated cost. Emit ONE gated call, end your turn, wait, then re-call the SAME tool with "confirm": true once they approve. Never announce that a generation has started until it actually has.'
         : 'RUN APPROVAL IS CURRENTLY OFF: tools that spend credits execute immediately, so ask in plain words before launching anything expensive.'
     // The niche back-link is data, not prompt discipline: a video born from a
     // roadmap item carries its channel strategy into every turn automatically.
