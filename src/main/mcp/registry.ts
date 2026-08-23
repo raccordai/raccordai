@@ -1991,6 +1991,26 @@ export const AGENT_TOOLS: AgentTool[] = [
     }
   },
   {
+    name: 'export_image',
+    description:
+      'Copy an image generation’s downloaded file to disk (e.g. the roadmap thumbnail, ready to upload): explicit outputPath, or Downloads/<file_name>.<ext> — never overwrites, suffixes instead. Returns the written path. Images only.',
+    inputSchema: obj(
+      {
+        generationId: str(),
+        outputPath: str('Absolute destination path (default: Downloads folder)'),
+        file_name: str('Base file name used with the default folder (default "thumbnail").')
+      },
+      ['generationId']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ generationId, outputPath, file_name }) =>
+      generations.exportGenerationImage(String(generationId), {
+        ...(outputPath ? { outputPath: String(outputPath) } : {}),
+        ...(file_name ? { fileName: String(file_name) } : {})
+      })
+  },
+  {
     name: 'cancel_generation',
     description: 'Cancel a node’s in-flight generation (queued or polling). No smart retry after.',
     inputSchema: obj({ nodeId: str() }, ['nodeId']),

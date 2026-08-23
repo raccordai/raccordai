@@ -1,3 +1,6 @@
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { dirname, extname, join } from 'node:path'
+import { app } from 'electron'
 import { and, desc, eq } from 'drizzle-orm'
 import { estimateCreditsFor, getModel } from '@shared/models'
 import { resolveDraftRun } from '@shared/models/draft'
@@ -193,4 +196,35 @@ export function timelineFallbackImages(
     }
   }
   return out
+}
+
+/**
+ * Headless image export (export_image): copies a generation's downloaded image
+ * to an explicit destination, or Downloads/<name>.<ext> when none is given —
+ * the MCP counterpart of the IPC handler's save-dialog flow (same rules:
+ * downloaded media only, images only). Suffixes instead of overwriting.
+ */
+export function exportGenerationImage(
+  generationId: string,
+  opts: { outputPath?: string; fileName?: string } = {}
+): { path: string } {
+  const row = getGeneration(generationId)
+  if (!row?.resultPath) {
+    throw new Error('This generation has no downloaded media to export.')
+  }
+  if (!(row.resultMimeType ?? '').startsWith('image/')) {
+    throw new Error('Only image generations can be exported as a file.')
+  }
+  let target = opts.outputPath
+  if (!target) {
+    const ext = extname(row.resultPath).replace('.', '') || 'png'
+    const base =
+      (opts.fileName ?? 'thumbnail').replace(/[^a-zA-Z0-9-_ ]/g, '').trim() || 'thumbnail'
+    const dir = app.getPath('downloads')
+    target = join(dir, `${base}.${ext}`)
+    for (let i = 2; existsSync(target); i++) target = join(dir, `${base}-${i}.${ext}`)
+  }
+  mkdirSync(dirname(target), { recursive: true })
+  copyFileSync(row.resultPath, target)
+  return { path: target }
 }

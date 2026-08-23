@@ -342,8 +342,7 @@ export function registerIpcHandlers(): void {
       filters: [{ name: 'Image', extensions: [ext] }]
     })
     if (result.canceled || !result.filePath) return null
-    await copyFile(row.resultPath, result.filePath)
-    return { path: result.filePath }
+    return generationsService.exportGenerationImage(generationId, { outputPath: result.filePath })
   })
   handle('generations:queueState', () => runEngine.queueState())
   handle('notifications:batchSummary', ({ succeeded, failed }) =>
