@@ -153,6 +153,7 @@
     "play": "Lecture",
     "pause": "Pause",
     "playPause": "Lecture / pause (clic)",
+    "shuttleRate": "Lecture rapide \u00d7{{rate}} \u2014 L pour acc\u00e9l\u00e9rer, pause pour revenir \u00e0 \u00d71",
     "noOutput": "Pas encore de sortie pour ce clip",
     "clipSettings": "Réglages du clip (trim, transition, texte)",
     "trimIn": "Entrée (s)",
@@ -828,6 +829,7 @@
     "replaceConfirm": "Remplacer les nœuds existants, ou fusionner l’import dans le graphe actuel ?",
     "deleteNodeConfirm": "Supprimer ce nœud et toutes ses générations ?",
     "copyNodeName": "Copier le nom du nœud",
+    "jumpToTimelineClip": "Voir ce clip dans la timeline",
     "estimatedCost": "~{{credits}} crédits (estimation)",
     "historyPanel": {
       "title": "Historique",

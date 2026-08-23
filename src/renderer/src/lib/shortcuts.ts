@@ -43,6 +43,8 @@ export const SHORTCUTS = {
   toggleHistory: { key: 'y', mod: true },
   toggleTimeline: { key: 't', mod: true },
   playPause: { key: ' ' },
+  /** FCP shuttle: play forward, repeated presses step the rate 1×→2×→4×→8×. */
+  shuttleForward: { key: 'l' },
   /** Razor: split the timeline clip under the playhead (§6.12e). */
   splitClip: { key: 's' },
   /** One timecode frame back/forward (Premiere/FCP habit). */

@@ -11,6 +11,8 @@ import {
   buildConcatListContent,
   buildCrossfadeArgs,
   buildLastFrameArgs,
+  buildPreviewArgs,
+  resolvePreviewSeek,
   buildMuxArgs,
   assColor,
   buildAssContent,
@@ -255,6 +257,42 @@ describe('buildLastFrameArgs', () => {
     expect(joined).toContain('-frames:v 1')
     expect(joined).toContain('-update 1')
     expect(args.at(-1)).toBe('/tmp/frame-1.jpg')
+  })
+})
+
+describe('resolvePreviewSeek', () => {
+  it('maps positions to seeks, degrading middle to first without a duration', () => {
+    expect(resolvePreviewSeek('first', 10)).toEqual({ atSec: 0 })
+    expect(resolvePreviewSeek('middle', 10)).toEqual({ atSec: 5 })
+    expect(resolvePreviewSeek('middle', null)).toEqual({ atSec: 0 })
+    expect(resolvePreviewSeek('last', 10)).toEqual({ fromEnd: true })
+    expect(resolvePreviewSeek('last', null)).toEqual({ fromEnd: true })
+  })
+})
+
+describe('buildPreviewArgs', () => {
+  it('writes one downscaled frame without seeking for stills', () => {
+    const args = buildPreviewArgs('/tmp/gen-1.png', '/tmp/preview.jpg')
+    const joined = args.join(' ')
+    expect(joined).not.toContain('-ss')
+    expect(joined).toContain('-i /tmp/gen-1.png')
+    expect(joined).toContain('-frames:v 1')
+    expect(joined).toContain(
+      "scale=w='min(1024,iw)':h='min(1024,ih)':force_original_aspect_ratio=decrease"
+    )
+    expect(args.at(-1)).toBe('/tmp/preview.jpg')
+  })
+
+  it('seeks before the input and honours maxDim', () => {
+    const args = buildPreviewArgs('/tmp/gen-1.mp4', '/tmp/preview.jpg', { atSec: 2.5, maxDim: 512 })
+    const joined = args.join(' ')
+    expect(joined).toContain('-ss 2.500 -i /tmp/gen-1.mp4')
+    expect(joined).toContain('min(512,iw)')
+  })
+
+  it('seeks from the end for the last frame', () => {
+    const args = buildPreviewArgs('/tmp/gen-1.mp4', '/tmp/preview.jpg', { fromEnd: true })
+    expect(args.join(' ')).toContain('-sseof -0.1 -i /tmp/gen-1.mp4')
   })
 })
 

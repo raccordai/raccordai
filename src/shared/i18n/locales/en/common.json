@@ -153,6 +153,7 @@
     "play": "Play",
     "pause": "Pause",
     "playPause": "Play / pause (click)",
+    "shuttleRate": "Fast playback \u00d7{{rate}} \u2014 press L to speed up, pause to reset to \u00d71",
     "noOutput": "No output for this clip yet",
     "clipSettings": "Clip settings (trim, transition, text)",
     "trimIn": "In (s)",
@@ -828,6 +829,7 @@
     "replaceConfirm": "Replace the existing nodes, or merge the import into the current graph?",
     "deleteNodeConfirm": "Delete this node and all its generations?",
     "copyNodeName": "Copy the node name",
+    "jumpToTimelineClip": "See this clip in the timeline",
     "estimatedCost": "~{{credits}} credits (estimate)",
     "historyPanel": {
       "title": "History",

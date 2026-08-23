@@ -3,7 +3,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { app as electronApp } from 'electron'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { AGENT_TOOLS, executeAgentTool } from './registry'
+import { AGENT_TOOLS, executeAgentTool, isToolMediaResult } from './registry'
 
 /**
  * MCP server — publishes the agent-tool registry over the Streamable HTTP
@@ -32,6 +32,20 @@ function buildServer(): Server {
         request.params.name,
         (request.params.arguments ?? {}) as Record<string, unknown>
       )
+      // Media results become real image content blocks — the client's model
+      // sees the picture, not a JSON blob of base64.
+      if (isToolMediaResult(result)) {
+        return {
+          content: [
+            ...result.images.map((image) => ({
+              type: 'image' as const,
+              data: image.base64,
+              mimeType: image.mediaType
+            })),
+            { type: 'text' as const, text: result.text }
+          ]
+        }
+      }
       return {
         content: [
           { type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }
