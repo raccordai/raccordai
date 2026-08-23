@@ -29,6 +29,7 @@ export default defineConfig({
         'src/main/services/scenarioGraph.ts',
         'src/main/services/graphHistory.ts',
         'src/main/services/genQueue.ts',
+        'src/main/services/generationWait.ts',
         'src/main/services/renderPlan.ts',
         'src/main/services/runPlanner.ts',
         'src/main/services/qcPlan.ts',

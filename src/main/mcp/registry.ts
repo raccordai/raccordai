@@ -55,6 +55,7 @@ import {
   updateFeedbackItem
 } from '../services/feedback'
 import { getTimelineInfo } from '../services/timelineInfo'
+import { waitForGenerations } from '../services/generationWait'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -1931,6 +1932,32 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'read',
     execute: () => queueState()
+  },
+  {
+    name: 'wait_for_generations',
+    description:
+      'Long-poll: blocks until the listed generations (and/or every in-flight generation of the listed nodes) settle — success or failure — or timeout_sec elapses (default 120, max 600; a timeout returns stillPending instead of throwing). For external agents; the embedded assistant is woken automatically and never needs this.',
+    inputSchema: obj({
+      generationIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Generation ids to wait on (already-settled ids report immediately).'
+      },
+      nodeIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Wait on every pending/running generation of these nodes.'
+      },
+      timeout_sec: { type: 'number' }
+    }),
+    scope: 'global',
+    risk: 'read',
+    execute: ({ generationIds, nodeIds, timeout_sec }) =>
+      waitForGenerations({
+        generationIds: Array.isArray(generationIds) ? generationIds.map(String) : undefined,
+        nodeIds: Array.isArray(nodeIds) ? nodeIds.map(String) : undefined,
+        timeoutSec: typeof timeout_sec === 'number' ? timeout_sec : undefined
+      })
   },
   {
     name: 'render_video',
