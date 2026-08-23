@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
 import { createProject } from './projects'
 import { createVideo } from './videos'
-import { undoGraph } from './graphHistory'
+import { historyState, undoGraph } from './graphHistory'
 import { createNode, listGraph } from './graph'
-import { linkShots } from './continuity'
+import { linkShots, planLinkShots } from './continuity'
 
 const SEEDANCE = 'bytedance/seedance-2-fast'
 const SEEDANCE_15 = 'bytedance/seedance-1.5-pro'
@@ -150,5 +150,41 @@ describe('linkShots', () => {
     expect(() => linkShots(videoId, [a.id])).toThrow(/at least two shots/)
     expect(() => linkShots(videoId, [a.id, image.id])).toThrow(/not a video shot/)
     expect(() => linkShots(videoId, [a.id, 'nope'])).toThrow(/Unknown nodeId/)
+  })
+})
+
+describe('planLinkShots', () => {
+  it('reports what would be chained without touching the graph', () => {
+    const a = shot('Shot 01')
+    const b = shot('Shot 02', SEEDANCE_15)
+    const c = shot('Shot 03')
+
+    const plan = planLinkShots(videoId, [a.id, b.id, c.id])
+    // a→b impossible (no reference-video input on 1.5); b→c would chain.
+    expect(plan.skipped).toHaveLength(1)
+    expect(plan.skipped[0]).toMatchObject({ sourceNodeId: a.id, targetNodeId: b.id })
+    expect(plan.toLink).toEqual([
+      {
+        sourceNodeId: b.id,
+        targetNodeId: c.id,
+        alias: '@Video1',
+        role: expect.stringContaining('PREVIOUS shot')
+      }
+    ])
+    expect(plan.alreadyLinked).toEqual([])
+    // Dry run: no edge, no prompt change, no undo step.
+    expect(listGraph(videoId).edges).toEqual([])
+    expect(historyState(videoId).canUndo).toBe(true) // node creations only
+  })
+
+  it('reports an existing chain as alreadyLinked', () => {
+    const a = shot('Shot 01')
+    const b = shot('Shot 02')
+    linkShots(videoId, [a.id, b.id])
+    const plan = planLinkShots(videoId, [a.id, b.id])
+    expect(plan.toLink).toEqual([])
+    expect(plan.alreadyLinked).toEqual([
+      { sourceNodeId: a.id, targetNodeId: b.id, alias: '@Video1' }
+    ])
   })
 })

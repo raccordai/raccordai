@@ -31,14 +31,20 @@ export interface LinkShotsResult {
   skipped: Array<{ sourceNodeId: string; targetNodeId: string; reason: string }>
 }
 
+export interface LinkShotsPlan {
+  /** Cuts a real call would chain: new edge + role sentence on the target. */
+  toLink: Array<{ sourceNodeId: string; targetNodeId: string; alias: string; role: string }>
+  /** Cuts already chained, with the alias they already answer to. */
+  alreadyLinked: Array<{ sourceNodeId: string; targetNodeId: string; alias: string }>
+  skipped: LinkShotsResult['skipped']
+}
+
 /**
- * Chains `nodeIds` in the given order (timeline order — the caller's job).
- * Every node must belong to `videoId` and be a video shot. A target whose model
- * has no reference-video input (Seedance 1.5, Grok) or whose handle is already
- * full is reported in `skipped`, so one impossible cut never costs the rest of
- * the chain.
+ * Free dry run of linkShots (plan_only): the same pair-by-pair decisions —
+ * missing reference-video handle, budget, already-chained detection — with no
+ * graph mutation. linkShots is this plan plus the one-undo-step application.
  */
-export function linkShots(videoId: string, nodeIds: string[]): LinkShotsResult {
+export function planLinkShots(videoId: string, nodeIds: string[]): LinkShotsPlan {
   if (nodeIds.length < 2) {
     throw new Error('Chaining continuity needs at least two shots, in timeline order.')
   }
@@ -76,14 +82,7 @@ export function linkShots(videoId: string, nodeIds: string[]): LinkShotsResult {
     }
   }
 
-  const result: LinkShotsResult = { linked: [], skipped: [] }
-  const planned: Array<{
-    handle: InputHandle
-    targetRow: (typeof rows)[number]
-    alias: string
-    role: string
-    sourceId: string
-  }> = []
+  const result: LinkShotsPlan = { toLink: [], alreadyLinked: [], skipped: [] }
 
   // Planned pair by pair: the budget belongs to the TARGET's handle, and a
   // sequence may legitimately mix models.
@@ -106,7 +105,7 @@ export function linkShots(videoId: string, nodeIds: string[]): LinkShotsResult {
     const wired = wiredTo(target.id, handle.key)
     const existingIndex = wired.findIndex((e) => e.sourceNodeId === source.id)
     if (existingIndex >= 0) {
-      result.linked.push({
+      result.alreadyLinked.push({
         sourceNodeId: source.id,
         targetNodeId: target.id,
         alias: `${handle.referenceAlias ?? '@Video'}${existingIndex + 1}`
@@ -139,38 +138,54 @@ export function linkShots(videoId: string, nodeIds: string[]): LinkShotsResult {
       })
     }
     for (const link of plan.links) {
-      planned.push({
-        handle,
-        targetRow: target,
+      result.toLink.push({
+        sourceNodeId: link.sourceId,
+        targetNodeId: target.id,
         alias: link.alias,
-        role: link.role,
-        sourceId: link.sourceId
+        role: link.role
       })
     }
   }
 
-  if (planned.length === 0) return result
+  return result
+}
+
+/**
+ * Chains `nodeIds` in the given order (timeline order — the caller's job).
+ * Every node must belong to `videoId` and be a video shot. A target whose model
+ * has no reference-video input (Seedance 1.5, Grok) or whose handle is already
+ * full is reported in `skipped`, so one impossible cut never costs the rest of
+ * the chain.
+ */
+export function linkShots(videoId: string, nodeIds: string[]): LinkShotsResult {
+  const plan = planLinkShots(videoId, nodeIds)
+  const db = getDb()
+  // Already-chained cuts first, then the applied ones — the historical order.
+  const result: LinkShotsResult = { linked: [...plan.alreadyLinked], skipped: plan.skipped }
+  if (plan.toLink.length === 0) return result
 
   withGraphHistoryGroup(videoId, () => {
-    for (const link of planned) {
+    for (const link of plan.toLink) {
+      const targetRow = db.select().from(nodes).where(eq(nodes.id, link.targetNodeId)).get()!
+      const handle = referenceVideoHandle(targetRow.modelId)!
       graph.connectNodes({
         videoId,
-        sourceNodeId: link.sourceId,
+        sourceNodeId: link.sourceNodeId,
         sourceHandle: 'output',
-        targetNodeId: link.targetRow.id,
-        targetHandle: link.handle.key
+        targetNodeId: link.targetNodeId,
+        targetHandle: handle.key
       })
       // A reference nobody addresses in the prompt only guides by accident —
       // the rule the lint enforces, applied at wiring time.
-      const params = { ...((link.targetRow.params as Record<string, unknown> | null) ?? {}) }
+      const params = { ...((targetRow.params as Record<string, unknown> | null) ?? {}) }
       const prompt = typeof params.prompt === 'string' ? params.prompt : ''
       if (!prompt.includes(link.alias)) {
         params.prompt = prompt.trim() ? `${prompt.trim()} ${link.role}` : link.role
-        graph.updateNodeParams(link.targetRow.id, params)
+        graph.updateNodeParams(link.targetNodeId, params)
       }
       result.linked.push({
-        sourceNodeId: link.sourceId,
-        targetNodeId: link.targetRow.id,
+        sourceNodeId: link.sourceNodeId,
+        targetNodeId: link.targetNodeId,
         alias: link.alias
       })
     }

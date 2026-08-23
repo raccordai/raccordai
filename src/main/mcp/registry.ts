@@ -19,7 +19,7 @@ import {
   deleteAnnotation,
   listAnnotations
 } from '../services/annotations'
-import { linkShots } from '../services/continuity'
+import { linkShots, planLinkShots } from '../services/continuity'
 import {
   castRole,
   createCasting,
@@ -1427,14 +1427,22 @@ export const AGENT_TOOLS: AgentTool[] = [
           type: 'array',
           items: { type: 'string' },
           description: 'Video shot node ids IN TIMELINE ORDER (at least two).'
+        },
+        plan_only: {
+          type: 'boolean',
+          description: 'Dry run: report what would be chained without touching the graph.'
         }
       },
       ['videoId', 'nodeIds']
     ),
     scope: 'video',
     risk: 'write',
-    execute: ({ videoId, nodeIds }) =>
-      linkShots(String(videoId), (Array.isArray(nodeIds) ? nodeIds : []).map(String))
+    execute: ({ videoId, nodeIds, plan_only }) => {
+      const ids = (Array.isArray(nodeIds) ? nodeIds : []).map(String)
+      return plan_only === true
+        ? planLinkShots(String(videoId), ids)
+        : linkShots(String(videoId), ids)
+    }
   },
   {
     name: 'list_castings',
