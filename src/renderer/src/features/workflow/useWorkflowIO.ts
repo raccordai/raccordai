@@ -11,7 +11,7 @@ import {
   sanitizeName,
   type FcpxmlAudioTrack,
   type FcpxmlClip
-} from '@renderer/lib/exportFcpxml'
+} from '@shared/fcpxml'
 import { fetchMediaBlob } from '@renderer/lib/mediaProxy'
 import { detectVideoFps, probeAudioDuration, probeVideoDimensions } from '@renderer/lib/probeMedia'
 import { isCaptionPresetId } from '@shared/captions'

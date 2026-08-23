@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GraphNode } from '@shared/ipc/contracts'
-import { buildFcpxml, extForMime, type FcpxmlAudioTrack } from './exportFcpxml'
+import { buildFcpxml, extForMime, type FcpxmlAudioTrack } from './fcpxml'
 
 let seq = 0
 function node(overrides: Partial<GraphNode> = {}): GraphNode {

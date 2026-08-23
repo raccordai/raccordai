@@ -68,6 +68,7 @@ import { refineNodeImagePrompt } from '../services/ai'
 import { searchAll, SEARCH_HIT_TYPES, type SearchHitType } from '../services/search'
 import { createVideoFromTemplate } from '../services/templates'
 import { exportPublishKit } from '../services/publishKit'
+import { exportFcpxmlBundle } from '../services/fcpxmlExport'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -2363,6 +2364,24 @@ export const AGENT_TOOLS: AgentTool[] = [
         ...(isCaptionPresetId(captionsPreset) ? { captionsPreset } : {}),
         ...(burnSubtitles !== undefined ? { burnSubtitles: Boolean(burnSubtitles) } : {}),
         ...(duckMusic !== undefined ? { duckMusic: Boolean(duckMusic) } : {})
+      })
+  },
+  {
+    name: 'export_fcpxml',
+    description:
+      'Hand the cut to a human editor: writes a folder with <video>.fcpxml (FCPXML 1.8 timeline — trims, both audio lanes, per-track volume) plus its media/ files, ready for Final Cut or DaVinci. Local media only; slots without a usable output become placeholder gaps (returned in `gaps`). Default folder: Downloads/<video>-fcpxml.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        outputDir: str('Absolute folder (default: Downloads/<video>-fcpxml)')
+      },
+      ['videoId']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, outputDir }) =>
+      exportFcpxmlBundle(String(videoId), {
+        ...(outputDir ? { outputDir: String(outputDir) } : {})
       })
   },
   {
