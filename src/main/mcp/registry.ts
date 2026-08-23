@@ -67,6 +67,7 @@ import { feedPreview, nicheThumbnails } from '../services/nicheVisuals'
 import { refineNodeImagePrompt } from '../services/ai'
 import { searchAll, SEARCH_HIT_TYPES, type SearchHitType } from '../services/search'
 import { createVideoFromTemplate } from '../services/templates'
+import { exportPublishKit } from '../services/publishKit'
 import { createRecipeNode } from '../services/recipes'
 import { elevenlabsListVoices } from '../services/elevenlabs'
 import {
@@ -2335,6 +2336,34 @@ export const AGENT_TOOLS: AgentTool[] = [
         ...(codec === 'h264' || codec === 'hevc' ? { codec } : {})
       })
     }
+  },
+  {
+    name: 'export_publish_kit',
+    description:
+      'Everything needed to upload, in ONE folder: the rendered MP4, the exported thumbnail (the workflow’s thumbnail recipe node) and metadata.md with the roadmap item’s packaging (title, variants, description draft). Default folder: Downloads/<video>-publish. Synchronous render — then upload and close the loop with mark_roadmap_published.',
+    inputSchema: obj(
+      {
+        videoId: str(),
+        outputDir: str('Absolute folder (default: Downloads/<video>-publish)'),
+        quality: { type: 'string', enum: ['draft', 'standard', 'high'] },
+        codec: { type: 'string', enum: ['h264', 'hevc'] },
+        captionsPreset: { type: 'string', enum: [...CAPTION_PRESET_IDS] },
+        burnSubtitles: { type: 'boolean' },
+        duckMusic: { type: 'boolean' }
+      },
+      ['videoId']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, outputDir, quality, codec, captionsPreset, burnSubtitles, duckMusic }) =>
+      exportPublishKit(String(videoId), {
+        ...(outputDir ? { outputDir: String(outputDir) } : {}),
+        ...(quality === 'draft' || quality === 'standard' || quality === 'high' ? { quality } : {}),
+        ...(codec === 'h264' || codec === 'hevc' ? { codec } : {}),
+        ...(isCaptionPresetId(captionsPreset) ? { captionsPreset } : {}),
+        ...(burnSubtitles !== undefined ? { burnSubtitles: Boolean(burnSubtitles) } : {}),
+        ...(duckMusic !== undefined ? { duckMusic: Boolean(duckMusic) } : {})
+      })
   },
   {
     name: 'cancel_render',
