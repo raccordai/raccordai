@@ -54,7 +54,22 @@ const UPLOAD_TTL_MS = 48 * 60 * 60 * 1000
  * In-flight budget control: a slot is held from task submission until the
  * generation settles. The limit is a user setting (default 2).
  */
-const queue = new GenerationQueue(getMaxConcurrentGenerations, broadcastQueueChanged)
+const queue = new GenerationQueue(getMaxConcurrentGenerations, broadcastQueueChanged, (id, err) => {
+  // Backstop for a task that rejected before settling its own failure: fail
+  // the row so the settle event releases the slot — with maxConcurrent=2 by
+  // default, two leaked slots freeze all generation until restart.
+  logError('run-engine', `queued task crashed for ${id}`, err)
+  try {
+    const row = getDb().select().from(generations).where(eq(generations.id, id)).get()
+    if (row && row.status !== 'success' && row.status !== 'failed') {
+      failGeneration(id, `Internal error: ${err instanceof Error ? err.message : String(err)}`)
+      return // the settle event released the slot
+    }
+  } catch (failErr) {
+    logError('run-engine', `failed to settle crashed task ${id}`, failErr)
+  }
+  queue.release(id)
+})
 onGenerationSettled((event) => {
   queue.release(event.generationId)
   retryCounts.delete(event.generationId)
@@ -708,17 +723,32 @@ function completeFromKie(
     // wake-up note and batch summaries carry the verdict. The service
     // degrades every failure to an 'error' verdict or null — the settle
     // path can never hang on it beyond its internal timeout.
-    void maybeRunQcOnSettle(generationId).then((qc) => {
-      emitGenerationSettled({
-        generationId,
-        videoId: gen.videoId,
-        nodeId: gen.nodeId,
-        status: 'success',
-        errorMessage: null,
-        qcVerdict: qc?.verdict ?? null,
-        qcNotes: qc?.notes ?? null
+    void maybeRunQcOnSettle(generationId)
+      .then((qc) => {
+        emitGenerationSettled({
+          generationId,
+          videoId: gen.videoId,
+          nodeId: gen.nodeId,
+          status: 'success',
+          errorMessage: null,
+          qcVerdict: qc?.verdict ?? null,
+          qcNotes: qc?.notes ?? null
+        })
       })
-    })
+      .catch((err) => {
+        // QC degrades its own failures and should never reject — but if it
+        // does, the settle event MUST still fire or the queue slot leaks.
+        logError('run-engine', `qc-on-settle failed for ${generationId}`, err)
+        emitGenerationSettled({
+          generationId,
+          videoId: gen.videoId,
+          nodeId: gen.nodeId,
+          status: 'success',
+          errorMessage: null,
+          qcVerdict: null,
+          qcNotes: null
+        })
+      })
   } else {
     emitGenerationSettled({
       generationId,
@@ -831,11 +861,17 @@ export function resumePolling(): void {
     .where(inArray(generations.status, ['running', 'pending']))
     .all()
   for (const gen of rows) {
-    if (gen.kieTaskId) {
-      queue.adopt(gen.id)
-      schedulePoll(gen.id, 1, 2000)
-    } else {
-      resubmitFromSnapshot(gen)
+    // Per-row fence: one unresumable row must not stop the others from
+    // resuming (and, called from the boot sequence, must never crash startup).
+    try {
+      if (gen.kieTaskId) {
+        queue.adopt(gen.id)
+        schedulePoll(gen.id, 1, 2000)
+      } else {
+        resubmitFromSnapshot(gen)
+      }
+    } catch (err) {
+      logError('run-engine', `resume failed for ${gen.id}`, err)
     }
   }
   if (rows.length > 0) logInfo('run-engine', `resumed ${rows.length} in-flight generation(s)`)
@@ -874,15 +910,27 @@ function prepFromSnapshot(gen: GenerationRow): PreparedRun | null {
       ? getModel(node.modelId)
       : undefined
   if (!node || !model || !snapshot?.params) return null
+  // buildPayload can throw (param validation, dialogue voice map…) and a model
+  // registry change between versions can make an old snapshot unbuildable.
+  // This runs from resumePolling() at startup: a throw here must fail the row
+  // (the caller's null path), never crash the boot — the row would stay
+  // pending and re-crash every launch.
+  let payload: PreparedRun['payload']
+  try {
+    payload = model.buildPayload({
+      params: snapshot.params as never,
+      inputs: snapshot.inputs ?? {}
+    })
+  } catch (err) {
+    logError('run-engine', `snapshot rebuild failed for ${gen.id}`, err)
+    return null
+  }
   return {
     videoId: gen.videoId,
     modelId: model.id,
     provider: model.provider ?? 'jobs',
     draft: gen.draft ?? false,
-    payload: model.buildPayload({
-      params: snapshot.params as never,
-      inputs: snapshot.inputs ?? {}
-    }),
+    payload,
     inputSnapshot: { ...snapshot, modelId: model.id }
   }
 }
@@ -906,34 +954,46 @@ async function submitGeneration(generationId: string, prep: PreparedRun): Promis
   // Cancelled (or otherwise settled) while waiting in the queue — nothing to do.
   if (!gen || gen.status === 'success' || gen.status === 'failed') return
 
-  db.update(generations).set({ status: 'running' }).where(eq(generations.id, generationId)).run()
-  broadcastGenerationsChanged({ videoId: prep.videoId, nodeId: gen.nodeId })
-
-  let kieTaskId: string
+  // Everything past the early return is fenced: a throw outside the inner
+  // submission try (db write, broadcast, schedulePoll) used to escape to the
+  // queue's catch, leaving the row 'running' with no poller and the slot held
+  // until restart. Failing the row settles it and releases the slot.
   try {
-    kieTaskId =
-      prep.provider === 'elevenlabs'
-        ? // Synchronous provider: the "task" is the staged result file.
-          await submitElevenLabs(generationId, prep)
-        : prep.provider === 'suno'
-          ? // The Suno client retries internally (its API 500s more often).
-            await kieCreateSunoTask({ input: prep.payload })
-          : await withRetry(() => kieCreateTask({ model: prep.modelId, input: prep.payload }), {
-              attempts: 3,
-              baseDelayMs: 2000,
-              // createTask surfaces the kie code in the message; 4xx codes won't heal.
-              isTransient: (err) => !/\((4\d\d)\)/.test(err instanceof Error ? err.message : '')
-            })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (!maybeScheduleRetry(generationId, msg)) {
-      failGeneration(generationId, withRetryNote(generationId, msg))
-    }
-    return
-  }
+    db.update(generations).set({ status: 'running' }).where(eq(generations.id, generationId)).run()
+    broadcastGenerationsChanged({ videoId: prep.videoId, nodeId: gen.nodeId })
 
-  db.update(generations).set({ kieTaskId }).where(eq(generations.id, generationId)).run()
-  schedulePoll(generationId, 1)
+    let kieTaskId: string
+    try {
+      kieTaskId =
+        prep.provider === 'elevenlabs'
+          ? // Synchronous provider: the "task" is the staged result file.
+            await submitElevenLabs(generationId, prep)
+          : prep.provider === 'suno'
+            ? // The Suno client retries internally (its API 500s more often).
+              await kieCreateSunoTask({ input: prep.payload })
+            : await withRetry(() => kieCreateTask({ model: prep.modelId, input: prep.payload }), {
+                attempts: 3,
+                baseDelayMs: 2000,
+                // createTask surfaces the kie code in the message; 4xx codes won't heal.
+                isTransient: (err) => !/\((4\d\d)\)/.test(err instanceof Error ? err.message : '')
+              })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!maybeScheduleRetry(generationId, msg)) {
+        failGeneration(generationId, withRetryNote(generationId, msg))
+      }
+      return
+    }
+
+    db.update(generations).set({ kieTaskId }).where(eq(generations.id, generationId)).run()
+    schedulePoll(generationId, 1)
+  } catch (err) {
+    logError('run-engine', `submission crashed for ${generationId}`, err)
+    failGeneration(
+      generationId,
+      `Internal error during submission: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
 }
 
 /**

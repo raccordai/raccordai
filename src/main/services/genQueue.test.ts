@@ -78,6 +78,21 @@ describe('GenerationQueue', () => {
     expect(started).toEqual(['a'])
   })
 
+  it('reports a task that rejects to onTaskError, keeping its slot for the callback to settle', async () => {
+    const errors: Array<{ id: string; err: unknown }> = []
+    const queue = new GenerationQueue(
+      () => 1,
+      undefined,
+      (id, err) => errors.push({ id, err })
+    )
+    const boom = new Error('threw before settling')
+    queue.enqueue('a', () => Promise.reject(boom))
+    await Promise.resolve() // let the rejection reach the catch
+    expect(errors).toEqual([{ id: 'a', err: boom }])
+    // The slot is deliberately still held — settling/releasing is the callback's job.
+    expect(queue.snapshot()).toEqual({ running: ['a'], queued: [] })
+  })
+
   it('honors a live concurrency change on the next pump', () => {
     let limit = 1
     const queue = new GenerationQueue(() => limit)

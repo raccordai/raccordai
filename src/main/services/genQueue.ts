@@ -22,10 +22,14 @@ export class GenerationQueue {
   /**
    * `onChange` fires after every state transition (enqueue, adopt, release,
    * a waiting task starting) — the run engine broadcasts it to the renderer.
+   * `onTaskError` fires when a started task rejects: the task normally settles
+   * its own failure, so a rejection reaching here means it threw before that
+   * path — the callback must settle or release `id`, or the slot leaks.
    */
   constructor(
     private readonly concurrency: () => number,
-    private readonly onChange?: () => void
+    private readonly onChange?: () => void,
+    private readonly onTaskError?: (id: string, err: unknown) => void
   ) {}
 
   /** Schedules a task; it starts as soon as a slot is free (FIFO). */
@@ -62,10 +66,12 @@ export class GenerationQueue {
     while (this.waiting.length > 0 && this.active.size < Math.max(1, this.concurrency())) {
       const item = this.waiting.shift()!
       this.active.add(item.id)
-      void item.start().catch(() => {
+      void item.start().catch((err) => {
         // The task is responsible for its own failure handling (failGeneration
-        // → settle event → release). This catch only prevents an unhandled
-        // rejection from a task that throws before reaching that path.
+        // → settle event → release). A rejection landing here means the task
+        // threw before reaching that path: without the callback the throw is
+        // swallowed and the slot is held until restart.
+        this.onTaskError?.(item.id, err)
       })
     }
   }

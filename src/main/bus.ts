@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { logError } from './services/logger'
 
 /**
  * In-main event bus — lets services react to each other without circular
@@ -28,6 +29,16 @@ export function emitGenerationSettled(event: GenerationSettledEvent): void {
 
 /** Subscribe; returns the unsubscribe (the batch engine adds/removes waiters). */
 export function onGenerationSettled(listener: (event: GenerationSettledEvent) => void): () => void {
-  emitter.on('generationSettled', listener)
-  return () => emitter.off('generationSettled', listener)
+  // emit() is synchronous: an unguarded listener that throws would skip every
+  // listener registered after it — including the queue-slot release and the
+  // batch waiters, which then never wake up.
+  const safe = (event: GenerationSettledEvent): void => {
+    try {
+      listener(event)
+    } catch (err) {
+      logError('bus', 'generationSettled listener failed', err)
+    }
+  }
+  emitter.on('generationSettled', safe)
+  return () => emitter.off('generationSettled', safe)
 }

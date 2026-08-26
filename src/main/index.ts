@@ -65,8 +65,11 @@ function createWindow(): void {
   window.on('ready-to-show', () => window.show())
 
   // External links open in the system browser, never inside the app shell.
+  // Only protocols a browser/mail client owns: links also come from assistant
+  // output (which quotes fetched web content), so file:// or an arbitrary
+  // scheme handler must never reach the OS.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (/^(?:https?|mailto):/i.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
 
@@ -110,16 +113,31 @@ if (!app.requestSingleInstanceLock()) {
       }
 
       registerMediaProtocolHandler()
+
+      // Every post-DB step is fenced on its own: a throw here used to fall
+      // into the final .catch → app.exit(1) with no window and no dialog, and
+      // since the faulty state persists (e.g. a pending generation whose
+      // snapshot no longer builds), the app never started again. A failed
+      // step now only logs — the window still opens.
+      const bootStep = (name: string, step: () => void): void => {
+        try {
+          step()
+        } catch (error) {
+          logError('startup', `${name} failed`, error)
+        }
+      }
       // Existing users (kie key already configured) never see the first-run overlay.
-      backfillOnboardingCompleted()
+      bootStep('onboarding backfill', backfillOnboardingCompleted)
       // Pre-thread conversations become threads once, then the switcher is
       // guaranteed to have at least one row to select.
-      backfillChatThreads(getChatThreadsBackfilled, setChatThreadsBackfilled)
-      ensureDefaultThread()
-      registerIpcHandlers()
-      initNotifications()
-      resumePolling()
-      initUpdater() // no-op in dev; packaged builds check the channel feed
+      bootStep('chat thread backfill', () => {
+        backfillChatThreads(getChatThreadsBackfilled, setChatThreadsBackfilled)
+        ensureDefaultThread()
+      })
+      bootStep('ipc handlers', registerIpcHandlers)
+      bootStep('notifications', initNotifications)
+      bootStep('resume polling', resumePolling)
+      bootStep('updater', initUpdater) // no-op in dev; packaged builds check the channel feed
       // Niche watchlists refresh themselves when older than 24 h — delayed so
       // startup never waits on the network, and every failure only logs.
       setTimeout(() => {
