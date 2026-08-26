@@ -691,7 +691,9 @@ export const generationSchema = z.object({
   videoId: z.string(),
   status: generationStatusSchema,
   kieTaskId: z.string().nullable(),
-  inputSnapshot: z.unknown(),
+  // Note: the row's inputSnapshot (full prompt + resolved input URLs) is
+  // deliberately NOT exposed — no renderer surface reads it, and it used to be
+  // serialized over IPC for every generation on every list refetch.
   /** Display URL: media://generation/<id>/result once local, else the remote kie.ai URL. */
   url: z.string().nullable(),
   lastFrameUrl: z.string().nullable(),

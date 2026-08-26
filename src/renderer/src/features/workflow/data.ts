@@ -191,12 +191,18 @@ export function useProject(projectId: string) {
   })
 }
 
-/** Invalidate the whole graph view for a video (nodes, edges, generations, history). */
+/** Invalidate the whole graph view for ONE video (nodes, edges, generation lists, history, undo/redo state) — never app-wide. */
 export function useInvalidateWorkflow(videoId: string): () => void {
   const queryClient = useQueryClient()
   return () => {
     void queryClient.invalidateQueries({ queryKey: graphKeys.graph(videoId) })
-    void queryClient.invalidateQueries({ queryKey: ['generations'] })
+    // Node-scoped generation lists have no videoId in their key; the mounted
+    // ones all belong to the open editor anyway.
+    void queryClient.invalidateQueries({ queryKey: ['generations', 'node'] })
+    void queryClient.invalidateQueries({ queryKey: graphKeys.generationsForVideo(videoId) })
+    void queryClient.invalidateQueries({ queryKey: graphKeys.history(videoId) })
+    // Undo/redo counters (Toolbar).
+    void queryClient.invalidateQueries({ queryKey: ['history', videoId] })
   }
 }
 

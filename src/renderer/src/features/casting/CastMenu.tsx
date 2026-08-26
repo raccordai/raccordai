@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@renderer/components/ui/Button'
 import { useDismissable } from '@renderer/components/ui/useDismissable'
 import { useToast } from '@renderer/components/feedback/Feedback'
-import { graphKeys } from '@renderer/features/workflow/data'
+import { useInvalidateWorkflow } from '@renderer/features/workflow/data'
 import { invoke } from '@renderer/lib/ipc'
 
 /**
@@ -27,6 +27,7 @@ export function CastMenu({
   const { t } = useTranslation()
   const toast = useToast()
   const queryClient = useQueryClient()
+  const invalidateWorkflow = useInvalidateWorkflow(videoId)
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
@@ -57,8 +58,7 @@ export function CastMenu({
     try {
       const result = await invoke('casting:apply', { videoId, castingId: role.id })
       toast.success(t('castingPage.castDone', { name: result.name, count: result.cast.length }))
-      void queryClient.invalidateQueries({ queryKey: graphKeys.graph(videoId) })
-      void queryClient.invalidateQueries({ queryKey: ['history'] })
+      invalidateWorkflow()
       void queryClient.invalidateQueries({ queryKey: ['casting'] })
       close()
     } catch (error) {

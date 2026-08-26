@@ -14,7 +14,6 @@ export function toGeneration(row: GenerationRow): Generation {
     videoId: row.videoId,
     status: row.status,
     kieTaskId: row.kieTaskId,
-    inputSnapshot: row.inputSnapshot,
     // file:// staging URLs (synchronous providers, pre-copy) are main-only —
     // the renderer could not load them anyway.
     url: row.resultPath

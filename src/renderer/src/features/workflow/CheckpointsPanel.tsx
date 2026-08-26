@@ -7,7 +7,7 @@ import { Button } from '@renderer/components/ui/Button'
 import { TextField } from '@renderer/components/ui/Input'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { invoke } from '@renderer/lib/ipc'
-import { graphKeys } from './data'
+import { useInvalidateWorkflow } from './data'
 
 /**
  * Named checkpoints (§6.4) — the safety net that authorizes boldness: capture
@@ -19,6 +19,7 @@ export function CheckpointsPanel({ videoId, onClose }: { videoId: string; onClos
   const toast = useToast()
   const confirmModal = useConfirm()
   const queryClient = useQueryClient()
+  const invalidateWorkflow = useInvalidateWorkflow(videoId)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   /** Checkpoint being reviewed before a restore (null = none). */
@@ -59,9 +60,7 @@ export function CheckpointsPanel({ videoId, onClose }: { videoId: string; onClos
     try {
       const result = await invoke('checkpoints:restore', { checkpointId: pending.id })
       // Everything the graph feeds: canvas, generations, undo/redo state.
-      void queryClient.invalidateQueries({ queryKey: graphKeys.graph(videoId) })
-      void queryClient.invalidateQueries({ queryKey: ['generations'] })
-      void queryClient.invalidateQueries({ queryKey: ['history'] })
+      invalidateWorkflow()
       toast.success(t('editor.checkpoints.restored', { count: result.selectionsRestored }))
       if (result.selectionsMissing > 0) {
         toast.info(t('editor.checkpoints.restoredMissing', { count: result.selectionsMissing }))

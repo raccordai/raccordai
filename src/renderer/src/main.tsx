@@ -5,6 +5,7 @@ import { RouterProvider, createHashHistory, createRouter } from '@tanstack/react
 import { ErrorBoundary, ErrorScreen } from './components/ErrorBoundary'
 import { installGlobalErrorHandlers, reportRendererError } from './lib/errorReporter'
 import { initI18n } from './lib/i18n'
+import { graphKeys } from './features/workflow/data'
 import { routeTree } from './routeTree.gen'
 import './styles.css'
 
@@ -40,9 +41,15 @@ async function bootstrap(): Promise<void> {
 
   // Desktop replacement for Convex reactivity: the main process pushes an
   // event whenever a generation changes; refetch what the editor is showing.
-  window.api.on('event:generationsChanged', () => {
-    void queryClient.invalidateQueries({ queryKey: ['generations'] })
-    void queryClient.invalidateQueries({ queryKey: ['graph'] })
+  // The payload carries the exact video/node, so only their queries refetch —
+  // this event fires on every poll transition, download and retry, and used
+  // to refetch every mounted video's graph and generation lists each time.
+  window.api.on('event:generationsChanged', (payload) => {
+    const { videoId, nodeId } = payload as { videoId: string; nodeId: string }
+    void queryClient.invalidateQueries({ queryKey: graphKeys.generationsForNode(nodeId) })
+    void queryClient.invalidateQueries({ queryKey: graphKeys.generationsForVideo(videoId) })
+    void queryClient.invalidateQueries({ queryKey: graphKeys.history(videoId) })
+    void queryClient.invalidateQueries({ queryKey: graphKeys.graph(videoId) })
   })
   // A generation settled — the kie.ai balance moved; refresh the toolbar chip.
   window.api.on('event:creditsChanged', () => {
@@ -52,18 +59,27 @@ async function bootstrap(): Promise<void> {
   window.api.on('event:queueChanged', () => {
     void queryClient.invalidateQueries({ queryKey: ['queue'] })
   })
-  // The assistant (main process) mutated the graph — refetch everything it touches.
-  window.api.on('event:workflowChanged', () => {
-    void queryClient.invalidateQueries({ queryKey: ['graph'] })
-    void queryClient.invalidateQueries({ queryKey: ['generations'] })
-    void queryClient.invalidateQueries({ queryKey: ['assets'] })
-    void queryClient.invalidateQueries({ queryKey: ['history'] })
+  // The assistant (main process) mutated the graph — refetch what it touches,
+  // scoped to the payload's video. Only the light row lists (videos, projects,
+  // assets) stay unscoped: the event has no projectId and those queries are
+  // cheap, unlike the graph/generation ones this used to refetch app-wide.
+  window.api.on('event:workflowChanged', (payload) => {
+    const { videoId } = payload as { videoId: string }
+    void queryClient.invalidateQueries({ queryKey: graphKeys.graph(videoId) })
+    // Node-scoped generation lists have no videoId in their key; the mounted
+    // ones all belong to the open editor anyway.
+    void queryClient.invalidateQueries({ queryKey: ['generations', 'node'] })
+    void queryClient.invalidateQueries({ queryKey: graphKeys.generationsForVideo(videoId) })
+    void queryClient.invalidateQueries({ queryKey: graphKeys.history(videoId) })
+    // Undo/redo counters (Toolbar).
+    void queryClient.invalidateQueries({ queryKey: ['history', videoId] })
     // The title track (§6.12b) — its mutations broadcast workflowChanged too.
-    void queryClient.invalidateQueries({ queryKey: ['textLayers'] })
+    void queryClient.invalidateQueries({ queryKey: ['textLayers', videoId] })
     // The sticker track (§6.12d) — same broadcast.
-    void queryClient.invalidateQueries({ queryKey: ['imageLayers'] })
+    void queryClient.invalidateQueries({ queryKey: ['imageLayers', videoId] })
     // The feedback bucket (§6.13) — same broadcast (MCP agents mark items done).
-    void queryClient.invalidateQueries({ queryKey: ['feedback'] })
+    void queryClient.invalidateQueries({ queryKey: ['feedback', videoId] })
+    void queryClient.invalidateQueries({ queryKey: ['assets'] })
     // The assistant can also change the video's style template (set_video_style).
     void queryClient.invalidateQueries({ queryKey: ['videos'] })
     // The home assistant can create projects and videos.

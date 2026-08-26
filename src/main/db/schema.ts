@@ -232,7 +232,12 @@ export const edges = sqliteTable(
     targetHandle: text('target_handle').notNull(),
     createdAt: integer('created_at').notNull()
   },
-  (table) => [index('edges_by_video').on(table.videoId)]
+  (table) => [
+    index('edges_by_video').on(table.videoId),
+    // Read on every run (dependency resolution in runEngine), by the lint's
+    // connectionsFor and by the ON DELETE cascades from nodes.
+    index('edges_by_target_node').on(table.targetNodeId)
+  ]
 )
 
 /**

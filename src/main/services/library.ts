@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { getModel } from '@shared/models'
 import type { MediaKind } from './libraryTypes'
 import { toVideo } from './videos'
@@ -26,14 +26,21 @@ function kindForMime(mime: string | null): MediaKind | null {
 /** Latest successful, locally-available generation among the given videos. */
 function thumbnailForVideos(videoIds: string[]): Thumbnail {
   if (videoIds.length === 0) return { thumbnailUrl: null, thumbnailKind: null }
+  // Projection + status filter: this runs per card on every home/project page
+  // mount, and used to pull ENTIRE rows (inputSnapshot/transcript JSON
+  // included) of every generation of every video just to find one thumbnail.
   const rows = getDb()
-    .select()
+    .select({
+      id: generations.id,
+      resultMimeType: generations.resultMimeType,
+      resultPath: generations.resultPath,
+      resultUrl: generations.resultUrl
+    })
     .from(generations)
-    .where(inArray(generations.videoId, videoIds))
+    .where(and(inArray(generations.videoId, videoIds), eq(generations.status, 'success')))
     .orderBy(desc(generations.createdAt))
     .all()
   for (const gen of rows) {
-    if (gen.status !== 'success') continue
     const kind = kindForMime(gen.resultMimeType)
     if (kind === 'audio') continue
     const url = gen.resultPath ? `media://generation/${gen.id}/result` : (gen.resultUrl ?? null)

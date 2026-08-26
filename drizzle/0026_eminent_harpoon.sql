@@ -1,0 +1,1 @@
+CREATE INDEX `edges_by_target_node` ON `edges` (`target_node_id`);
