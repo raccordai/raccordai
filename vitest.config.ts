@@ -34,6 +34,8 @@ export default defineConfig({
         'src/main/services/changeFeed.ts',
         'src/main/services/renderPlan.ts',
         'src/main/services/runPlanner.ts',
+        'src/main/services/runParams.ts',
+        'src/main/services/checkpoints.ts',
         'src/main/services/qcPlan.ts',
         'src/main/services/chatStore.ts',
         'src/main/services/chatCompaction.ts',

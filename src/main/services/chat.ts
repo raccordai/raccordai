@@ -12,7 +12,7 @@ import { onGenerationSettled } from '../bus'
 import { broadcastChatUpdate, broadcastWorkflowChanged } from '../events'
 import { AGENT_TOOLS, isToolMediaResult } from '../mcp/registry'
 import { diffAgainstCurrent } from './checkpoints'
-import { finalizeVideo, planBatch, planFinalize, startBatch, videoNodeTargets } from './runBatch'
+import { planBatch, planFinalize, videoNodeTargets } from './runBatch'
 import { clampVariants } from './runPlanner'
 import {
   SUMMARY_SYSTEM,
@@ -403,84 +403,25 @@ async function executeTool(
         label: `Asset saved · ${asset.name}`
       }
     }
-    // The chat variant of the registry's run_batch (§4.10 phase 4): every
-    // generation the batch claims enters session.watched as it starts, so the
-    // existing settle wake-up drains the whole batch — the tool itself
-    // returns immediately (the assistant never polls).
-    case 'run_batch': {
-      // Ids already injected and the gate already cleared above.
+    default: {
+      // Everything else IS the registry (§4.10 phase 3): one execution path
+      // shared with MCP, plus the chat-only concerns — transcript labels, run
+      // watching and the never-poll notes. Ids and the approval gate were
+      // handled above. run_batch/finalize_video used to be re-implemented
+      // here for the sake of the watch callback; the registry now takes it as
+      // execute context, so the spending tools have ONE implementation.
+      if (!registryTool) throw new Error(`Unknown tool: ${name}`)
       const args = input
-      const videoId = String(args['videoId'] ?? '')
-      if (!videoId) throw new Error('run_batch needs a "videoId".')
-      const targets = args['all_videos']
-        ? videoNodeTargets(videoId)
-        : Array.isArray(args['targetNodeIds'])
-          ? (args['targetNodeIds'] as unknown[]).map(String)
-          : []
-      if (targets.length === 0) {
-        throw new Error('Pass targetNodeIds, or all_videos: true on a graph with video nodes.')
-      }
-      const session = sessionFor(ctx.sessionKey)
-      // §6.6: variants regenerate the targets on purpose — reusing a satisfied
-      // target would hand back zero candidates.
-      const variants = clampVariants(args['variants'] ?? 1)
-      const { planned } = startBatch({
-        videoId,
-        targetNodeIds: targets,
-        reuseTargets: variants === 1,
-        variants,
+      const result = await registryTool.execute(args, {
+        // Batch generations claim over the batch's lifetime, past the end of
+        // this turn — persist each watch as it lands so a restart mid-batch
+        // keeps the settle wake-up.
         onGenerationStarted: (_nodeId, generationId) => {
+          const session = sessionFor(ctx.sessionKey)
           session.watched.add(generationId)
           persistSession(ctx.sessionKey, session)
         }
       })
-      return {
-        result: JSON.stringify({
-          planned,
-          note: 'The batch runs dependency-aware in the background; you are woken automatically as each generation settles — never poll get_generations to wait.'
-        }),
-        mutatedVideoId: videoId,
-        label:
-          variants > 1
-            ? `Batch started · ${planned.length} nodes ×${variants}`
-            : `Batch started · ${planned.length} nodes`
-      }
-    }
-    // Same watched-generation wiring for the finalize batch (§6.1): the settle
-    // wake-up reports each real-model re-run back to the assistant.
-    case 'finalize_video': {
-      const args = input
-      const videoId = String(args['videoId'] ?? '')
-      if (!videoId) throw new Error('finalize_video needs a "videoId".')
-      const plan = planFinalize(videoId)
-      if (args['plan_only'] || plan.rows.length === 0) {
-        return {
-          result: JSON.stringify(plan),
-          mutatedVideoId: null,
-          label: `Finalize preview · ${plan.rows.length} draft nodes`
-        }
-      }
-      const session = sessionFor(ctx.sessionKey)
-      const { planned } = finalizeVideo(videoId, (_nodeId, generationId) => {
-        session.watched.add(generationId)
-        persistSession(ctx.sessionKey, session)
-      })
-      return {
-        result: JSON.stringify({
-          planned,
-          note: 'The finalize batch re-runs the draft keepers on the real models in the background and promotes each success to the node selection; you are woken automatically as each generation settles — never poll.'
-        }),
-        mutatedVideoId: videoId,
-        label: `Finalize started · ${planned.length} nodes`
-      }
-    }
-    default: {
-      // Everything else IS the registry (§4.10 phase 3): one execution path
-      // shared with MCP, plus the chat-only concerns — transcript labels and
-      // run watching. Ids and the approval gate were handled above.
-      if (!registryTool) throw new Error(`Unknown tool: ${name}`)
-      const args = input
-      const result = await registryTool.execute(args)
       // Generations launched from the chat are watched: the engine's settle
       // event wakes the conversation up (never poll).
       if (name === 'run_node') {
@@ -489,6 +430,7 @@ async function executeTool(
         for (const id of (result as { generationIds: string[] }).generationIds) {
           session.watched.add(id)
         }
+        persistSession(ctx.sessionKey, session)
       }
       // Media results ride as real vision blocks: the assistant SEES what it
       // generated. The base64 lands in the persisted history (compaction will
@@ -513,14 +455,39 @@ async function executeTool(
           label: (CHAT_LABELS[name] ?? (() => name.replace(/_/g, ' ')))(args, result)
         }
       }
+      // Chat-only guidance riding on the shared result (the settle wake-up is
+      // a chat concern the registry must not carry).
+      const note = CHAT_RESULT_NOTES[name]?.(args, result)
       return {
-        result: typeof result === 'string' ? result : JSON.stringify(result ?? { ok: true }),
+        result:
+          typeof result === 'string'
+            ? result
+            : JSON.stringify(
+                note ? { ...(result as Record<string, unknown>), note } : (result ?? { ok: true })
+              ),
         mutatedVideoId:
           registryTool.risk === 'read' ? null : String(args['videoId'] ?? ctx.videoId ?? ''),
         label: (CHAT_LABELS[name] ?? (() => name.replace(/_/g, ' ')))(args, result)
       }
     }
   }
+}
+
+/**
+ * Chat-only notes appended to a registry tool's JSON result. The assistant is
+ * woken by the settle bus, so it must never poll — that guidance is
+ * presentation, not tool behavior. null = nothing launched (plan_only).
+ */
+const CHAT_RESULT_NOTES: Record<
+  string,
+  (args: Record<string, unknown>, result: unknown) => string | null
+> = {
+  run_batch: () =>
+    'The batch runs dependency-aware in the background; you are woken automatically as each generation settles — never poll get_generations to wait.',
+  finalize_video: (_a, r) =>
+    r && typeof r === 'object' && 'planned' in r
+      ? 'The finalize batch re-runs the draft keepers on the real models in the background and promotes each success to the node selection; you are woken automatically as each generation settles — never poll.'
+      : null
 }
 
 /** Transcript chip labels for registry tools (fallback: the tool name). */
@@ -538,6 +505,19 @@ const CHAT_LABELS: Record<string, (args: Record<string, unknown>, result: unknow
   delete_video: () => 'Video deleted',
   open_video: () => 'Opened video',
   focus_node: () => 'Focused node',
+  run_batch: (a, r) => {
+    const planned = (r as { planned?: unknown[] }).planned ?? []
+    const variants = clampVariants(a['variants'] ?? 1)
+    return variants > 1
+      ? `Batch started · ${planned.length} nodes ×${variants}`
+      : `Batch started · ${planned.length} nodes`
+  },
+  finalize_video: (_a, r) => {
+    const res = r as { planned?: unknown[]; rows?: unknown[] }
+    return res.planned
+      ? `Finalize started · ${res.planned.length} nodes`
+      : `Finalize preview · ${res.rows?.length ?? 0} draft nodes`
+  },
   set_video_style: (a) => {
     const styleId = a['styleId'] ? String(a['styleId']) : ''
     return `Style · ${styleId ? (getStyle(styleId)?.label ?? styleId) : 'none'}`

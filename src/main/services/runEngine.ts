@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { describeParamsError, estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
+import { estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
 import type { ModelProvider } from '@shared/models/types'
-import { remapDraftInputs, resolveDraftRun } from '@shared/models/draft'
-import { getStyle, nodeAppliesVideoStyle, wrapPromptWithStyle } from '@shared/styles/registry'
+import { remapDraftInputs } from '@shared/models/draft'
+import { getStyle, nodeAppliesVideoStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes, videos } from '../db/schema'
 import { emitGenerationSettled, onGenerationSettled } from '../bus'
@@ -20,6 +20,7 @@ import {
 import { ffmpegPath } from '../media/ffbin'
 import { mediaDirFor, mimeTypeFor } from '../media/files'
 import { GenerationQueue, isRetryableGenerationError, withRetry } from './genQueue'
+import { composeRunParams } from './runParams'
 import { logError, logInfo, logWarn } from './logger'
 import { buildLastFrameArgs } from './renderPlan'
 import { clampVariants } from './runPlanner'
@@ -333,56 +334,6 @@ interface PreparedRun {
     inputs: Record<string, string[]>
     aliases: Record<string, string>
   }
-}
-
-/**
- * Draft substitution (§6.1) + params validation + style-at-payload (§6.9): the
- * exact composition prepareRun persists into the input snapshot, extracted so
- * preview_run_payload can show agents the FINAL prompt without running.
- *
- * Draft mode substitutes the model's declared draftEquivalent — resolved
- * BEFORE the input snapshot is persisted, so retries and re-queues replay the
- * substituted run, and the node's stored model/params stay untouched
- * (finalize passes forceFinal). Style-at-payload composes the video's CURRENT
- * art direction into the prompt of nodes flagged `applyVideoStyle`: stored
- * prompts stay business-only and a style change propagates on the next run.
- * Stills get the bible appended; MOVING IMAGES get the full sandwich (capture
- * declaration + compressed bible on top, booster stack at the bottom).
- */
-export function composeRunParams(
-  node: { modelId: string; params: unknown },
-  video: { draftMode?: boolean | null; styleId?: string | null } | undefined,
-  opts?: { forceFinal?: boolean }
-): {
-  model: ReturnType<typeof getModelOrThrow>
-  validatedParams: unknown
-  draftSub: ReturnType<typeof resolveDraftRun>
-} {
-  const nodeModel = getModelOrThrow(node.modelId)
-  const draftSub =
-    video?.draftMode && !opts?.forceFinal ? resolveDraftRun(nodeModel.id, node.params ?? {}) : null
-  const model = draftSub ? getModelOrThrow(draftSub.modelId) : nodeModel
-
-  let validatedParams: unknown
-  try {
-    validatedParams = model.paramsSchema.parse(draftSub ? draftSub.params : (node.params ?? {}))
-  } catch (err) {
-    // A raw zod dump is unreadable in the node's error badge — name the field
-    // and what it accepts (the prompt lint says the same thing before the run).
-    throw new Error(`Invalid params: ${describeParamsError(err, model)}`, { cause: err })
-  }
-
-  if (model.kind !== 'audio' && nodeAppliesVideoStyle(node.params)) {
-    const style = video?.styleId ? getStyle(video.styleId) : undefined
-    const prompt = (validatedParams as { prompt?: unknown }).prompt
-    if (style && typeof prompt === 'string') {
-      validatedParams = {
-        ...(validatedParams as Record<string, unknown>),
-        prompt: wrapPromptWithStyle({ prompt, style, kind: model.kind })
-      }
-    }
-  }
-  return { model, validatedParams, draftSub }
 }
 
 /**

@@ -146,13 +146,24 @@ export type ToolScope = 'global' | 'project' | 'video'
  */
 export type ToolRisk = 'read' | 'write' | 'destructive' | 'spending'
 
+/**
+ * Optional per-call context a host surface can provide. The chat loop passes
+ * onGenerationStarted so every generation a batch claims joins its watched set
+ * (settle wake-up); the MCP server passes nothing. This is what keeps
+ * run_batch/finalize_video single-sourced here instead of re-implemented in
+ * chat.ts for the sake of one callback.
+ */
+export interface ToolExecuteContext {
+  onGenerationStarted?: (nodeId: string, generationId: string) => void
+}
+
 export interface AgentTool {
   name: string
   description: string
   inputSchema: Record<string, unknown>
   scope: ToolScope
   risk: ToolRisk
-  execute(args: Record<string, unknown>): Promise<unknown> | unknown
+  execute(args: Record<string, unknown>, ctx?: ToolExecuteContext): Promise<unknown> | unknown
 }
 
 /**
@@ -2099,7 +2110,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     ),
     scope: 'video',
     risk: 'spending',
-    execute: ({ videoId, targetNodeIds, all_videos, variants }) => {
+    execute: ({ videoId, targetNodeIds, all_videos, variants }, ctx) => {
       const targets = all_videos
         ? videoNodeTargets(String(videoId))
         : Array.isArray(targetNodeIds)
@@ -2115,7 +2126,8 @@ export const AGENT_TOOLS: AgentTool[] = [
         // Exploring variants means regenerating on purpose — reusing the
         // satisfied target would return zero candidates.
         reuseTargets: count === 1,
-        variants: count
+        variants: count,
+        onGenerationStarted: ctx?.onGenerationStarted
       })
       void done
       return { planned }
@@ -2134,10 +2146,10 @@ export const AGENT_TOOLS: AgentTool[] = [
     ),
     scope: 'video',
     risk: 'spending',
-    execute: ({ videoId, plan_only }) => {
+    execute: ({ videoId, plan_only }, ctx) => {
       const plan = planFinalize(String(videoId))
       if (plan_only || plan.rows.length === 0) return plan
-      const { planned, done } = finalizeVideo(String(videoId))
+      const { planned, done } = finalizeVideo(String(videoId), ctx?.onGenerationStarted)
       void done
       return { planned }
     }
