@@ -12,20 +12,61 @@ Free and open source. Website: [raccord.ai](https://raccord.ai)
 
 ## Features
 
-- **The canvas** — shots as composable, inspectable nodes on a node graph.
-- **The timeline** — renders land in the timeline the moment they complete.
-- **The assistant** — a native studio tool built on MCP; ask for a full
-  project in one message.
-- **Style consistency** — set the look once, shots follow it.
-- **Refine in place** — tweak a prompt inline without rebuilding the workflow.
-- **Same shot, another model** — swap the model behind a shot in one click.
-- **Inline diagnostics** — errors and retries surface right on the node.
-- **History** — compare every generation of a shot in one place.
-- **MCP server** — plug external agents (Claude Code, …) straight into your
-  project.
+**Direct**
 
-Generation runs through a single [KIE.ai](https://kie.ai) API key — one key
-for every model, at rates 30%+ cheaper than going direct.
+- **The canvas** — shots as composable, inspectable nodes on a node graph.
+- **Scenario → graph** — write the beats, get a shot list that is legal by
+  construction, build the graph from it in one deterministic, credit-free
+  step.
+- **Recipes** — pre-configured nodes for design sheets (characters, décors,
+  props, storyboards…) and shot presets (push-in, orbit, POV handheld…) with
+  the camera move already written.
+- **Casting** — name a design sheet as a role of the film, then wire it as a
+  reference across every shot in one step.
+- **Style consistency** — pick an art direction once; every prompt gets its
+  capture declaration and style bible at run time, never baked into your
+  nodes.
+- **Same shot, another model** — swap the model behind a shot in one click.
+
+**Generate**
+
+- **One key, every model** — generation runs through a single
+  [KIE.ai](https://kie.ai) API key (image, video, music), at rates 30%+
+  cheaper than going direct. Cost is estimated before you confirm.
+- **Draft mode & QC** — iterate on cheap draft models, then finalize the
+  keepers on the real ones; optional vision QC reviews each image as it
+  lands.
+- **Variants** — claim 2–4 candidates of a shot at once and arbitrate them in
+  a synced compare grid.
+- **Inline diagnostics** — errors, queue state and smart retries surface
+  right on the node.
+- **History, checkpoints, undo** — compare every generation of a shot; every
+  graph mutation is one undo step; named checkpoints diff and roll back the
+  whole graph.
+- **Speech** — ElevenLabs voices and multi-speaker dialogue, with real
+  transcripts to cut against; named voice personas per channel.
+
+**Edit & ship**
+
+- **The timeline** — renders land in it the moment they complete: trim,
+  split, ~25 transitions, per-clip speed/looks/volume, title and sticker
+  tracks, dynamic captions from real speech timings, music ducking.
+- **Export** — render an MP4 (quality/codec options, burned subtitles,
+  watermark) or export FCPXML to finish in a real NLE.
+
+**Research**
+
+- **Niches** — track YouTube niches (real SERP + Data API), outlier scoring
+  across three lenses, competitor transcripts.
+- **Roadmap** — grounded video ideas with evidence, packaging-first titles
+  and thumbnail briefs, a feed preview against the niche's real thumbnails.
+
+**Drive it from anywhere**
+
+- **The assistant** — a native studio agent built on the same tools; ask for
+  a full project in one message.
+- **MCP server** — plug Claude Code, Claude Desktop, Codex or claude.ai
+  straight into your projects ([connection guides](docs/mcp.md#connecting)).
 
 ## Quickstart
 
@@ -45,16 +86,26 @@ for every model, at rates 30%+ cheaper than going direct.
 
 Then, in any order: describe what you want to the built-in **assistant**
 instead of wiring nodes by hand, pick a **style** so every shot matches, or
-plug an external agent into the **MCP server**
-([Settings → Integrations](docs/mcp.md) has the URL and token):
+plug an external agent into the **MCP server** (Settings → Integrations has
+the URL and token):
 
 ```sh
 claude mcp add raccord --transport http http://127.0.0.1:4517/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
+The server is local-only — Claude Desktop and Codex connect to it without any
+tunnel or HTTPS; [docs/mcp.md](docs/mcp.md#connecting) has the copy-paste
+config for each client (claude.ai in the browser is the one that needs a
+tunnel).
+
+Optional integrations, added later in Settings → Integrations: an
+**ElevenLabs** key for speech, a **YouTube Data API** key and **DataForSEO**
+credentials for niche research.
+
 No account, no cloud backend: projects, media and settings live in a local
-SQLite database and a local media store.
+SQLite database and a local media store — and the whole app state exports as
+one `.raccord` backup archive.
 
 ## Download
 
@@ -73,6 +124,7 @@ Updates install themselves (stable or beta channel, Settings → Updates).
 - **Tailwind CSS v4**
 - **SQLite** (better-sqlite3) + **Drizzle ORM**, versioned migrations applied on startup
 - **Hono**: local HTTP API in the main process (`127.0.0.1:4517` by default — port and token persisted in settings), mount point of the MCP server
+- **ffmpeg / ffprobe** bundled (`ffmpeg-static`, `@ffprobe-installer/ffprobe`): MP4 render, transitions, subtitle burn, frame extraction — no system install needed
 - **i18next**: FR/EN, resources shared between main and renderer, typed keys
 
 ## Run from source

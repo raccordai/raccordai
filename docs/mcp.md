@@ -16,7 +16,12 @@ manage assets.
   unless a client cannot send headers. Applies immediately, no restart.
 - Requires the app to be running (the local API starts with the app).
 
-Example — wiring up Claude Code:
+The server only binds `127.0.0.1`. Local clients — Claude Code, Claude
+Desktop, Codex — talk to it directly: **no tunnel, no HTTPS, nothing exposed
+to the network**. The one exception is claude.ai in the browser (last
+subsection), whose connectors call in from Anthropic's cloud.
+
+### Claude Code
 
 ```sh
 claude mcp add raccord --transport http http://127.0.0.1:4517/mcp \
@@ -24,6 +29,69 @@ claude mcp add raccord --transport http http://127.0.0.1:4517/mcp \
 ```
 
 With tokenless mode on, the `--header` flag can simply be omitted.
+
+### Claude Desktop
+
+Skip the **custom connectors** screen: those connect from Anthropic's
+infrastructure and therefore demand a public HTTPS URL. Claude Desktop's
+_local_ mechanism — the stdio servers in `claude_desktop_config.json` — works
+with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridging stdio
+to the local endpoint, and everything stays on the machine:
+
+```json
+{
+  "mcpServers": {
+    "raccord": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://127.0.0.1:4517/mcp",
+        "--transport",
+        "http-only",
+        "--allow-http",
+        "--header",
+        "Authorization: Bearer <token>"
+      ]
+    }
+  }
+}
+```
+
+The config file lives at
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS,
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows; restart Claude
+Desktop after editing. `--allow-http` is required because the endpoint is
+plain HTTP — deliberate, it never leaves `127.0.0.1`. With tokenless mode on,
+drop the two `--header` lines.
+
+### Codex CLI
+
+Codex speaks Streamable HTTP natively, localhost included. In
+`~/.codex/config.toml` (or a repo-scoped `.codex/config.toml`):
+
+```toml
+[mcp_servers.raccord]
+url = "http://127.0.0.1:4517/mcp"
+bearer_token_env_var = "RACCORD_MCP_TOKEN"
+```
+
+Codex reads the token from that environment variable at connect time — export
+`RACCORD_MCP_TOKEN` in the shell that launches `codex` instead of pasting the
+token into the file. One-liner alternative: `codex mcp add raccord --url
+http://127.0.0.1:4517/mcp`. With tokenless mode on, the `url` line alone is
+enough.
+
+### claude.ai in the browser
+
+The only client that genuinely needs a tunnel: claude.ai's custom connectors
+are called from Anthropic's infrastructure, so the endpoint must be reachable
+from the public internet over HTTPS. Expose it with a tunnel (a Cloudflare
+Tunnel with a stable hostname is more comfortable than ngrok's rotating URLs),
+then add the `https://…/mcp` URL as a custom connector. **Keep the Bearer
+token on** — a tunnel makes the registry's destructive tools reachable from
+outside, and the token is the only thing gating them. Never combine a tunnel
+with tokenless mode.
 
 ## Philosophy: exploratory documentation
 
