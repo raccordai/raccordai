@@ -257,6 +257,10 @@
     "stickerDelete": "Delete this sticker",
     "stickerDragHint": "Drag the sticker directly on the preview to position it."
   },
+  "updateBanner": {
+    "text": "New version {{version}} downloaded — ready to install.",
+    "dismiss": "Hide (the update will install on quit)"
+  },
   "onboarding": {
     "skip": "Skip",
     "back": "Back",

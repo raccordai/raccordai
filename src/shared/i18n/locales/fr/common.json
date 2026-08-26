@@ -257,6 +257,10 @@
     "stickerDelete": "Supprimer ce sticker",
     "stickerDragHint": "Glisse le sticker directement sur l'aperçu pour le positionner."
   },
+  "updateBanner": {
+    "text": "Nouvelle version {{version}} téléchargée — prête à installer.",
+    "dismiss": "Masquer (la mise à jour s'installera à la fermeture)"
+  },
   "onboarding": {
     "skip": "Passer",
     "back": "Retour",

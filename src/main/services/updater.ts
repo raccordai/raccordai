@@ -5,6 +5,7 @@ import electronUpdater from 'electron-updater'
 import type { UpdateState } from '@shared/ipc/contracts'
 import { getUpdateChannel } from './settings'
 import { logWarn } from './logger'
+import { broadcastUpdateState } from '../events'
 
 const { autoUpdater } = electronUpdater
 
@@ -32,7 +33,13 @@ export function getUpdateState(): UpdateState {
 }
 
 function set(next: Partial<UpdateState>): void {
+  const prev = state
   state = { ...state, ...next }
+  // Only meaningful transitions reach the renderer — download-progress ticks
+  // re-set 'downloading' constantly and would spam the event channel.
+  if (state.status !== prev.status || state.version !== prev.version) {
+    broadcastUpdateState(state)
+  }
 }
 
 export function initUpdater(): void {

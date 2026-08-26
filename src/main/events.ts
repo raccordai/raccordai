@@ -2,7 +2,8 @@ import { BrowserWindow } from 'electron'
 import type {
   FocusNodePayload,
   NavigatePayload,
-  RenderProgressPayload
+  RenderProgressPayload,
+  UpdateState
 } from '@shared/ipc/contracts'
 import { recordChange } from './services/changeFeed'
 
@@ -81,6 +82,13 @@ export function broadcastNichesChanged(): void {
   recordChange('niches')
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:nichesChanged', {})
+  }
+}
+
+/** Auto-update state moved (available/downloaded/…) — the update banner refetches. */
+export function broadcastUpdateState(payload: UpdateState): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:updateStateChanged', payload)
   }
 }
 

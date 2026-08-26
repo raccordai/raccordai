@@ -1951,7 +1951,8 @@ export const ipcEvents = [
   'event:focusNode',
   'event:navigate',
   'event:nichesChanged',
-  'event:voicePersonasChanged'
+  'event:voicePersonasChanged',
+  'event:updateStateChanged'
 ] as const
 export type IpcEvent = (typeof ipcEvents)[number]
 

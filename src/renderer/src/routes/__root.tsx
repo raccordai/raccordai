@@ -1,7 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, Outlet, createRootRoute, useRouter, useRouterState } from '@tanstack/react-router'
-import { KeyRound, MessageSquare, Settings } from 'lucide-react'
-import { useCallback, useEffect, useRef } from 'react'
+import { Download, KeyRound, MessageSquare, Settings, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HeaderActions, MenuBar, MenuBarProvider } from '@renderer/components/menubar/MenuBar'
 import { FeedbackProvider } from '@renderer/components/feedback/Feedback'
@@ -45,6 +45,7 @@ function RootLayout(): React.JSX.Element {
             <SettingsToggle />
           </header>
           <MissingKeyBanner />
+          <UpdateBanner />
           <div className="flex min-h-0 flex-1">
             <AssistantSidebar />
             <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -111,6 +112,59 @@ function AssistantToggle(): React.JSX.Element {
     >
       <MessageSquare className="h-4 w-4" />
     </Button>
+  )
+}
+
+/**
+ * App-wide notice when an update finished downloading — until this, Settings →
+ * Updates was the only place the new version showed up. Hidden on /settings
+ * (that page has its own install button) and dismissible for the session: the
+ * update installs on quit anyway (autoInstallOnAppQuit), so the banner is an
+ * offer to restart now, not a nag.
+ */
+function UpdateBanner(): React.JSX.Element | null {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [dismissed, setDismissed] = useState(false)
+  const onSettingsPage = useRouterState({
+    select: (state) => state.location.pathname === '/settings'
+  })
+  const state = useQuery({
+    queryKey: ['update', 'state'],
+    queryFn: () => invoke('update:getState')
+  })
+
+  // The main process pushes every meaningful updater transition; Settings
+  // shares the same query key, so this keeps both surfaces live.
+  useEffect(() => {
+    return window.api.on('event:updateStateChanged', () => {
+      void queryClient.invalidateQueries({ queryKey: ['update'] })
+    })
+  }, [queryClient])
+
+  const install = useMutation({ mutationFn: () => invoke('update:install') })
+
+  if (dismissed || onSettingsPage || state.data?.status !== 'downloaded') return null
+  return (
+    <div className="flex shrink-0 items-center justify-center gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-1.5">
+      <Download className="h-3.5 w-3.5 text-accent" />
+      <span className="text-xs text-neutral-300">
+        {t('updateBanner.text', { version: state.data.version ?? '' })}
+      </span>
+      <button
+        className="rounded-md bg-highlight px-2.5 py-1 text-xs font-medium text-neutral-900 hover:bg-highlight-hover"
+        onClick={() => install.mutate()}
+      >
+        {t('settings.updateInstall')}
+      </button>
+      <button
+        className="rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+        onClick={() => setDismissed(true)}
+        title={t('updateBanner.dismiss')}
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
   )
 }
 
