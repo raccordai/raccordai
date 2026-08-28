@@ -3,6 +3,7 @@ import {
   buildScreenMotionFilter,
   cursorKeyframes,
   cursorOverlayFilter,
+  demoCameraEnabled,
   planZoomSegments,
   sampleCamera,
   sampleCursor,
@@ -12,6 +13,22 @@ import {
 } from './screenMotion'
 
 const click = (t: number, x = 0.5, y = 0.5): DemoEvent => ({ t, type: 'click', x, y })
+
+describe('demoCameraEnabled', () => {
+  const events = [click(1)]
+
+  it('is on by default when the asset carries a journal', () => {
+    expect(demoCameraEnabled({ assetId: 'a1' }, events)).toBe(true)
+    expect(demoCameraEnabled(undefined, events)).toBe(true)
+    expect(demoCameraEnabled({ demoCamera: true }, events)).toBe(true)
+  })
+
+  it('is off without a journal, and on explicit opt-out', () => {
+    expect(demoCameraEnabled({ assetId: 'a1' }, null)).toBe(false)
+    expect(demoCameraEnabled({ assetId: 'a1' }, [])).toBe(false)
+    expect(demoCameraEnabled({ demoCamera: false }, events)).toBe(false)
+  })
+})
 
 describe('smoothstep', () => {
   it('eases with flat tangents and clamps outside 0-1', () => {

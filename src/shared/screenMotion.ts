@@ -66,6 +66,21 @@ export interface ZoomSegment {
   targets: PanTarget[]
 }
 
+/**
+ * Should the automatic camera run on this clip? The product promise is
+ * AUTOMATIC: a demo journal on the asset ⇒ camera applied at render. The
+ * opt-out is a params marker on the asset NODE (`demoCamera: false`, written
+ * through the journaled updateNodeParams — same pattern as applyVideoStyle),
+ * so "keep the raw capture" is an explicit, undoable gesture.
+ */
+export function demoCameraEnabled(
+  params: unknown,
+  events: DemoEvent[] | null | undefined
+): boolean {
+  if (!events || events.length === 0) return false
+  return (params as { demoCamera?: unknown } | undefined)?.demoCamera !== false
+}
+
 /** Hermite smoothstep — the easing of every camera and cursor move. */
 export function smoothstep(p: number): number {
   const c = Math.min(1, Math.max(0, p))
