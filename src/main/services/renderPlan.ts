@@ -862,6 +862,36 @@ export function buildOverlayArgs(
  * thing a headless MCP run doesn't have). `-sseof -0.1` seeks from the end;
  * `-update 1` writes a single image.
  */
+/**
+ * Demo mode (§9): transcode a MediaRecorder webm capture into an editable mp4.
+ * H.264 + yuv420p for the timeline/render pipeline, even dimensions (webm
+ * captures can be odd-sized), faststart for instant scrubbing, no audio —
+ * the capture has none.
+ */
+export function buildDemoTranscodeArgs(webmPath: string, mp4Path: string): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    webmPath,
+    '-vf',
+    'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    '20',
+    '-pix_fmt',
+    'yuv420p',
+    '-an',
+    '-movflags',
+    '+faststart',
+    mp4Path
+  ]
+}
+
 export function buildLastFrameArgs(inputPath: string, outputPath: string): string[] {
   return [
     '-y',

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { MAX_VARIANTS } from '../config'
 import { SCENARIO_VERSION, SCREEN_DIRECTIONS, type Scenario } from '../scenario'
 import { type SpeechTranscript } from '../speech'
+import { type DemoEvent } from '../screenMotion'
 import { CLIP_TRANSITION_IDS, TRANSITION_MAX_SECONDS, TRANSITION_MIN_SECONDS } from '../transitions'
 import { CAPTION_PRESET_IDS } from '../captions'
 import {
@@ -92,7 +93,9 @@ export const appInfoSchema = z.object({
   localApi: z.object({
     running: z.boolean(),
     port: z.number().nullable()
-  })
+  }),
+  /** Demo mode (§9) is armed (RACCORD_DEMO=1): the recorder UI and demo:* channels are live. */
+  demo: z.boolean()
 })
 export type AppInfo = z.infer<typeof appInfoSchema>
 
@@ -177,6 +180,21 @@ export type Video = z.infer<typeof videoSchema>
 
 export const mediaKindSchema = z.enum(['image', 'video', 'audio'])
 
+/**
+ * Demo mode (§9): one input event of a self-recorded demo session — the feed
+ * of the screen-motion compiler. Zod mirror of `DemoEvent` from
+ * src/shared/screenMotion.ts, kept identical by the Exactly<> witness below.
+ */
+export const demoEventSchema = z.object({
+  t: z.number(),
+  type: z.enum(['click', 'move', 'key', 'scroll']),
+  x: z.number().optional(),
+  y: z.number().optional()
+})
+export type DemoEventContractMatchesShared = Exactly<z.infer<typeof demoEventSchema>, DemoEvent>
+const demoEventContractMatchesShared: DemoEventContractMatchesShared = true
+void demoEventContractMatchesShared
+
 export const assetSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -194,6 +212,8 @@ export const assetSchema = z.object({
   designId: z.string().nullable(),
   /** The subject the design sheet was built from ("Mira, 12, red scarf"). */
   designSubject: z.string().nullable(),
+  /** Demo mode (§9): the recording's input-event journal (screen-motion feed). */
+  demoEvents: z.array(demoEventSchema).nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number().nullable()
 })
@@ -906,6 +926,75 @@ export type PlannedRow = z.infer<typeof plannedRowSchema>
 
 export const ipcContracts = {
   'app:getInfo': { input: z.void(), output: appInfoSchema },
+
+  /**
+   * Demo mode (§9) — the app records itself. `demo:start` opens a session in
+   * main (staging dir + growing webm) and, unless `external`, resizes the
+   * window and broadcasts event:demoControl for the renderer recorder to obey;
+   * `external: true` is the driver/harness mode where the caller feeds
+   * appendChunk/finish itself. All channels throw when RACCORD_DEMO ≠ 1.
+   */
+  'demo:start': {
+    input: z.object({
+      /** Import the recording into this project; omitted = files land in Downloads. */
+      projectId: z.string().optional(),
+      /** Content size pinned during the take (even values; default 1280x720). */
+      width: z.number().int().min(640).max(3840).optional(),
+      height: z.number().int().min(480).max(2160).optional(),
+      /** Driver mode: no broadcast, no resize — the caller streams the media itself. */
+      external: z.boolean().optional()
+    }),
+    output: z.object({ sessionId: z.string() })
+  },
+  /** One base64 slice of the webm (≤ ~4 MB); seq must be the next expected index. */
+  'demo:appendChunk': {
+    input: z.object({
+      sessionId: z.string(),
+      seq: z.number().int().min(0),
+      base64: z.string().min(1)
+    }),
+    output: z.void()
+  },
+  /**
+   * The recorder's terminal report: media fully appended + the event journal
+   * (or `error` when the capture failed). Resolves the pending demo:stop.
+   */
+  'demo:finish': {
+    input: z.object({
+      sessionId: z.string(),
+      durationSec: z.number().min(0),
+      events: z.array(demoEventSchema),
+      error: z.string().optional()
+    }),
+    output: z.void()
+  },
+  /**
+   * Stop the take and wait for the result: transcoded mp4 imported as a
+   * project video asset (journal stored on the row), or files in Downloads
+   * when the session has no project. `format: 'webm'` = transcode failed but
+   * the take was kept.
+   */
+  'demo:stop': {
+    input: z.void(),
+    output: z.object({
+      assetId: z.string().nullable(),
+      path: z.string(),
+      eventsPath: z.string().nullable(),
+      durationSec: z.number(),
+      format: z.enum(['mp4', 'webm']),
+      events: z.array(demoEventSchema)
+    })
+  },
+  /** Recorder state — banner rehydration after a renderer reload, E2E assertions. */
+  'demo:status': {
+    input: z.void(),
+    output: z.object({
+      recording: z.boolean(),
+      sessionId: z.string().nullable(),
+      startedAt: z.number().nullable()
+    })
+  },
+
   'settings:getLocale': { input: z.void(), output: localeSchema },
   'settings:setLocale': { input: localeSchema, output: z.void() },
   'projects:list': { input: z.void(), output: z.array(projectSchema) },
@@ -1959,7 +2048,8 @@ export const ipcEvents = [
   'event:navigate',
   'event:nichesChanged',
   'event:voicePersonasChanged',
-  'event:updateStateChanged'
+  'event:updateStateChanged',
+  'event:demoControl'
 ] as const
 export type IpcEvent = (typeof ipcEvents)[number]
 
@@ -1977,6 +2067,12 @@ export interface FocusNodePayload {
 /** The assistant (open_video tool) asks the app to navigate to a route. */
 export interface NavigatePayload {
   path: string
+}
+
+/** Demo mode (§9): main tells the renderer recorder to start/stop capturing. */
+export interface DemoControlPayload {
+  action: 'start' | 'stop'
+  sessionId: string
 }
 
 /** Progress of an MP4 render. One terminal event is always sent: done or error. */

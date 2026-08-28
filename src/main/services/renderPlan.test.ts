@@ -10,6 +10,7 @@ import {
   buildConcatArgs,
   buildConcatListContent,
   buildCrossfadeArgs,
+  buildDemoTranscodeArgs,
   buildLastFrameArgs,
   buildPreviewArgs,
   resolvePreviewSeek,
@@ -441,6 +442,20 @@ describe('trim on planned clips', () => {
     const joined = args.join(' ')
     expect(joined).toContain('-ss 1.500')
     expect(joined).toContain('-t 2.500 -i /media/a.mp4')
+  })
+})
+
+describe('buildDemoTranscodeArgs', () => {
+  it('turns a webm capture into an editable mp4: h264, even dims, no audio, faststart', () => {
+    const args = buildDemoTranscodeArgs('/tmp/capture.webm', '/tmp/capture.mp4')
+    const joined = args.join(' ')
+    expect(joined).toContain('-i /tmp/capture.webm')
+    expect(joined).toContain('-vf scale=trunc(iw/2)*2:trunc(ih/2)*2')
+    expect(joined).toContain('-c:v libx264')
+    expect(joined).toContain('-pix_fmt yuv420p')
+    expect(joined).toContain('-an')
+    expect(joined).toContain('-movflags +faststart')
+    expect(args.at(-1)).toBe('/tmp/capture.mp4')
   })
 })
 
