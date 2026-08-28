@@ -261,6 +261,10 @@
     "text": "New version {{version}} downloaded — ready to install.",
     "dismiss": "Hide (the update will install on quit)"
   },
+  "demoBanner": {
+    "recording": "Recording demo",
+    "stop": "Stop"
+  },
   "onboarding": {
     "skip": "Skip",
     "back": "Back",

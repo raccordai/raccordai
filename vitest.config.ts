@@ -57,6 +57,7 @@ export default defineConfig({
         'src/main/mcp/registry.ts',
         'src/main/mcp/docs.ts',
         'src/main/media/files.ts',
+        'src/renderer/src/lib/demoJournal.ts',
         'src/renderer/src/lib/errorReporter.ts',
         'src/renderer/src/lib/relativeTime.ts',
         'src/renderer/src/lib/shortcuts.ts',

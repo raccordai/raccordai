@@ -261,6 +261,10 @@
     "text": "Nouvelle version {{version}} téléchargée — prête à installer.",
     "dismiss": "Masquer (la mise à jour s'installera à la fermeture)"
   },
+  "demoBanner": {
+    "recording": "Enregistrement de la démo",
+    "stop": "Arrêter"
+  },
   "onboarding": {
     "skip": "Passer",
     "back": "Retour",

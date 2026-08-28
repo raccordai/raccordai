@@ -30,6 +30,8 @@ export const SHORTCUTS = {
   toggleAssistant: { key: 'j', mod: true },
   newChat: { key: 'n', mod: true, shift: true },
   openSettings: { key: ',', mod: true },
+  /** Demo mode (§9): start/stop the self-recording (RACCORD_DEMO=1 builds only). */
+  toggleDemoRecording: { key: 'r', mod: true, shift: true },
   /** Home */
   newProject: { key: 'n', mod: true },
   /** Workflow editor */
