@@ -3,6 +3,7 @@ import { copyFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { and, asc, eq } from 'drizzle-orm'
 import type { Asset } from '@shared/ipc/contracts'
+import type { DemoEvent } from '@shared/screenMotion'
 import { assetMatchesQuery, normalizeTags } from '@shared/assets/search'
 import { getDesignRecipe } from '@shared/designs/registry'
 import { getDb } from '../db/client'
@@ -132,6 +133,7 @@ export function importAssetFromFile(projectId: string, sourcePath: string): Asse
     designId: null,
     designSubject: null,
     contentHash: hashFile(filePath),
+    demoEvents: null,
     createdAt: Date.now(),
     updatedAt: null
   }
@@ -199,6 +201,7 @@ export async function importAssetFromUrl(
     designId: null,
     designSubject: null,
     contentHash: createHash('sha256').update(bytes).digest('hex'),
+    demoEvents: null,
     createdAt: Date.now(),
     updatedAt: null
   }
@@ -254,6 +257,7 @@ export function importAssetFromBytes(args: {
     designId,
     designSubject,
     contentHash: createHash('sha256').update(args.bytes).digest('hex'),
+    demoEvents: null,
     createdAt: Date.now(),
     updatedAt: null
   }
@@ -341,6 +345,7 @@ export async function promoteGeneration(
     designId,
     designSubject,
     contentHash: hashFile(filePath),
+    demoEvents: null,
     createdAt: Date.now(),
     updatedAt: null
   }
@@ -356,6 +361,15 @@ export function updateAsset(
     .update(assets)
     .set({ ...patch, updatedAt: Date.now() })
     .where(eq(assets.id, id))
+    .run()
+}
+
+/** Demo mode (§9): store the recording's input-event journal on its asset row. */
+export function setAssetDemoEvents(assetId: string, events: DemoEvent[]): void {
+  getDb()
+    .update(assets)
+    .set({ demoEvents: events, updatedAt: Date.now() })
+    .where(eq(assets.id, assetId))
     .run()
 }
 

@@ -15,6 +15,7 @@ import * as checkpointsService from '../services/checkpoints'
 import * as backupService from '../services/backup'
 import * as updaterService from '../services/updater'
 import * as chatService from '../services/chat'
+import * as demoService from '../services/demo'
 import * as assetsService from '../services/assets'
 import * as castingService from '../services/casting'
 import * as scenarioGraph from '../services/scenarioGraph'
@@ -61,8 +62,16 @@ export function registerIpcHandlers(): void {
     channel: getReleaseChannel(),
     platform: process.platform,
     dbPath: getDbPath(),
-    localApi: getLocalApiStatus()
+    localApi: getLocalApiStatus(),
+    demo: demoService.isDemoEnabled()
   }))
+
+  // Demo mode (§9) — the app records itself (RACCORD_DEMO=1 only).
+  handle('demo:start', (input) => demoService.startDemo(input))
+  handle('demo:appendChunk', (input) => demoService.appendDemoChunk(input))
+  handle('demo:finish', (input) => demoService.finishDemo(input))
+  handle('demo:stop', () => demoService.stopDemo())
+  handle('demo:status', () => demoService.demoStatus())
 
   handle('settings:getLocale', () => settingsService.getLocale())
   handle('settings:setLocale', (locale) => settingsService.setLocale(locale))

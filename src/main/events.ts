@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import type {
+  DemoControlPayload,
   FocusNodePayload,
   NavigatePayload,
   RenderProgressPayload,
@@ -89,6 +90,13 @@ export function broadcastNichesChanged(): void {
 export function broadcastUpdateState(payload: UpdateState): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:updateStateChanged', payload)
+  }
+}
+
+/** Demo mode (§9): main tells the renderer recorder to start/stop (no recordChange — not data state). */
+export function broadcastDemoControl(payload: DemoControlPayload): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:demoControl', payload)
   }
 }
 

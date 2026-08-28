@@ -64,6 +64,17 @@ function createWindow(): void {
 
   window.on('ready-to-show', () => window.show())
 
+  // Demo mode (§9): getDisplayMedia needs a main-side grant on Electron. The
+  // handler only ever answers our own renderer and hands it its own frame —
+  // tab-style capture: no picker, no window chrome, no OS cursor, and no
+  // macOS Screen Recording prompt (nothing outside our contents is read).
+  // If frame capture ever regresses, the fallback is desktopCapturer window
+  // sources matched on window.getMediaSourceId() — that path DOES hit TCC.
+  window.webContents.session.setDisplayMediaRequestHandler(
+    (request, callback) => callback(request.frame ? { video: request.frame } : {}),
+    { useSystemPicker: false }
+  )
+
   // External links open in the system browser, never inside the app shell.
   // Only protocols a browser/mail client owns: links also come from assistant
   // output (which quotes fetched web content), so file:// or an arbitrary
