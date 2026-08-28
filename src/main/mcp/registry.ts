@@ -2326,14 +2326,23 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'record_demo',
     description:
-      'Demo mode (§9, RACCORD_DEMO=1 builds only): start/stop a self-recording of the Raccord window. The app captures its own screen AND an input-event journal (clicks/moves, normalized coords); stop transcodes to mp4, imports it as a project video asset and stores the journal on it. projectId is ignored on stop (the session already owns it).',
+      'Demo mode (§9, RACCORD_DEMO=1 builds only): start/stop a recording with an input-event journal. source "self" films the Raccord window; "screen" films a whole display — any application, put it fullscreen (macOS: first use prompts Screen Recording; the journal needs Accessibility, else stop returns a warning). Stop imports the mp4 as a project video asset with the journal.',
     inputSchema: obj(
       {
         action: { type: 'string', enum: ['start', 'stop'] },
         projectId: str('Project the recording is imported into on stop'),
+        source: {
+          type: 'string',
+          enum: ['self', 'screen'],
+          description: 'What to film (default self = the Raccord window)'
+        },
+        displayId: {
+          type: 'number',
+          description: 'Display to film in screen mode (list_demo_displays; default primary)'
+        },
         width: {
           type: 'number',
-          description: 'Pinned content width during the take (default 1280)'
+          description: 'Pinned content width during a SELF take (default 1280)'
         },
         height: { type: 'number', description: 'Pinned content height (default 720)' }
       },
@@ -2341,10 +2350,12 @@ export const AGENT_TOOLS: AgentTool[] = [
     ),
     scope: 'project',
     risk: 'write',
-    execute: async ({ action, projectId, width, height }) => {
+    execute: async ({ action, projectId, source, displayId, width, height }) => {
       if (action === 'start') {
         return demo.startDemo({
           projectId: String(projectId),
+          ...(source === 'screen' ? { sourceKind: 'screen' as const } : {}),
+          ...(typeof displayId === 'number' ? { displayId } : {}),
           ...(typeof width === 'number' ? { width } : {}),
           ...(typeof height === 'number' ? { height } : {})
         })
@@ -2353,6 +2364,15 @@ export const AGENT_TOOLS: AgentTool[] = [
       const { events, ...rest } = result
       return { ...rest, eventCount: events.length }
     }
+  },
+  {
+    name: 'list_demo_displays',
+    description:
+      'Demo mode (§9): the machine’s displays — id, label, bounds, scale, primary — to pick the screen a record_demo source "screen" take films.',
+    inputSchema: obj({}, []),
+    scope: 'global',
+    risk: 'read',
+    execute: () => demo.listDemoDisplays()
   },
   {
     name: 'render_video',

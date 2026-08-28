@@ -179,6 +179,34 @@ await spec('demo', async () => {
     `the click frame is transformed, the tail is not (zoomed ${zoomedPsnr.toFixed(1)} dB vs identity ${identityPsnr.toFixed(1)} dB)`
   )
 
+  step('screen mode: external session records provenance and warnings')
+  const displays = await invoke('demo:listDisplays')
+  check(displays.length > 0 && displays.some((d) => d.primary), 'displays are listed')
+  const screenStart = await invoke('demo:start', {
+    projectId: project.id,
+    external: true,
+    sourceKind: 'screen'
+  })
+  let seq2 = 0
+  for (const base64 of base64Chunks(webmBytes)) {
+    await invoke('demo:appendChunk', { sessionId: screenStart.sessionId, seq: seq2, base64 })
+    seq2 += 1
+  }
+  await invoke('demo:finish', {
+    sessionId: screenStart.sessionId,
+    durationSec: FIXTURES.demoWebm.seconds,
+    events: [],
+    captureStartEpochMs: Date.now()
+  })
+  const screenTake = await invoke('demo:stop')
+  checkEqual(screenTake.source, 'screen', 'the take reports its screen provenance')
+  check(Array.isArray(screenTake.warnings), 'warnings surface degradations (hook availability)')
+  const screenAsset = (await invoke('assets:listByProject', { projectId: project.id })).find(
+    (a) => a.id === screenTake.assetId
+  )
+  checkEqual(screenAsset?.demoSource, 'screen', 'demo_source is stored on the asset row')
+  ok(`screen take imported (warnings: ${screenTake.warnings.length})`)
+
   step('params demoCamera:false keeps the raw capture')
   await invoke('nodes:updateParams', {
     nodeId: node.id,

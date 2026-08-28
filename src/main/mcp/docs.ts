@@ -809,9 +809,11 @@ set_clip_transition joins two entries (each transition SHORTENS the film by its 
 set_clip_speed / set_clip_look / set_still_motion bake per-clip effects. An imported VIDEO
 asset (add_asset_from_file, e.g. a screen recording) placed via set_timeline_order plays as a
 real clip — trims, split, speed, looks and transitions all apply; only IMAGE assets are stills.
-A clip whose asset carries a demo journal (record_demo) gets the AUTOMATIC screen-motion camera
-at render — zoom on each click, synthetic cursor; update_node with params {"demoCamera": false}
-keeps the raw capture. plan_render reports the slot with demoCamera: true.
+A clip whose asset carries a demo journal (record_demo — source "self" films Raccord, "screen"
+films a whole display so ANY application can be demoed fullscreen) gets the AUTOMATIC
+screen-motion camera at render — zoom on each click; the synthetic cursor only on self takes
+(screen captures keep the real one). update_node with params {"demoCamera": false} keeps the
+raw capture. plan_render reports the slot with demoCamera: true.
 
 AUDIO SYNC (the ElevenLabs workflow). Audio nodes land on their lane by model (music = Suno bed,
 speech = voice-over/dialogue). Tracks without an offset chain one after another; set_audio_offset
