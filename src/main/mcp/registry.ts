@@ -2326,41 +2326,28 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'record_demo',
     description:
-      'Demo mode (§9, RACCORD_DEMO=1 builds only): start/stop a recording with an input-event journal. source "self" films the Raccord window; "screen" films a whole display — any application, put it fullscreen (macOS: first use prompts Screen Recording; the journal needs Accessibility, else stop returns a warning). Stop imports the mp4 as a project video asset with the journal.',
+      'Demo mode (§9, RACCORD_DEMO=1 builds only): start/stop a screen recording with an input-event journal — a take films a whole display (Raccord fullscreen or any other app; macOS prompts Screen Recording once, the journal needs Accessibility else stop warns). During a take, focus_node points at what you show. Stop imports the mp4 into projectId (overrides the start’s) with the journal.',
     inputSchema: obj(
       {
         action: { type: 'string', enum: ['start', 'stop'] },
-        projectId: str('Project the recording is imported into on stop'),
-        source: {
-          type: 'string',
-          enum: ['self', 'screen'],
-          description: 'What to film (default self = the Raccord window)'
-        },
+        projectId: str('Destination project (stop’s value wins over start’s)'),
         displayId: {
           type: 'number',
-          description: 'Display to film in screen mode (list_demo_displays; default primary)'
-        },
-        width: {
-          type: 'number',
-          description: 'Pinned content width during a SELF take (default 1280)'
-        },
-        height: { type: 'number', description: 'Pinned content height (default 720)' }
+          description: 'Display to film (list_demo_displays; default: Raccord’s display)'
+        }
       },
       ['action', 'projectId']
     ),
     scope: 'project',
     risk: 'write',
-    execute: async ({ action, projectId, source, displayId, width, height }) => {
+    execute: async ({ action, projectId, displayId }) => {
       if (action === 'start') {
         return demo.startDemo({
           projectId: String(projectId),
-          ...(source === 'screen' ? { sourceKind: 'screen' as const } : {}),
-          ...(typeof displayId === 'number' ? { displayId } : {}),
-          ...(typeof width === 'number' ? { width } : {}),
-          ...(typeof height === 'number' ? { height } : {})
+          ...(typeof displayId === 'number' ? { displayId } : {})
         })
       }
-      const result = await demo.stopDemo()
+      const result = await demo.stopDemo({ projectId: String(projectId) })
       const { events, ...rest } = result
       return { ...rest, eventCount: events.length }
     }

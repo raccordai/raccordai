@@ -71,7 +71,8 @@ export function registerIpcHandlers(): void {
   handle('demo:listDisplays', () => demoService.listDemoDisplays())
   handle('demo:appendChunk', (input) => demoService.appendDemoChunk(input))
   handle('demo:finish', (input) => demoService.finishDemo(input))
-  handle('demo:stop', () => demoService.stopDemo())
+  handle('demo:stop', (input) => demoService.stopDemo(input))
+  handle('demo:point', (input) => demoService.demoPoint(input))
   handle('demo:status', () => demoService.demoStatus())
 
   handle('settings:getLocale', () => settingsService.getLocale())

@@ -938,22 +938,18 @@ export const ipcContracts = {
    */
   'demo:start': {
     input: z.object({
-      /** Import the recording into this project; omitted = files land in Downloads. */
+      /** Default destination project (demo:stop can override); omitted = Downloads. */
       projectId: z.string().optional(),
       /**
-       * 'self' (default) records Raccord's own window; 'screen' records a
-       * whole display (any application — put it fullscreen) with the input
-       * journal collected by a GLOBAL hook (macOS: needs Accessibility;
-       * missing permission ⇒ the take still records, with a warning and no
-       * journal). Screen capture triggers the OS Screen Recording prompt.
+       * Display to record (demo:listDisplays; default: the one Raccord is
+       * on). EVERY take films a whole display — Raccord and third-party apps
+       * go through the exact same path: screen capture + a GLOBAL input hook
+       * for the journal (macOS: Screen Recording prompt on first use;
+       * Accessibility required for the journal, missing ⇒ warning, no auto
+       * camera).
        */
-      sourceKind: z.enum(['self', 'screen']).optional(),
-      /** Display to capture in 'screen' mode (demo:listDisplays; default: primary). */
       displayId: z.number().int().optional(),
-      /** Content size pinned during a SELF take (even values; default 1280x720). */
-      width: z.number().int().min(640).max(3840).optional(),
-      height: z.number().int().min(480).max(2160).optional(),
-      /** Driver mode: no broadcast, no resize — the caller streams the media itself. */
+      /** Driver mode: no broadcast, no hook — the caller streams media and events itself. */
       external: z.boolean().optional()
     }),
     output: z.object({ sessionId: z.string() })
@@ -1002,18 +998,31 @@ export const ipcContracts = {
    * the take was kept.
    */
   'demo:stop': {
-    input: z.void(),
+    input: z
+      .object({
+        /** Overrides the start's destination — where the take is imported. */
+        projectId: z.string().optional()
+      })
+      .optional(),
     output: z.object({
       assetId: z.string().nullable(),
       path: z.string(),
       eventsPath: z.string().nullable(),
       durationSec: z.number(),
       format: z.enum(['mp4', 'webm']),
-      source: z.enum(['self', 'screen']),
       /** Degradations worth telling the user (e.g. global hook unavailable → no journal). */
       warnings: z.array(z.string()),
       events: z.array(demoEventSchema)
     })
+  },
+  /**
+   * Agent pointing: journal a synthetic click at a SCREEN coordinate during a
+   * take (the renderer forwards focus_node landings here — tool-driven demos
+   * never move the real mouse, this is how the auto camera gets its targets).
+   */
+  'demo:point': {
+    input: z.object({ x: z.number(), y: z.number() }),
+    output: z.void()
   },
   /** Recorder state — banner rehydration after a renderer reload, E2E assertions. */
   'demo:status': {
@@ -2103,8 +2112,6 @@ export interface NavigatePayload {
 export interface DemoControlPayload {
   action: 'start' | 'stop'
   sessionId: string
-  /** 'screen' = the journal is collected by main's GLOBAL hook — the renderer records video only. */
-  capture?: 'self' | 'screen'
 }
 
 /** Progress of an MP4 render. One terminal event is always sent: done or error. */

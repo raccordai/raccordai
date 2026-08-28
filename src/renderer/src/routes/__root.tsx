@@ -52,7 +52,7 @@ function RootLayout(): React.JSX.Element {
           </header>
           <MissingKeyBanner />
           <UpdateBanner />
-          <DemoRecordingBanner />
+          <DemoModeController />
           <div className="flex min-h-0 flex-1">
             <AssistantSidebar />
             <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -176,17 +176,17 @@ function UpdateBanner(): React.JSX.Element | null {
 }
 
 /**
- * Demo mode (§9): the REC banner + the whole renderer-side wiring — the
- * demoControl subscription, the reload reconciliation and the ⇧⌘R toggle all
- * live here because this component is always mounted while the banner itself
- * only renders during a take. Everything is inert unless the app was launched
- * with RACCORD_DEMO=1 (app:getInfo.demo).
+ * Demo mode (§9): headless renderer-side wiring — the demoControl
+ * subscription, the reload reconciliation and the ⇧⌘R toggle. Deliberately
+ * NO in-window visual: the old REC banner was part of the captured page and
+ * ended up in every take; the indicator is now main's floating pill window
+ * (content-protected, excluded from captures). Inert unless the app was
+ * launched with RACCORD_DEMO=1 (app:getInfo.demo).
  */
-function DemoRecordingBanner(): React.JSX.Element | null {
-  const { t } = useTranslation()
+function DemoModeController(): null {
   const info = useQuery({ queryKey: ['app', 'info'], queryFn: () => invoke('app:getInfo') })
   const demo = info.data?.demo === true
-  const { recording, startedAt } = useDemoRecorder()
+  const { recording } = useDemoRecorder()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const projectId = /^\/projects\/([^/]+)/.exec(pathname)?.[1]
 
@@ -200,7 +200,7 @@ function DemoRecordingBanner(): React.JSX.Element | null {
 
   const toggle = useCallback(() => {
     const run = recording
-      ? invoke('demo:stop')
+      ? invoke('demo:stop', undefined)
       : invoke('demo:start', projectId ? { projectId } : {})
     void run.then(
       () => undefined,
@@ -211,31 +211,7 @@ function DemoRecordingBanner(): React.JSX.Element | null {
   // Stop must work while a text field has focus — a demo often ends mid-typing.
   useShortcut('toggleDemoRecording', toggle, { enabled: demo, allowWhileTyping: true })
 
-  const [elapsed, setElapsed] = useState(0)
-  useEffect(() => {
-    if (!recording || startedAt === null) return
-    const update = (): void => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
-    update()
-    const id = setInterval(update, 1000)
-    return () => clearInterval(id)
-  }, [recording, startedAt])
-
-  if (!demo || !recording || startedAt === null) return null
-  const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`
-  return (
-    <div className="flex shrink-0 items-center justify-center gap-3 border-b border-neutral-800 bg-neutral-900 px-4 py-1.5">
-      <span className="h-2 w-2 animate-pulse rounded-full bg-danger" aria-hidden />
-      <span className="text-xs text-neutral-300">
-        {t('demoBanner.recording')} · {clock}
-      </span>
-      <button
-        className="rounded-md bg-neutral-800 px-2.5 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-700"
-        onClick={toggle}
-      >
-        {t('demoBanner.stop')}
-      </button>
-    </div>
-  )
+  return null
 }
 
 /**

@@ -1,46 +1,15 @@
-import type { DemoEvent } from '@shared/screenMotion'
-
 /**
- * Demo mode (§9) — the decision-shaped parts of the input-event journal, kept
- * pure so they are unit-testable: event normalization (with the keystroke
- * redaction rule), pointer-move coalescing and the base64 chunking of the
- * MediaRecorder blobs. The recorder store (features/demo) only wires these to
- * the DOM and the IPC bridge.
+ * Demo mode (§9) — the renderer-side pure part of the capture upload: base64
+ * chunking of the MediaRecorder blobs. (The input journal itself is main's
+ * business — machine-wide hook + demo:point — since every take films a whole
+ * display through one path.)
  */
-
-const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
-
-/**
- * One journal entry from a raw DOM sample. Coordinates are normalized to the
- * capture frame (window content size). Key events carry NO position and NO key
- * value — `DemoEvent` has no field for either, which IS the redaction: what
- * the user types (passwords included) never reaches the journal, only the
- * fact that they typed.
- */
-export function normalizeEvent(
-  type: DemoEvent['type'],
-  tSec: number,
-  clientX: number,
-  clientY: number,
-  innerWidth: number,
-  innerHeight: number
-): DemoEvent {
-  const t = Math.max(0, tSec)
-  if (type === 'key') return { t, type }
-  if (innerWidth <= 0 || innerHeight <= 0) return { t, type }
-  return { t, type, x: clamp01(clientX / innerWidth), y: clamp01(clientY / innerHeight) }
-}
-
-// Move coalescing lives in shared/screenMotion.ts since main's global hook
-// (external screen captures) throttles the same way — re-exported for the
-// renderer-side consumers.
-export { createMoveThrottle } from '@shared/screenMotion'
 
 /**
  * Bytes → base64 strings sized for the IPC boundary (the handle() wrapper
  * zod-parses every payload, so one giant string is off the table). The
  * 0x8000-slice String.fromCharCode loop avoids the spread-arg stack overflow
- * on big buffers (same loop as useLastFrameExtractor).
+ * on big buffers.
  */
 export function toBase64Chunks(bytes: Uint8Array, maxChars = 4_000_000): string[] {
   let binary = ''

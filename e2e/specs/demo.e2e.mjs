@@ -179,33 +179,29 @@ await spec('demo', async () => {
     `the click frame is transformed, the tail is not (zoomed ${zoomedPsnr.toFixed(1)} dB vs identity ${identityPsnr.toFixed(1)} dB)`
   )
 
-  step('screen mode: external session records provenance and warnings')
+  step('stop-time projectId override files the take elsewhere')
   const displays = await invoke('demo:listDisplays')
   check(displays.length > 0 && displays.some((d) => d.primary), 'displays are listed')
-  const screenStart = await invoke('demo:start', {
-    projectId: project.id,
-    external: true,
-    sourceKind: 'screen'
-  })
+  const otherProject = await invoke('projects:create', { name: 'E2E — Demo destination' })
+  const secondStart = await invoke('demo:start', { projectId: project.id, external: true })
   let seq2 = 0
   for (const base64 of base64Chunks(webmBytes)) {
-    await invoke('demo:appendChunk', { sessionId: screenStart.sessionId, seq: seq2, base64 })
+    await invoke('demo:appendChunk', { sessionId: secondStart.sessionId, seq: seq2, base64 })
     seq2 += 1
   }
   await invoke('demo:finish', {
-    sessionId: screenStart.sessionId,
+    sessionId: secondStart.sessionId,
     durationSec: FIXTURES.demoWebm.seconds,
-    events: [],
+    events: EVENTS,
     captureStartEpochMs: Date.now()
   })
-  const screenTake = await invoke('demo:stop')
-  checkEqual(screenTake.source, 'screen', 'the take reports its screen provenance')
-  check(Array.isArray(screenTake.warnings), 'warnings surface degradations (hook availability)')
-  const screenAsset = (await invoke('assets:listByProject', { projectId: project.id })).find(
-    (a) => a.id === screenTake.assetId
+  const rerouted = await invoke('demo:stop', { projectId: otherProject.id })
+  check(Array.isArray(rerouted.warnings), 'warnings surface degradations (hook availability)')
+  const reroutedAsset = (await invoke('assets:listByProject', { projectId: otherProject.id })).find(
+    (a) => a.id === rerouted.assetId
   )
-  checkEqual(screenAsset?.demoSource, 'screen', 'demo_source is stored on the asset row')
-  ok(`screen take imported (warnings: ${screenTake.warnings.length})`)
+  check(reroutedAsset !== undefined, 'the take landed in the STOP-time project, not the start’s')
+  checkEqual(reroutedAsset.demoSource, 'screen', 'demo_source records the provenance')
 
   step('params demoCamera:false keeps the raw capture')
   await invoke('nodes:updateParams', {

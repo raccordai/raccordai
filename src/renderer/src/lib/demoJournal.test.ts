@@ -1,44 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createMoveThrottle, normalizeEvent, toBase64Chunks } from './demoJournal'
-
-describe('normalizeEvent', () => {
-  it('normalizes pointer coords to the window and clamps out-of-frame samples', () => {
-    expect(normalizeEvent('click', 2, 320, 180, 1280, 720)).toEqual({
-      t: 2,
-      type: 'click',
-      x: 0.25,
-      y: 0.25
-    })
-    expect(normalizeEvent('move', 1, -50, 9000, 1280, 720)).toEqual({
-      t: 1,
-      type: 'move',
-      x: 0,
-      y: 1
-    })
-    // A negative timestamp (sample raced the recorder start) clamps to 0.
-    expect(normalizeEvent('scroll', -0.2, 640, 360, 1280, 720).t).toBe(0)
-  })
-
-  it('key events carry neither coordinates nor a key value (the redaction rule)', () => {
-    expect(normalizeEvent('key', 3.5, 640, 360, 1280, 720)).toEqual({ t: 3.5, type: 'key' })
-  })
-
-  it('degrades to a positionless event when the window size is unusable', () => {
-    expect(normalizeEvent('click', 1, 10, 10, 0, 0)).toEqual({ t: 1, type: 'click' })
-  })
-})
-
-describe('createMoveThrottle', () => {
-  it('keeps at most one move per window, always the newest', () => {
-    const throttle = createMoveThrottle(0.1)
-    const at = (t: number) => ({ t, type: 'move' as const, x: 0.5, y: 0.5 })
-    expect(throttle(at(0))).not.toBeNull()
-    expect(throttle(at(0.05))).toBeNull()
-    expect(throttle(at(0.09))).toBeNull()
-    expect(throttle(at(0.11))?.t).toBe(0.11)
-    expect(throttle(at(0.15))).toBeNull()
-  })
-})
+import { toBase64Chunks } from './demoJournal'
 
 describe('toBase64Chunks', () => {
   const decode = (chunks: string[]): Uint8Array => {
