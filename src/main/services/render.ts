@@ -188,12 +188,24 @@ async function downloadTo(workDir: string, name: string, url: string): Promise<s
   return target
 }
 
-/** Local path of a node's best output (generation rows carry absolute paths). */
+/**
+ * Local path of a node's best output (generation rows carry absolute paths).
+ * Asset nodes have no generation rows: their managed file IS the output
+ * (a video asset renders as a real clip), so `row` is null for them — a
+ * dangling filePath returns null and the slot lands in `skipped`.
+ */
 async function resolveNodeMedia(
   workDir: string,
   node: GraphNode,
   name: string
-): Promise<{ path: string; row: GenerationRow } | null> {
+): Promise<{ path: string; row: GenerationRow | null } | null> {
+  if (node.modelId === 'studio/asset') {
+    const url = resolveSelectedOutputUrl(node, 'output')
+    if (!url) return null
+    const local = resolveMediaUrlToFile(url)
+    if (local) return existsSync(local.path) ? { path: local.path, row: null } : null
+    return { path: await downloadTo(workDir, name, url), row: null }
+  }
   const rows = listGenerationsForNode(node.id)
   const best = bestGeneration(
     node,
@@ -347,7 +359,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           const { start, end } = clipTrim(node, Number.POSITIVE_INFINITY)
           const volume = clipVolume(node)
           lane.push({
-            transcript: (media.row.transcript ?? null) as SpeechTranscript | null,
+            transcript: (media.row?.transcript ?? null) as SpeechTranscript | null,
             offsetSec: clipTimelineOffset(node),
             track: {
               path: media.path,
@@ -875,6 +887,42 @@ export async function planRender(
         skipped.push(label(node))
         entries.push({ ...base, source: 'skipped', durationSec: null })
       }
+      continue
+    }
+    // A non-still asset node is a VIDEO asset: its managed file is the clip.
+    if (node.modelId === 'studio/asset') {
+      const url = resolveSelectedOutputUrl(node, 'output')
+      const local = url ? resolveMediaUrlToFile(url) : null
+      const localPath = local && existsSync(local.path) ? local.path : null
+      if (!localPath && (local || !url)) {
+        // No asset, or a managed file gone missing → the render would skip it.
+        skipped.push(label(node))
+        entries.push({ ...base, source: 'skipped', durationSec: null })
+        continue
+      }
+      const probe = localPath ? await probeOnce(localPath) : null
+      const clip: PlannedClip = {
+        path: localPath ?? url!,
+        isStill: false,
+        stillDurationSeconds: 0,
+        probe
+      }
+      const { start, end } = segmentTrim(entry.segment, probe?.durationSeconds ?? undefined)
+      if (start > 0) clip.trimStartSec = start
+      if (end !== undefined) clip.trimEndSec = end
+      const speed = clipSpeed(node)
+      if (speed !== 1) clip.speed = speed
+      const look = clipLook(node)
+      if (look) clip.look = look
+      clip.transitionAfter = segmentTransitionAfter(entry.segment)
+      clip.transitionDurationSec = segmentTransitionSeconds(entry.segment)
+      clips.push(clip)
+      const duration = clipEffectiveDuration(clip)
+      entries.push({
+        ...base,
+        source: localPath ? 'video' : 'remote',
+        durationSec: duration > 0 ? Number(duration.toFixed(3)) : null
+      })
       continue
     }
     const rows = listGenerationsForNode(node.id)

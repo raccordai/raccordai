@@ -10,8 +10,9 @@ import {
   resolveTimeline,
   type ResolvedTimeline
 } from '@shared/timeline'
+import { resolveMediaUrlToFile } from '../media/protocol'
 import { parseFfprobeJson } from './renderPlan'
-import { listGenerationsForNode } from './generations'
+import { listGenerationsForNode, resolveSelectedOutputUrl } from './generations'
 import * as graphService from './graph'
 import * as videosService from './videos'
 
@@ -44,6 +45,14 @@ async function probeDurationSeconds(path: string): Promise<number | null> {
 
 /** Local file of the node's best successful output (never downloads). */
 export function localMediaPath(node: GraphNode): string | null {
+  if (node.modelId === 'studio/asset') {
+    // Asset nodes have no generation rows — resolve the asset's managed file
+    // (remote-only sourceUrl assets return null and keep the default duration).
+    const url = resolveSelectedOutputUrl(node, 'output')
+    if (!url) return null
+    const resolved = resolveMediaUrlToFile(url)
+    return resolved && existsSync(resolved.path) ? resolved.path : null
+  }
   const rows = listGenerationsForNode(node.id)
   const best = bestGeneration(
     node,

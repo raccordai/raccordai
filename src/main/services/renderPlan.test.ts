@@ -444,6 +444,28 @@ describe('trim on planned clips', () => {
   })
 })
 
+describe('asset-sourced clips', () => {
+  // A video ASSET (imported mp4, screen recording) reaches this layer as a
+  // plain {isStill: false, probe} clip — deliberately indistinguishable from a
+  // generated clip, so trims/speed/lossless-concat behave identically.
+  it('behave exactly like generated clips: lossless concat and trimmed/speeded argv', () => {
+    const assetClip = (over: Partial<PlannedClip> = {}) =>
+      clip({ path: '/media/recording.mp4', ...over })
+    const spec = decideSequenceSpec([assetClip()])
+    expect(canConcatLosslessly([assetClip(), assetClip()], spec)).toBe(true)
+    expect(decideSequenceSpec([assetClip({ probe: probe({ width: 1280, height: 720 }) })])).toEqual(
+      { width: 1280, height: 720, fps: 24 }
+    )
+
+    const edited = assetClip({ trimStartSec: 2, trimEndSec: 10, speed: 2 })
+    const args = buildNormalizeArgs(edited, spec, '/tmp/seg.mp4').join(' ')
+    expect(args).toContain('-ss 2.000')
+    expect(args).toContain('-t 8.000 -i /media/recording.mp4')
+    expect(args).toContain('setpts=PTS/2')
+    expect(clipEffectiveDuration(edited)).toBe(4)
+  })
+})
+
 describe('crossfades', () => {
   it('groups consecutive crossfaded clips, cuts split the groups', () => {
     const a = clip({ transitionAfter: 'crossfade' })
