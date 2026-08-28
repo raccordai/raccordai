@@ -58,6 +58,12 @@ interface DemoSession {
   sessionId: string
   external: boolean
   projectId: string | null
+  /**
+   * 'window' films Raccord's own window (frame capture — pixel-exact content,
+   * no Screen Recording prompt, other windows never in the take); 'display'
+   * films a whole screen (any third-party app).
+   */
+  target: 'window' | 'display'
   displayId: number
   displayBounds: Electron.Rectangle
   hookRunning: boolean
@@ -168,17 +174,38 @@ export function listDemoDisplays(): Array<{
 /**
  * The display the ACTIVE session captures — consulted by the display-media
  * handler in main/index.ts to answer getDisplayMedia with the right screen
- * source (null when no live capture is expected).
+ * source. Null for window takes (the handler then answers `request.frame`,
+ * i.e. Raccord's own content) and when no live capture is expected.
  */
 export function pendingScreenCaptureDisplayId(): number | null {
-  return active && !active.external ? active.displayId : null
+  return active && !active.external && active.target === 'display' ? active.displayId : null
 }
 
-export function startDemo(input: { projectId?: string; displayId?: number; external?: boolean }): {
+/** The capture area the journal normalizes against — live, so a window take follows its window. */
+function captureBounds(session: DemoSession): Electron.Rectangle {
+  if (session.target === 'window') {
+    const window = mainWindow()
+    if (window && !window.isDestroyed()) return window.getContentBounds()
+  }
+  return session.displayBounds
+}
+
+export function startDemo(input: {
+  projectId?: string
+  target?: 'window' | 'display'
+  displayId?: number
+  external?: boolean
+}): {
   sessionId: string
 } {
   if (!isDemoEnabled()) throw new Error('Demo mode is not enabled (launch with RACCORD_DEMO=1).')
   if (active) throw new Error('A demo recording is already in progress.')
+
+  // Default: film Raccord's own window; a displayId (or external driver mode)
+  // implies a display take.
+  const target =
+    input.target ??
+    (input.displayId !== undefined || input.external === true ? 'display' : 'window')
 
   const window = mainWindow()
   const display =
@@ -196,6 +223,7 @@ export function startDemo(input: { projectId?: string; displayId?: number; exter
     sessionId,
     external: input.external === true,
     projectId: input.projectId ?? null,
+    target,
     displayId: display.id,
     displayBounds: display.bounds,
     hookRunning: false,
@@ -213,7 +241,7 @@ export function startDemo(input: { projectId?: string; displayId?: number; exter
   active = session
 
   if (!session.external) {
-    const hook = startGlobalJournal(display.bounds)
+    const hook = startGlobalJournal(() => captureBounds(session))
     if (hook.ok) session.hookRunning = true
     else session.warnings.push(hook.reason)
 
@@ -227,7 +255,7 @@ export function startDemo(input: { projectId?: string; displayId?: number; exter
   }
   logInfo(
     'demo',
-    `recording started (${sessionId}, display ${display.id}${session.external ? ', external' : ''})`
+    `recording started (${sessionId}, ${target === 'window' ? 'app window' : `display ${display.id}`}${session.external ? ', external' : ''})`
   )
   return { sessionId }
 }
@@ -253,7 +281,7 @@ export function appendDemoChunk(input: { sessionId: string; seq: number; base64:
 export function demoPoint(input: { x: number; y: number }): void {
   const session = active
   if (!session || session.external) return
-  const point = normalizeOnDisplay(input.x, input.y, session.displayBounds)
+  const point = normalizeOnDisplay(input.x, input.y, captureBounds(session))
   if (!point) return
   const nowSec = Date.now() / 1000
   session.syntheticEvents.push({ t: nowSec - 0.4, type: 'move', x: point.x, y: point.y })
@@ -276,7 +304,7 @@ function deliverTake(
       name: label,
       description: 'Demo-mode screen recording (input-event journal attached).'
     })
-    setAssetDemoEvents(asset.id, take.events, 'screen')
+    setAssetDemoEvents(asset.id, take.events, session.target === 'window' ? 'self' : 'screen')
     return {
       assetId: asset.id,
       path: asset.filePath ?? take.mediaPath,

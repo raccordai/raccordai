@@ -54,15 +54,13 @@ interface ActiveHook {
 let activeHook: ActiveHook | null = null
 
 /**
- * Starts collecting global input over the given display. Returns the failure
- * reason (an actionable warning) when the journal cannot be collected.
+ * Starts collecting global input over the given capture area — a GETTER so a
+ * window take follows its window when it moves. Returns the failure reason
+ * (an actionable warning) when the journal cannot be collected.
  */
-export function startGlobalJournal(bounds: {
-  x: number
-  y: number
-  width: number
-  height: number
-}): { ok: true } | { ok: false; reason: string } {
+export function startGlobalJournal(
+  getBounds: () => { x: number; y: number; width: number; height: number }
+): { ok: true } | { ok: false; reason: string } {
   if (activeHook) return { ok: false, reason: 'A global journal is already running.' }
   if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(false)) {
     return {
@@ -80,7 +78,7 @@ export function startGlobalJournal(bounds: {
   const throttle = createMoveThrottle()
   const nowSec = (): number => Date.now() / 1000
   const positioned = (type: DemoEvent['type'], e: { x: number; y: number }): void => {
-    const point = normalizeOnDisplay(e.x, e.y, bounds)
+    const point = normalizeOnDisplay(e.x, e.y, getBounds())
     if (!point) return
     const event: DemoEvent = { t: nowSec(), type, x: point.x, y: point.y }
     if (type === 'move') {

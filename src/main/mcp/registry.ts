@@ -2326,24 +2326,30 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'record_demo',
     description:
-      'Demo mode (§9, RACCORD_DEMO=1 builds only): start/stop a screen recording with an input-event journal — a take films a whole display (Raccord fullscreen or any other app; macOS prompts Screen Recording once, the journal needs Accessibility else stop warns). During a take, focus_node points at what you show. Stop imports the mp4 into projectId (overrides the start’s) with the journal.',
+      'Demo mode (§9, RACCORD_DEMO=1 only): start/stop a recording with an input-event journal. target "window" (default) films Raccord’s own window — other windows never appear; "display" films a whole screen for any other app. The journal needs macOS Accessibility else stop warns. During a take, focus_node points at what you show. Stop imports the mp4 into projectId (overrides the start’s).',
     inputSchema: obj(
       {
         action: { type: 'string', enum: ['start', 'stop'] },
         projectId: str('Destination project (stop’s value wins over start’s)'),
+        target: {
+          type: 'string',
+          enum: ['window', 'display'],
+          description: 'window = Raccord’s own window (default); display = a whole screen'
+        },
         displayId: {
           type: 'number',
-          description: 'Display to film (list_demo_displays; default: Raccord’s display)'
+          description: 'Display to film in display mode (list_demo_displays; default: Raccord’s)'
         }
       },
       ['action', 'projectId']
     ),
     scope: 'project',
     risk: 'write',
-    execute: async ({ action, projectId, displayId }) => {
+    execute: async ({ action, projectId, target, displayId }) => {
       if (action === 'start') {
         return demo.startDemo({
           projectId: String(projectId),
+          ...(target === 'display' || target === 'window' ? { target } : {}),
           ...(typeof displayId === 'number' ? { displayId } : {})
         })
       }

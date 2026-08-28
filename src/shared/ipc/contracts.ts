@@ -941,13 +941,15 @@ export const ipcContracts = {
       /** Default destination project (demo:stop can override); omitted = Downloads. */
       projectId: z.string().optional(),
       /**
-       * Display to record (demo:listDisplays; default: the one Raccord is
-       * on). EVERY take films a whole display — Raccord and third-party apps
-       * go through the exact same path: screen capture + a GLOBAL input hook
-       * for the journal (macOS: Screen Recording prompt on first use;
-       * Accessibility required for the journal, missing ⇒ warning, no auto
-       * camera).
+       * What to film. 'window' (the default) films Raccord's OWN window —
+       * frame capture: pixel-exact content, other windows never in the take,
+       * no Screen Recording prompt. 'display' films a whole screen (any
+       * third-party app fullscreen). Both share the same journal: the global
+       * hook normalized against the live capture area (macOS: Accessibility
+       * required, missing ⇒ warning, no auto camera).
        */
+      target: z.enum(['window', 'display']).optional(),
+      /** Display to record in 'display' mode (demo:listDisplays; default: Raccord's). Implies target 'display'. */
       displayId: z.number().int().optional(),
       /** Driver mode: no broadcast, no hook — the caller streams media and events itself. */
       external: z.boolean().optional()
