@@ -10,6 +10,8 @@ import {
   buildConcatArgs,
   buildConcatListContent,
   buildCrossfadeArgs,
+  buildCursorImageArgs,
+  buildDemoCameraArgs,
   buildDemoTranscodeArgs,
   buildLastFrameArgs,
   buildPreviewArgs,
@@ -442,6 +444,45 @@ describe('trim on planned clips', () => {
     const joined = args.join(' ')
     expect(joined).toContain('-ss 1.500')
     expect(joined).toContain('-t 2.500 -i /media/a.mp4')
+  })
+})
+
+describe('demo camera builders', () => {
+  it('buildCursorImageArgs draws the one-shot cursor png', () => {
+    const args = buildCursorImageArgs('/tmp/demo-cursor.png')
+    const joined = args.join(' ')
+    expect(joined).toContain('color=white:s=56x56,format=rgba')
+    expect(joined).toContain('geq=')
+    expect(joined).toContain('-frames:v 1')
+    expect(args.at(-1)).toBe('/tmp/demo-cursor.png')
+  })
+
+  it('buildDemoCameraArgs wires capture + cursor through the filter to h264', () => {
+    const args = buildDemoCameraArgs(
+      '/media/take.mp4',
+      '/tmp/demo-cursor.png',
+      '/tmp/demo-cam-01.mp4',
+      '[0:v][1:v]overlay=x=1:y=1[comp];[comp]zoompan=z=1[out]'
+    )
+    const joined = args.join(' ')
+    expect(joined).toContain('-i /media/take.mp4 -i /tmp/demo-cursor.png')
+    expect(joined).toContain('-map [out]')
+    expect(joined).toContain('-c:v libx264')
+    expect(joined).toContain('-pix_fmt yuv420p')
+    expect(joined).toContain('-an')
+    expect(args.at(-1)).toBe('/tmp/demo-cam-01.mp4')
+  })
+
+  it('buildDemoCameraArgs skips the cursor input on a positionless journal', () => {
+    const args = buildDemoCameraArgs(
+      '/media/take.mp4',
+      null,
+      '/tmp/out.mp4',
+      '[0:v]zoompan=z=1[out]'
+    )
+    const joined = args.join(' ')
+    expect(joined).toContain('-i /media/take.mp4 -filter_complex')
+    expect(joined).not.toContain('cursor')
   })
 })
 

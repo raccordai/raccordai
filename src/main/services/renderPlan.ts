@@ -892,6 +892,68 @@ export function buildDemoTranscodeArgs(webmPath: string, mp4Path: string): strin
   ]
 }
 
+/**
+ * Demo camera (§9): the synthetic cursor image — a soft white dot with a
+ * translucent halo, drawn once per render (the screen-motion pass composites
+ * it BEFORE the zoom so it scales with the picture).
+ */
+export function buildCursorImageArgs(outputPath: string): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=white:s=56x56,format=rgba',
+    '-vf',
+    "geq=r=255:g=255:b=255:a='255*clip((14-hypot(X-28,Y-28))/3,0,1)+90*clip((24-hypot(X-28,Y-28))/6,0,1)*lt(14,hypot(X-28,Y-28))'",
+    '-frames:v',
+    '1',
+    outputPath
+  ]
+}
+
+/**
+ * Demo camera (§9): bake the automatic screen-motion camera into a clip —
+ * capture on input 0, cursor on input 1 (when the journal has positions),
+ * `filter` from the shared buildScreenMotionFilter. 1:1 in time, so the
+ * baked file slots into the pipeline exactly where the raw capture was
+ * (trims/speed/transitions untouched). h264/yuv420p keeps lossless concat
+ * possible on homogeneous demo timelines; no audio — captures have none.
+ */
+export function buildDemoCameraArgs(
+  capturePath: string,
+  cursorPath: string | null,
+  outputPath: string,
+  filter: string
+): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    capturePath,
+    ...(cursorPath ? ['-i', cursorPath] : []),
+    '-filter_complex',
+    filter,
+    '-map',
+    '[out]',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    '18',
+    '-pix_fmt',
+    'yuv420p',
+    '-an',
+    '-movflags',
+    '+faststart',
+    outputPath
+  ]
+}
+
 export function buildLastFrameArgs(inputPath: string, outputPath: string): string[] {
   return [
     '-y',

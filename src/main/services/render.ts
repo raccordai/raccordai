@@ -25,6 +25,7 @@ import {
   type TimelineEntry
 } from '@shared/timeline'
 import { xfadeNameFor } from '@shared/transitions'
+import { buildScreenMotionFilter, demoCameraEnabled } from '@shared/screenMotion'
 import type { SpeechTranscript } from '@shared/speech'
 import { broadcastRenderProgress } from '../events'
 import { resolveMediaUrlToFile } from '../media/protocol'
@@ -34,6 +35,7 @@ import {
   timelineFallbackImages,
   type GenerationRow
 } from './generations'
+import { logError } from './logger'
 import { listTextLayers } from './textLayers'
 import { listImageLayers } from './imageLayers'
 import { getAsset } from './assets'
@@ -45,6 +47,8 @@ import {
   buildConcatArgs,
   buildConcatListContent,
   buildCrossfadeArgs,
+  buildCursorImageArgs,
+  buildDemoCameraArgs,
   buildMuxArgs,
   buildNormalizeArgs,
   buildOverlayArgs,
@@ -406,10 +410,64 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     // ── Probe ────────────────────────────────────────────────────────────
     const probeSpansGuess = computeStageSpans(true, hasAudioLane)
     progress(probeSpansGuess, 'probe', 0)
+
+    // Demo camera (§9): a clip whose asset carries an input-event journal is
+    // BAKED first (auto zoom on clicks + synthetic cursor, shared screen-
+    // motion compiler) — 1:1 in time, so the baked file then flows through
+    // the pipeline exactly where the raw capture was (trims/speed/transitions
+    // untouched, probe reads the baked truth). One bake per path (split
+    // segments share); opt-out via the node's `demoCamera: false` params
+    // marker; a bake failure renders the raw capture, never fails the render.
+    const bakedByPath = new Map<string, string | null>()
+    let cursorPath: string | null = null
+    let bakeIndex = 0
+    const bakeDemoCamera = async (clip: PlannedClip, node: GraphNode): Promise<void> => {
+      if (node.modelId !== 'studio/asset') return
+      const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+      const asset = assetId ? getAsset(assetId) : null
+      if (!asset?.demoEvents || !demoCameraEnabled(node.params, asset.demoEvents)) return
+      if (bakedByPath.has(clip.path)) {
+        const baked = bakedByPath.get(clip.path)
+        if (baked) clip.path = baked
+        return
+      }
+      const rawPath = clip.path
+      try {
+        const rawProbe = await probeFile(active, rawPath)
+        if (!rawProbe.width || !rawProbe.height || !rawProbe.durationSeconds) {
+          bakedByPath.set(rawPath, null)
+          return
+        }
+        const { filter, usesCursor } = buildScreenMotionFilter(
+          asset.demoEvents,
+          rawProbe.durationSeconds,
+          { width: rawProbe.width, height: rawProbe.height, fps: rawProbe.fps ?? 30 }
+        )
+        if (usesCursor && !cursorPath) {
+          cursorPath = join(workDir, 'demo-cursor.png')
+          await run(active, ffmpegPath(), buildCursorImageArgs(cursorPath))
+        }
+        bakeIndex += 1
+        const bakedPath = join(workDir, `demo-cam-${String(bakeIndex).padStart(2, '0')}.mp4`)
+        await run(
+          active,
+          ffmpegPath(),
+          buildDemoCameraArgs(rawPath, usesCursor ? cursorPath : null, bakedPath, filter)
+        )
+        bakedByPath.set(rawPath, bakedPath)
+        clip.path = bakedPath
+      } catch (error) {
+        if (error instanceof RenderCancelledError) throw error
+        logError('demo', 'camera bake failed — rendering the raw capture', error)
+        bakedByPath.set(rawPath, null)
+      }
+    }
+
     // Split halves share one file — probe each path once.
     const probeByPath = new Map<string, ClipProbe>()
     for (const [i, clip] of clips.entries()) {
       if (!clip.isStill) {
+        await bakeDemoCamera(clip, clipEntries[i]!.node)
         let probe = probeByPath.get(clip.path)
         if (!probe) {
           probe = await probeFile(active, clip.path)
@@ -805,6 +863,8 @@ export interface RenderPlanEntry {
   source: 'video' | 'still' | 'fallback-still' | 'remote' | 'skipped'
   /** Effective slot length when computable (trim + speed applied). */
   durationSec: number | null
+  /** Demo camera (§9): the automatic screen-motion pass will bake this slot. */
+  demoCamera?: boolean
 }
 
 export interface RenderPlanSummary {
@@ -918,10 +978,16 @@ export async function planRender(
       clip.transitionDurationSec = segmentTransitionSeconds(entry.segment)
       clips.push(clip)
       const duration = clipEffectiveDuration(clip)
+      // Demo camera (§9): reported, never baked in a dry run (1:1 in time,
+      // so the planned duration is already exact).
+      const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+      const asset = assetId ? getAsset(assetId) : null
+      const demoCamera = demoCameraEnabled(node.params, asset?.demoEvents ?? null)
       entries.push({
         ...base,
         source: localPath ? 'video' : 'remote',
-        durationSec: duration > 0 ? Number(duration.toFixed(3)) : null
+        durationSec: duration > 0 ? Number(duration.toFixed(3)) : null,
+        ...(demoCamera ? { demoCamera: true } : {})
       })
       continue
     }
