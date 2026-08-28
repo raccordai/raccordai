@@ -6,11 +6,51 @@
  * /verify on macOS). Asserted on the produced ASSET (ffprobe on the managed
  * file, journal round-trip), not on the app's report alone.
  */
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import { join } from 'node:path'
 import { launchApp } from '../harness/app.mjs'
-import { FIXTURES, fixturePath, probe } from '../harness/fixtures.mjs'
+import { FFMPEG, FIXTURES, fixturePath, probe } from '../harness/fixtures.mjs'
 import { startKieMock } from '../harness/kie-mock.mjs'
 import { check, checkClose, checkEqual, defer, ok, spec, step } from '../harness/spec.mjs'
+
+/**
+ * PSNR between one frame of two files at the same timecode — how we prove the
+ * automatic camera really transformed the picture (a zoomed frame scores LOW
+ * against the raw capture; an identity frame scores high).
+ */
+function psnrAt(fileA, fileB, t) {
+  // Input-side -t windows: with -frames:v the psnr filter is torn down before
+  // it logs its summary line — a short decoded window flushes it properly.
+  const run = spawnSync(
+    FFMPEG,
+    [
+      '-hide_banner',
+      '-ss',
+      String(t),
+      '-t',
+      '0.25',
+      '-i',
+      fileA,
+      '-ss',
+      String(t),
+      '-t',
+      '0.25',
+      '-i',
+      fileB,
+      '-filter_complex',
+      '[0:v][1:v]psnr',
+      '-f',
+      'null',
+      '-'
+    ],
+    { encoding: 'utf8' }
+  )
+  const match = /average:(inf|[\d.]+)/.exec(`${run.stdout}${run.stderr}`)
+  if (!match) throw new Error(`psnr produced no average for ${fileA} vs ${fileB}`)
+  return match[1] === 'inf' ? 99 : Number(match[1])
+}
 
 /** Base64 slices sized to exercise several appendChunk calls, cut on 4-char boundaries. */
 function base64Chunks(bytes, maxChars = 64_000) {
@@ -108,4 +148,47 @@ await spec('demo', async () => {
     (error) => error
   )
   check(/no demo recording/i.test(stopAgain?.message ?? ''), 'a stray stop is refused')
+
+  step('the render bakes the automatic camera from the journal')
+  const outDir = mkdtempSync(join(os.tmpdir(), 'raccord-e2e-demo-'))
+  defer(() => rmSync(outDir, { recursive: true, force: true }))
+  const video = await invoke('videos:create', { projectId: project.id, name: 'Demo cut' })
+  const node = await invoke('nodes:create', {
+    videoId: video.id,
+    modelId: 'studio/asset',
+    position: { x: 0, y: 0 },
+    label: 'Take'
+  })
+  await invoke('nodes:updateParams', { nodeId: node.id, params: { assetId: result.assetId } })
+  await invoke('nodes:setTimelineOrder', { videoId: video.id, nodeIds: [node.id] })
+
+  const rawPath = fixturePath('demoWebm')
+  const cameraPath = join(outDir, 'camera.mp4')
+  const rendered = await app.mcp('render_video', { videoId: video.id, outputPath: cameraPath })
+  checkClose(
+    rendered.durationSeconds,
+    FIXTURES.demoWebm.seconds,
+    0.5,
+    'the camera bake is 1:1 in time'
+  )
+  // Click at t=1 → zoom held around t=1.4; released well before t=5.5.
+  const zoomedPsnr = psnrAt(cameraPath, rawPath, 1.4)
+  const identityPsnr = psnrAt(cameraPath, rawPath, 5.5)
+  check(
+    identityPsnr - zoomedPsnr > 6,
+    `the click frame is transformed, the tail is not (zoomed ${zoomedPsnr.toFixed(1)} dB vs identity ${identityPsnr.toFixed(1)} dB)`
+  )
+
+  step('params demoCamera:false keeps the raw capture')
+  await invoke('nodes:updateParams', {
+    nodeId: node.id,
+    params: { assetId: result.assetId, demoCamera: false }
+  })
+  const rawRenderPath = join(outDir, 'raw.mp4')
+  await app.mcp('render_video', { videoId: video.id, outputPath: rawRenderPath })
+  const optOutPsnr = psnrAt(rawRenderPath, rawPath, 1.4)
+  check(
+    optOutPsnr - zoomedPsnr > 6,
+    `the opt-out renders the raw frame (${optOutPsnr.toFixed(1)} dB vs zoomed ${zoomedPsnr.toFixed(1)} dB)`
+  )
 })
