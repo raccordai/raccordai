@@ -650,6 +650,11 @@ export const graphNodeSchema = z.object({
   timelineOffsetSec: z.number().nullable().optional(),
   /** Split clip (§6.12e): materialized segments, null = one implicit segment. */
   segments: z.array(timelineSegmentSchema).nullable().optional(),
+  /**
+   * Kind of the referenced asset — derived at read time by listGraph, never
+   * stored. Only present on `studio/asset` nodes; absent/null ⇒ still slot.
+   */
+  assetKind: mediaKindSchema.nullish(),
   createdAt: z.number(),
   updatedAt: z.number()
 })

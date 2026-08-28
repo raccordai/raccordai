@@ -237,10 +237,12 @@ describe('collectTimelineClips', () => {
     const image = node({ modelId: 'nano-banana-2' })
     const audio = node({ modelId: 'suno/generate-music' })
     const asset = node({ modelId: 'studio/asset' })
+    // A video asset stays opt-in too: it must not auto-enter like generated clips.
+    const videoAsset = node({ modelId: 'studio/asset', assetKind: 'video' })
     const unknown = node({ modelId: 'ghost/none' })
-    expect(collectTimelineClips([video, image, audio, asset, unknown]).map((n) => n.id)).toEqual([
-      video.id
-    ])
+    expect(
+      collectTimelineClips([video, image, audio, asset, videoAsset, unknown]).map((n) => n.id)
+    ).toEqual([video.id])
   })
 
   it('deduplicates a shot number: a node with a selected generation wins', () => {
@@ -270,12 +272,26 @@ describe('collectTimelineClips', () => {
       collectTimelineClips([video, placedImage, placedAsset, workingImage]).map((n) => n.id)
     ).toEqual([placedImage.id, placedAsset.id, video.id])
   })
+
+  it('includes a placed video asset as a clip', () => {
+    const video = node({ label: 'Shot 1' })
+    const placedRecording = node({ modelId: 'studio/asset', assetKind: 'video', timelineOrder: 0 })
+    expect(collectTimelineClips([video, placedRecording]).map((n) => n.id)).toEqual([
+      placedRecording.id,
+      video.id
+    ])
+  })
 })
 
 describe('stills', () => {
-  it('isStillClip covers image models and asset nodes, never video', () => {
+  it('isStillClip covers image models and non-video asset nodes, never video', () => {
     expect(isStillClip(node({ modelId: 'nano-banana-2' }))).toBe(true)
+    // Un-enriched asset nodes (no assetKind) keep the historical still behavior.
     expect(isStillClip(node({ modelId: 'studio/asset' }))).toBe(true)
+    expect(isStillClip(node({ modelId: 'studio/asset', assetKind: 'image' }))).toBe(true)
+    expect(isStillClip(node({ modelId: 'studio/asset', assetKind: 'audio' }))).toBe(true)
+    expect(isStillClip(node({ modelId: 'studio/asset', assetKind: null }))).toBe(true)
+    expect(isStillClip(node({ modelId: 'studio/asset', assetKind: 'video' }))).toBe(false)
     expect(isStillClip(node())).toBe(false)
   })
 
@@ -370,6 +386,37 @@ describe('resolveTimeline', () => {
     const still = node({ modelId: 'studio/asset', timelineOrder: 0, trimEndSec: 3 })
     const resolved = resolveTimeline([still])
     expect(resolved.entries[0]).toMatchObject({ still: true, durationSec: 3 })
+  })
+
+  it('a video asset resolves as a real clip: measured duration, trims and speed apply', () => {
+    const recording = node({
+      modelId: 'studio/asset',
+      assetKind: 'video',
+      timelineOrder: 0,
+      trimStartSec: 2,
+      trimEndSec: 10,
+      speed: 2
+    })
+    const resolved = resolveTimeline([recording], { [recording.id]: 30 })
+    // 8 s media window at 2x = 4 s of timeline; the trim is a media window, not a hold.
+    expect(resolved.entries[0]).toMatchObject({
+      still: false,
+      durationSec: 4,
+      trimStartSec: 2,
+      trimEndSec: 10,
+      speed: 2,
+      durationSource: 'measured'
+    })
+  })
+
+  it('a video asset without a probe falls back to the default clip length, never declared', () => {
+    const recording = node({ modelId: 'studio/asset', assetKind: 'video', timelineOrder: 0 })
+    const resolved = resolveTimeline([recording])
+    expect(resolved.entries[0]).toMatchObject({
+      still: false,
+      durationSec: DEFAULT_CLIP_SECONDS,
+      durationSource: 'default'
+    })
   })
 })
 
