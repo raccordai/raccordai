@@ -680,6 +680,9 @@ export const AGENT_TOOLS: AgentTool[] = [
           intent: n.intent,
           position: n.position,
           params: n.params,
+          // On studio/asset nodes: the referenced asset's kind (derived) — a
+          // 'video' asset placed on the timeline plays as a real clip.
+          ...(n.modelId === 'studio/asset' ? { assetKind: n.assetKind ?? null } : {}),
           // Timeline editing state (set_timeline_order / set_clip_trim /
           // set_clip_transition / set_clip_overlay).
           timelineOrder: n.timelineOrder ?? null,
@@ -1023,7 +1026,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'set_timeline_order',
     description:
-      'Set the timeline order of a video’s clips explicitly (one undo step). Pass ALL clip node ids in the desired sequence — playback, FCPXML and MP4 render follow it. Image/asset node ids may be included: they become STILL slots (5 s default, duration = trim window via set_clip_trim); a still left out of the list is removed from the timeline.',
+      'Set the timeline order of a video’s clips explicitly (one undo step). Pass ALL clip node ids in the desired sequence — playback, FCPXML and MP4 render follow it. Image/asset node ids may be included: image assets become STILL slots (duration = trim window) while a VIDEO asset plays as a real clip (docs "timeline"); an image or asset node left out of the list is removed from the timeline.',
     inputSchema: obj(
       {
         videoId: str(),
@@ -1229,7 +1232,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'set_still_motion',
     description:
-      'Ken Burns motion on a STILL timeline slot (image/asset node placed via set_timeline_order): zoom-in, zoom-out, pan-left or pan-right instead of a frozen frame. Null = static. Applied at render (zoompan).',
+      'Ken Burns motion on a STILL timeline slot (image node or image asset placed via set_timeline_order — never a video asset): zoom-in, zoom-out, pan-left or pan-right instead of a frozen frame. Null = static. Applied at render (zoompan).',
     inputSchema: obj(
       {
         nodeId: str(),

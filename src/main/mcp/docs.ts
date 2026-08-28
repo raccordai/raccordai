@@ -806,7 +806,9 @@ track's computed start. Always read get_timeline before placing anything by time
 CLIPS. set_timeline_order fixes the sequence; set_clip_trim cuts a window inside the media
 (MEDIA seconds — on a 2x clip the timeline shows half); split_clip razors an entry in two;
 set_clip_transition joins two entries (each transition SHORTENS the film by its length);
-set_clip_speed / set_clip_look / set_still_motion bake per-clip effects.
+set_clip_speed / set_clip_look / set_still_motion bake per-clip effects. An imported VIDEO
+asset (add_asset_from_file, e.g. a screen recording) placed via set_timeline_order plays as a
+real clip — trims, split, speed, looks and transitions all apply; only IMAGE assets are stills.
 
 AUDIO SYNC (the ElevenLabs workflow). Audio nodes land on their lane by model (music = Suno bed,
 speech = voice-over/dialogue). Tracks without an offset chain one after another; set_audio_offset
