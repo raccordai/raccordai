@@ -1,7 +1,7 @@
 /**
  * Screen-motion compiler (§9 — automatic feature videos): turns the EVENT
  * TRACK of a recorded demo (clicks/moves with timestamps, captured by whoever
- * drove the app) into the Screen-Studio-style camera — auto zoom-in on each
+ * drove the app) into the automatic demo camera — auto zoom-in on each
  * click, smooth pans between nearby clicks, eased release — plus a synthetic
  * cursor glide, both as ffmpeg filter expressions.
  *
@@ -349,7 +349,7 @@ export function cursorOverlayFilter(keyframes: PanTarget[]): string | null {
 }
 
 /**
- * Screen-Studio-style framing (§9): the capture sits inset over a gradient
+ * Framed presentation (§9): the capture sits inset over a gradient
  * background, rounded and shadowed like a simple floating window, and the
  * camera zooms the whole composition.
  */
@@ -411,7 +411,7 @@ function frameChain(
  * The full -filter_complex of a screen-motion pass: capture on input 0,
  * cursor image on input 1 (omitted when the track has no position — the
  * chain then starts from the capture directly). `frame` composes the
- * Screen-Studio look first (journal positions are remapped onto the inset);
+ * framed look first (journal positions are remapped onto the inset);
  * `cursor: false` skips the synthetic cursor even with positioned events.
  */
 export function buildScreenMotionFilter(

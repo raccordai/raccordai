@@ -815,7 +815,7 @@ screen-motion camera at render — zoom on each journalled click + a synthetic c
 DRIVING A DEMO YOURSELF (tools, not mouse): tool calls journal nothing — call focus_node on
 each thing you show; the app journals a click where the node lands, which becomes a zoom
 target. Per-clip params markers on the asset node (update_node): {"demoCamera": false} keeps
-the raw capture; {"demoFrame": true} adds the Screen-Studio look — gradient background,
+the raw capture; {"demoFrame": true} adds the framed look — gradient background,
 rounded inset window with a shadow, camera zooming the whole composition. plan_render reports
 the slot with demoCamera: true.
 

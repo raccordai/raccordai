@@ -426,7 +426,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       const assetId = (node.params as { assetId?: string } | undefined)?.assetId
       const asset = assetId ? getAsset(assetId) : null
       if (!asset?.demoEvents || !demoCameraEnabled(node.params, asset.demoEvents)) return
-      // Screen-Studio framing (§9) is a per-clip params marker — two nodes
+      // The framed look (§9) is a per-clip params marker — two nodes
       // sharing an asset may frame differently, so the memo key carries it.
       const framed = (node.params as { demoFrame?: unknown } | undefined)?.demoFrame === true
       const bakeKey = `${clip.path}|${framed ? 'framed' : 'plain'}`

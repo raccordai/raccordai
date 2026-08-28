@@ -200,7 +200,7 @@ describe('filter builders', () => {
     expect(screenTake.filter).not.toContain('overlay')
   })
 
-  it('frame composes the Screen-Studio look and remaps the journal onto the inset', () => {
+  it('frame composes the framed look and remaps the journal onto the inset', () => {
     const framed = buildScreenMotionFilter([click(5, 1, 1)], 20, { ...opts, frame: {} })
     // Gradient background + shadow + rounded inset, ended by the capture.
     expect(framed.filter).toContain('gradients=s=1280x720:c0=0xb7b6ff:c1=0xff9bc6')

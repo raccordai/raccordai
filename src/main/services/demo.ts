@@ -3,7 +3,7 @@ import { createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { app, BrowserWindow, screen } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, screen, Tray } from 'electron'
 import type { DemoEvent } from '@shared/screenMotion'
 import { normalizeOnDisplay } from '@shared/screenMotion'
 import { ffmpegPath } from '../media/ffbin'
@@ -21,9 +21,10 @@ import { logError, logInfo } from './logger'
  * event schema and normalization in shared/screenMotion.ts, the transcode
  * argv in renderPlan.ts (pure, tested), asset persistence in assets.ts.
  * This file only owns the session state machine: staging dir + growing webm,
- * the REC pill window, the stop↔finish handshake, and delivering the take to
- * its destination project AT STOP TIME (demo:stop's projectId overrides the
- * start's — an agent can record in one context and file the take elsewhere).
+ * the menu-bar REC tray, the stop↔finish handshake, and delivering the take
+ * to its destination project AT STOP TIME (demo:stop's projectId overrides
+ * the start's — an agent can record in one context and file the take
+ * elsewhere).
  *
  * Armed by RACCORD_DEMO=1 only. NOT in the graph journal — nothing touches a
  * graph until the imported asset is placed on a timeline. macOS permissions:
@@ -85,76 +86,46 @@ export function isDemoEnabled(): boolean {
 }
 
 function mainWindow(): BrowserWindow | null {
-  return BrowserWindow.getAllWindows().find((w) => w !== recPill) ?? null
+  return BrowserWindow.getAllWindows()[0] ?? null
 }
 
 /**
- * The REC indicator is its own tiny always-on-top window, NOT part of the app
- * page: the in-app banner used to be captured with the take. Content
- * protection excludes it from screen captures (macOS/Windows).
+ * The REC indicator is a MENU-BAR tray item, not a window: window content
+ * protection does NOT exclude a window from full-display captures (only from
+ * window captures), so any floating indicator would end up in the take — the
+ * in-page banner did, and so did the pill window that replaced it. A tiny
+ * menu-bar dot is invisible when the demoed app runs fullscreen (macOS hides
+ * the menu bar) and discreet otherwise.
  */
-let recPill: BrowserWindow | null = null
+let recTray: Tray | null = null
 
-const REC_PILL_HTML = `<!doctype html><meta charset="utf-8"><style>
-  html,body{margin:0;background:transparent;overflow:hidden;user-select:none}
-  .pill{display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;margin:3px;
-    border-radius:15px;background:rgba(20,20,28,.92);color:#e5e5e5;
-    font:12px -apple-system,system-ui,sans-serif;-webkit-app-region:drag}
-  .dot{width:8px;height:8px;border-radius:50%;background:#f87171;animation:p 1.2s infinite}
-  @keyframes p{50%{opacity:.3}}
-  button{-webkit-app-region:no-drag;border:0;border-radius:9px;width:22px;height:18px;
-    background:#3a3a46;color:#e5e5e5;font-size:9px;cursor:pointer}
-  button:hover{background:#4a4a58}
-</style><div class="pill"><span class="dot"></span><span id="t">0:00</span>
-<button title="Stop" onclick="window.api.invoke('demo:stop').catch(()=>{})">&#9632;</button></div>
-<script>
-  const start = Date.now()
-  setInterval(() => {
-    const s = Math.floor((Date.now() - start) / 1000)
-    document.getElementById('t').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0')
-  }, 1000)
-</script>`
+const REC_DOT_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAYElEQVR4nGP4ERXFQAmmSDMxBsgCsTGUJsmAOCA+D8T/kfB5qDhBA7rQNKLjLnwGxBHQDMNxuAxAdzYufB6bAbJEaoZhWXQDjEk0wJjqLqA4DKgSCxSnA6qkRKrkBaIxAMalEgpF4vBAAAAAAElFTkSuQmCC'
 
-function openRecPill(displayBounds: Electron.Rectangle): void {
-  if (recPill) return
-  recPill = new BrowserWindow({
-    width: 120,
-    height: 36,
-    x: displayBounds.x + displayBounds.width - 136,
-    y: displayBounds.y + 12,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    show: false,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  })
-  recPill.setContentProtection(true)
-  recPill.setAlwaysOnTop(true, 'screen-saver')
-  // The demoed app is often fullscreen (its own macOS Space) — follow it.
-  recPill.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  recPill.on('closed', () => {
-    recPill = null
-  })
-  void recPill
-    .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(REC_PILL_HTML)}`)
-    .then(() => recPill?.showInactive())
+function openRecTray(): void {
+  if (recTray) return
+  recTray = new Tray(nativeImage.createFromDataURL(REC_DOT_PNG))
+  recTray.setToolTip('Raccord — demo recording (⇧⌘R stops it)')
+  recTray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Stop demo recording',
+        click: () => {
+          stopDemo().catch((error: unknown) => logError('demo', 'tray stop failed', error))
+        }
+      }
+    ])
+  )
 }
 
-function closeRecPill(): void {
-  if (recPill && !recPill.isDestroyed()) recPill.destroy()
-  recPill = null
+function closeRecTray(): void {
+  recTray?.destroy()
+  recTray = null
 }
 
 /** Drops the REC pill, the hook and the throttling opt-out — safe to call twice. */
 function releaseCapture(session: DemoSession): void {
-  closeRecPill()
+  closeRecTray()
   if (session.hookRunning) {
     stopGlobalJournal()
     session.hookRunning = false
@@ -251,7 +222,7 @@ export function startDemo(input: { projectId?: string; displayId?: number; exter
       session.prevBackgroundThrottling = window.webContents.getBackgroundThrottling()
       window.webContents.setBackgroundThrottling(false)
     }
-    openRecPill(display.bounds)
+    openRecTray()
     broadcastDemoControl({ action: 'start', sessionId })
   }
   logInfo(
@@ -397,6 +368,12 @@ export async function finishDemo(input: {
   if (!session || session.sessionId !== input.sessionId) {
     throw new Error('No demo recording matches this session.')
   }
+
+  // The stop timeout only covers the renderer HANDSHAKE. Once finish arrives
+  // the take is safe and the transcode may take as long as it needs — a
+  // Retina display capture is heavy; timing out here used to destroy the
+  // staging dir mid-transcode and lose the take.
+  if (session.pending) clearTimeout(session.pending.timer)
 
   await new Promise<void>((resolve) => session.stream.end(resolve))
   const hookEvents = session.hookRunning ? stopGlobalJournal() : []
