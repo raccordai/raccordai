@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildScreenMotionFilter,
+  createMoveThrottle,
   cursorKeyframes,
   cursorOverlayFilter,
   demoCameraEnabled,
+  normalizeOnDisplay,
   planZoomSegments,
   sampleCamera,
   sampleCursor,
@@ -136,6 +138,35 @@ describe('cursor', () => {
   })
 })
 
+describe('normalizeOnDisplay', () => {
+  const main = { x: 0, y: 0, width: 1512, height: 982 }
+  const secondary = { x: 1512, y: -200, width: 2560, height: 1440 }
+
+  it('maps a global point onto the captured display', () => {
+    expect(normalizeOnDisplay(756, 491, main)).toEqual({ x: 0.5, y: 0.5 })
+    // Secondary displays have non-zero origins (negative y included).
+    expect(normalizeOnDisplay(1512 + 640, -200 + 360, secondary)).toEqual({ x: 0.25, y: 0.25 })
+  })
+
+  it('rejects points outside the display (clicks on another monitor)', () => {
+    expect(normalizeOnDisplay(-1, 100, main)).toBeNull()
+    expect(normalizeOnDisplay(2000, 100, main)).toBeNull()
+    expect(normalizeOnDisplay(100, 100, secondary)).toBeNull()
+    expect(normalizeOnDisplay(1, 1, { x: 0, y: 0, width: 0, height: 0 })).toBeNull()
+  })
+})
+
+describe('createMoveThrottle (shared with main)', () => {
+  it('offset-invariant: epoch-based provisional times throttle the same', () => {
+    const throttle = createMoveThrottle(0.08)
+    const epoch = 1_700_000_000
+    const at = (t: number) => ({ t: epoch + t, type: 'move' as const, x: 0.5, y: 0.5 })
+    expect(throttle(at(0))).not.toBeNull()
+    expect(throttle(at(0.05))).toBeNull()
+    expect(throttle(at(0.1))).not.toBeNull()
+  })
+})
+
 describe('filter builders', () => {
   const opts = { width: 1280, height: 720, fps: 30 }
 
@@ -159,5 +190,12 @@ describe('filter builders', () => {
     const bare = buildScreenMotionFilter([{ t: 1, type: 'key' }], 20, opts)
     expect(bare.usesCursor).toBe(false)
     expect(bare.filter).toMatch(/^\[0:v\]zoompan=/)
+  })
+
+  it('cursor: false skips the synthetic cursor even with positioned events', () => {
+    const screenTake = buildScreenMotionFilter([click(5)], 20, { ...opts, cursor: false })
+    expect(screenTake.usesCursor).toBe(false)
+    expect(screenTake.filter).toMatch(/^\[0:v\]zoompan=/)
+    expect(screenTake.filter).not.toContain('overlay')
   })
 })

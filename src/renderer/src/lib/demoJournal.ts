@@ -31,19 +31,10 @@ export function normalizeEvent(
   return { t, type, x: clamp01(clientX / innerWidth), y: clamp01(clientY / innerHeight) }
 }
 
-/**
- * Latest-sample-per-window coalescing for pointermove: at most one move event
- * per interval, always the most recent position (the glide compiler only
- * needs waypoints, not every 8 ms sample).
- */
-export function createMoveThrottle(intervalSec = 0.08): (event: DemoEvent) => DemoEvent | null {
-  let windowStart = -Infinity
-  return (event) => {
-    if (event.t - windowStart < intervalSec) return null
-    windowStart = event.t
-    return event
-  }
-}
+// Move coalescing lives in shared/screenMotion.ts since main's global hook
+// (external screen captures) throttles the same way — re-exported for the
+// renderer-side consumers.
+export { createMoveThrottle } from '@shared/screenMotion'
 
 /**
  * Bytes → base64 strings sized for the IPC boundary (the handle() wrapper

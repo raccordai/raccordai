@@ -90,6 +90,40 @@ export function smoothstep(p: number): number {
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
 
 /**
+ * Global point (screen coordinates, e.g. a uiohook event during an external
+ * SCREEN capture) → normalized position on the captured display. Null when
+ * the point lands outside it (a click on another monitor is not part of the
+ * demo). Bounds are Electron display bounds (DIPs — macOS CGEvent points
+ * share that space).
+ */
+export function normalizeOnDisplay(
+  x: number,
+  y: number,
+  bounds: { x: number; y: number; width: number; height: number }
+): { x: number; y: number } | null {
+  if (bounds.width <= 0 || bounds.height <= 0) return null
+  const nx = (x - bounds.x) / bounds.width
+  const ny = (y - bounds.y) / bounds.height
+  if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null
+  return { x: nx, y: ny }
+}
+
+/**
+ * Latest-sample-per-window coalescing for pointer/mouse moves: at most one
+ * move event per interval (the glide compiler only needs waypoints). Shared
+ * by the renderer journal (self capture) and main's global hook (screen
+ * capture).
+ */
+export function createMoveThrottle(intervalSec = 0.08): (event: DemoEvent) => DemoEvent | null {
+  let windowStart = -Infinity
+  return (event) => {
+    if (event.t - windowStart < intervalSec) return null
+    windowStart = event.t
+    return event
+  }
+}
+
+/**
  * Camera segments from the event track: one segment per burst of clicks
  * (gaps ≤ mergeWindowSec chain into the same segment — the camera pans
  * instead of zooming out and back in), expanded by the lead/hold/release
@@ -317,16 +351,19 @@ export function cursorOverlayFilter(keyframes: PanTarget[]): string | null {
 /**
  * The full -filter_complex of a screen-motion pass: capture on input 0,
  * cursor image on input 1 (omitted when the track has no position — the
- * chain then starts from [0:v] directly).
+ * chain then starts from [0:v] directly). `cursor: false` skips the
+ * synthetic cursor even with positioned events: an external SCREEN capture
+ * already has the real OS cursor in its pixels, compositing ours would
+ * double it.
  */
 export function buildScreenMotionFilter(
   events: DemoEvent[],
   durationSec: number,
-  opts: { width: number; height: number; fps: number } & ScreenMotionOptions
+  opts: { width: number; height: number; fps: number; cursor?: boolean } & ScreenMotionOptions
 ): { filter: string; usesCursor: boolean } {
   const segments = planZoomSegments(events, durationSec, opts)
   const zoom = zoompanFilter(segments, opts)
-  const cursor = cursorOverlayFilter(cursorKeyframes(events))
+  const cursor = opts.cursor === false ? null : cursorOverlayFilter(cursorKeyframes(events))
   if (cursor) {
     return { filter: `[0:v][1:v]${cursor}[comp];[comp]${zoom}[out]`, usesCursor: true }
   }
