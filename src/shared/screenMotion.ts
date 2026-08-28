@@ -1,0 +1,319 @@
+/**
+ * Screen-motion compiler (§9 — automatic feature videos): turns the EVENT
+ * TRACK of a recorded demo (clicks/moves with timestamps, captured by whoever
+ * drove the app) into the Screen-Studio-style camera — auto zoom-in on each
+ * click, smooth pans between nearby clicks, eased release — plus a synthetic
+ * cursor glide, both as ffmpeg filter expressions.
+ *
+ * Everything decision-shaped is numeric and pure here (renderPlan doctrine):
+ * `planZoomSegments` merges clicks into camera segments, `sampleCamera` is the
+ * tested source of truth for the camera at any time t, and the `*Filter`
+ * builders translate the SAME segment data into ffmpeg expressions (zoompan
+ * for the camera — the cursor is overlaid BEFORE zooming, so it scales with
+ * the picture like a real recording would).
+ *
+ * Coordinates are NORMALIZED (0-1 of the capture frame), like every overlay
+ * in the app; times are seconds from the start of the capture.
+ */
+
+/** One input event of a recorded demo session. */
+export interface DemoEvent {
+  /** Seconds from the start of the capture. */
+  t: number
+  type: 'click' | 'move' | 'key' | 'scroll'
+  /** Normalized position (0-1); absent on key events. */
+  x?: number
+  y?: number
+}
+
+export interface ScreenMotionOptions {
+  /** Zoom level held on a click (1 = no zoom). */
+  zoom?: number
+  /** Seconds the zoom-in ramp starts BEFORE the click. */
+  leadSec?: number
+  /** Seconds the zoom holds after the segment's last click. */
+  holdSec?: number
+  /** Seconds of the zoom-out ramp. */
+  releaseSec?: number
+  /** Clicks closer than this share one segment (the camera pans between them). */
+  mergeWindowSec?: number
+}
+
+const DEFAULTS: Required<ScreenMotionOptions> = {
+  zoom: 1.8,
+  leadSec: 0.6,
+  holdSec: 1.1,
+  releaseSec: 0.8,
+  mergeWindowSec: 2.5
+}
+
+/** A pan target inside a segment — the camera centers here at time t. */
+export interface PanTarget {
+  t: number
+  x: number
+  y: number
+}
+
+/** One camera move: ramp in before the first click, pan, ramp out at the end. */
+export interface ZoomSegment {
+  startSec: number
+  endSec: number
+  /** Seconds of the in/out ramps (may be shorter than asked on short segments). */
+  leadSec: number
+  releaseSec: number
+  zoom: number
+  /** Chronological pan targets (the segment's clicks). Never empty. */
+  targets: PanTarget[]
+}
+
+/** Hermite smoothstep — the easing of every camera and cursor move. */
+export function smoothstep(p: number): number {
+  const c = Math.min(1, Math.max(0, p))
+  return c * c * (3 - 2 * c)
+}
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+
+/**
+ * Camera segments from the event track: one segment per burst of clicks
+ * (gaps ≤ mergeWindowSec chain into the same segment — the camera pans
+ * instead of zooming out and back in), expanded by the lead/hold/release
+ * envelope, then overlapping segments merged. Ramps shrink to at most half
+ * of a short segment so in+out never cross.
+ */
+export function planZoomSegments(
+  events: DemoEvent[],
+  durationSec: number,
+  options: ScreenMotionOptions = {}
+): ZoomSegment[] {
+  const opts = { ...DEFAULTS, ...options }
+  const clicks = events
+    .filter((e) => e.type === 'click' && typeof e.x === 'number' && typeof e.y === 'number')
+    .filter((e) => e.t >= 0 && e.t <= durationSec)
+    .sort((a, b) => a.t - b.t)
+  if (clicks.length === 0 || opts.zoom <= 1) return []
+
+  const groups: PanTarget[][] = []
+  for (const click of clicks) {
+    const target = { t: click.t, x: clamp01(click.x!), y: clamp01(click.y!) }
+    const current = groups[groups.length - 1]
+    if (current && target.t - current[current.length - 1]!.t <= opts.mergeWindowSec) {
+      current.push(target)
+    } else {
+      groups.push([target])
+    }
+  }
+
+  const segments: ZoomSegment[] = []
+  for (const targets of groups) {
+    const startSec = Math.max(0, targets[0]!.t - opts.leadSec)
+    const endSec = Math.min(
+      durationSec,
+      targets[targets.length - 1]!.t + opts.holdSec + opts.releaseSec
+    )
+    const previous = segments[segments.length - 1]
+    if (previous && startSec <= previous.endSec) {
+      // The envelopes touch: one continuous camera move.
+      previous.endSec = endSec
+      previous.targets.push(...targets)
+      continue
+    }
+    segments.push({ startSec, endSec, leadSec: 0, releaseSec: 0, zoom: opts.zoom, targets })
+  }
+  for (const seg of segments) {
+    const half = (seg.endSec - seg.startSec) / 2
+    seg.leadSec = Math.min(opts.leadSec, half)
+    seg.releaseSec = Math.min(opts.releaseSec, half)
+  }
+  return segments
+}
+
+/** The camera's center at time t within a segment (before easing ramps). */
+function panCenter(seg: ZoomSegment, t: number): { x: number; y: number } {
+  const targets = seg.targets
+  if (t <= targets[0]!.t) return targets[0]!
+  const last = targets[targets.length - 1]!
+  if (t >= last.t) return last
+  for (let i = 0; i < targets.length - 1; i++) {
+    const a = targets[i]!
+    const b = targets[i + 1]!
+    if (t >= a.t && t < b.t) {
+      const e = smoothstep((t - a.t) / (b.t - a.t))
+      return { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e }
+    }
+  }
+  return last
+}
+
+/**
+ * The camera at time t — the numeric source of truth the ffmpeg expressions
+ * mirror. Zoom eases in over the lead, holds while panning between targets,
+ * eases out over the release; the center is clamped so the crop window never
+ * leaves the frame (at zoom 1 the clamp collapses to the frame center).
+ */
+export function sampleCamera(
+  segments: ZoomSegment[],
+  t: number
+): { zoom: number; cx: number; cy: number } {
+  const seg = segments.find((s) => t >= s.startSec && t <= s.endSec)
+  if (!seg) return { zoom: 1, cx: 0.5, cy: 0.5 }
+
+  let zoom: number
+  if (t < seg.startSec + seg.leadSec) {
+    zoom = 1 + (seg.zoom - 1) * smoothstep((t - seg.startSec) / seg.leadSec)
+  } else if (t > seg.endSec - seg.releaseSec) {
+    zoom = 1 + (seg.zoom - 1) * smoothstep((seg.endSec - t) / seg.releaseSec)
+  } else {
+    zoom = seg.zoom
+  }
+
+  const { x, y } = panCenter(seg, t)
+  const halfWindow = 0.5 / zoom
+  return {
+    zoom,
+    cx: Math.min(1 - halfWindow, Math.max(halfWindow, x)),
+    cy: Math.min(1 - halfWindow, Math.max(halfWindow, y))
+  }
+}
+
+/** Formats a number for an ffmpeg expression (fixed, locale-proof). */
+const n = (v: number): string => v.toFixed(4)
+
+/** smoothstep of `p` as an ffmpeg expression fragment. */
+const ssExpr = (p: string): string => {
+  const c = `clip(${p},0,1)`
+  return `(${c}*${c}*(3-2*${c}))`
+}
+
+/** The segment's pan center (x or y) as an expression of the time variable. */
+function panExpr(seg: ZoomSegment, axis: 'x' | 'y', time: string): string {
+  const targets = seg.targets
+  let expr = n(targets[targets.length - 1]![axis])
+  // Build right-to-left: if(before leg i, interpolate leg i, later legs…).
+  for (let i = targets.length - 2; i >= 0; i--) {
+    const a = targets[i]!
+    const b = targets[i + 1]!
+    const e = ssExpr(`(${time}-${n(a.t)})/${n(b.t - a.t)}`)
+    const leg = `(${n(a[axis])}+${n(b[axis] - a[axis])}*${e})`
+    expr = `if(lt(${time},${n(b.t)}),${leg},${expr})`
+  }
+  return `if(lt(${time},${n(targets[0]!.t)}),${n(targets[0]![axis])},${expr})`
+}
+
+/** The segment's zoom as an expression of the time variable. */
+function zoomExpr(seg: ZoomSegment, time: string): string {
+  const rampIn = ssExpr(`(${time}-${n(seg.startSec)})/${n(seg.leadSec)}`)
+  const rampOut = ssExpr(`(${n(seg.endSec)}-${time})/${n(seg.releaseSec)}`)
+  const rise = `(1+${n(seg.zoom - 1)}*${rampIn})`
+  const fall = `(1+${n(seg.zoom - 1)}*${rampOut})`
+  const inEnd = seg.startSec + seg.leadSec
+  const outStart = seg.endSec - seg.releaseSec
+  return `if(lt(${time},${n(inEnd)}),${rise},if(gt(${time},${n(outStart)}),${fall},${n(seg.zoom)}))`
+}
+
+/** Piecewise expression over the segments; `fallback` outside all of them. */
+function piecewise(
+  segments: ZoomSegment[],
+  time: string,
+  perSegment: (seg: ZoomSegment) => string,
+  fallback: string
+): string {
+  let expr = fallback
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const seg = segments[i]!
+    expr = `if(between(${time},${n(seg.startSec)},${n(seg.endSec)}),${perSegment(seg)},${expr})`
+  }
+  return expr
+}
+
+/**
+ * The whole camera as one zoompan filter (d=1 keeps the frame count). zoompan
+ * exposes the input timestamp as `it`; x/y run after z, so `zoom` is the
+ * current level — the clamp keeps the crop window inside the frame exactly
+ * like sampleCamera. Output size must be given (zoompan defaults to hd720).
+ */
+export function zoompanFilter(
+  segments: ZoomSegment[],
+  opts: { width: number; height: number; fps: number }
+): string {
+  const z = piecewise(segments, 'it', (seg) => zoomExpr(seg, 'it'), '1')
+  const cx = piecewise(segments, 'it', (seg) => panExpr(seg, 'x', 'it'), '0.5')
+  const cy = piecewise(segments, 'it', (seg) => panExpr(seg, 'y', 'it'), '0.5')
+  const x = `clip(iw*(${cx})-iw/(2*zoom),0,iw-iw/zoom)`
+  const y = `clip(ih*(${cy})-ih/(2*zoom),0,ih-ih/zoom)`
+  return `zoompan=z='${z}':x='${x}':y='${y}':d=1:s=${opts.width}x${opts.height}:fps=${opts.fps}`
+}
+
+/**
+ * Cursor glide keyframes: every event that carries a position, in order. The
+ * synthetic cursor eases from one to the next over the real gap — steadier
+ * than any human hand, and it arrives exactly when the click fires.
+ */
+export function cursorKeyframes(events: DemoEvent[]): PanTarget[] {
+  return events
+    .filter((e) => typeof e.x === 'number' && typeof e.y === 'number')
+    .sort((a, b) => a.t - b.t)
+    .map((e) => ({ t: e.t, x: clamp01(e.x!), y: clamp01(e.y!) }))
+}
+
+/** The cursor position at time t — numeric twin of the overlay expressions. */
+export function sampleCursor(keyframes: PanTarget[], t: number): { x: number; y: number } | null {
+  if (keyframes.length === 0) return null
+  if (t <= keyframes[0]!.t) return keyframes[0]!
+  const last = keyframes[keyframes.length - 1]!
+  if (t >= last.t) return last
+  for (let i = 0; i < keyframes.length - 1; i++) {
+    const a = keyframes[i]!
+    const b = keyframes[i + 1]!
+    if (t >= a.t && t < b.t) {
+      const e = smoothstep((t - a.t) / (b.t - a.t))
+      return { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e }
+    }
+  }
+  return last
+}
+
+/** One axis of the cursor glide as an overlay expression of `t`. */
+function cursorAxisExpr(keyframes: PanTarget[], axis: 'x' | 'y'): string {
+  let expr = n(keyframes[keyframes.length - 1]![axis])
+  for (let i = keyframes.length - 2; i >= 0; i--) {
+    const a = keyframes[i]!
+    const b = keyframes[i + 1]!
+    const e = ssExpr(`(t-${n(a.t)})/${n(b.t - a.t)}`)
+    const leg = `(${n(a[axis])}+${n(b[axis] - a[axis])}*${e})`
+    expr = `if(lt(t,${n(b.t)}),${leg},${expr})`
+  }
+  return `if(lt(t,${n(keyframes[0]!.t)}),${n(keyframes[0]![axis])},${expr})`
+}
+
+/**
+ * Overlay filter placing the cursor image (input [cursor]) on the capture.
+ * Applied BEFORE zoompan so the cursor rides — and scales with — the zoom.
+ * Normalized position maps to the cursor's CENTER (overlay_w/h are the
+ * cursor input's own size). Null when the track has no positioned event.
+ */
+export function cursorOverlayFilter(keyframes: PanTarget[]): string | null {
+  if (keyframes.length === 0) return null
+  const x = `main_w*(${cursorAxisExpr(keyframes, 'x')})-overlay_w/2`
+  const y = `main_h*(${cursorAxisExpr(keyframes, 'y')})-overlay_h/2`
+  return `overlay=x='${x}':y='${y}'`
+}
+
+/**
+ * The full -filter_complex of a screen-motion pass: capture on input 0,
+ * cursor image on input 1 (omitted when the track has no position — the
+ * chain then starts from [0:v] directly).
+ */
+export function buildScreenMotionFilter(
+  events: DemoEvent[],
+  durationSec: number,
+  opts: { width: number; height: number; fps: number } & ScreenMotionOptions
+): { filter: string; usesCursor: boolean } {
+  const segments = planZoomSegments(events, durationSec, opts)
+  const zoom = zoompanFilter(segments, opts)
+  const cursor = cursorOverlayFilter(cursorKeyframes(events))
+  if (cursor) {
+    return { filter: `[0:v][1:v]${cursor}[comp];[comp]${zoom}[out]`, usesCursor: true }
+  }
+  return { filter: `[0:v]${zoom}[out]`, usesCursor: false }
+}
