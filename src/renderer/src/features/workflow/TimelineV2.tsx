@@ -946,17 +946,18 @@ export function TimelineV2({
     [clips, displaySlot]
   )
 
-  // Images the add-image picker offers: image-kind nodes with a successful
-  // output, plus image assets — excluding what already sits on the timeline.
+  // What the add-to-timeline picker offers: image-kind nodes with a successful
+  // output, plus image AND video assets (a video asset becomes a real clip) —
+  // excluding what already sits on the timeline.
   const imageCandidates = useMemo(() => {
     const placed = new Set(clipNodes.map((n) => n.id))
-    const out: Array<{ node: GraphNode; url: string }> = []
+    const out: Array<{ node: GraphNode; url: string; video?: boolean }> = []
     for (const node of graph.nodes) {
       if (placed.has(node.id)) continue
       if (node.modelId === 'studio/asset') {
         const media = assetMedia?.[node.id]
-        if (media?.url && media.mimeType?.startsWith('image/')) {
-          out.push({ node, url: media.url })
+        if (media?.url && media.kind !== 'audio') {
+          out.push({ node, url: media.url, video: media.kind === 'video' })
         }
       } else if (getModel(node.modelId)?.kind === 'image') {
         const best = bestGeneration(
@@ -2278,7 +2279,9 @@ export function TimelineV2({
               splitAtMediaSec={splitPointOf(editClip.idx)}
               onClose={() => setEditClip(null)}
               onRemoveStill={
-                clip.still && !clip.placeholder
+                // Asset nodes (video assets included) are opt-in timeline
+                // members — the trash is their only un-place affordance.
+                clip.node.modelId === 'studio/asset' || (clip.still && !clip.placeholder)
                   ? () => {
                       setEditClip(null)
                       void invoke('nodes:setTimelineOrder', {
@@ -3138,7 +3141,7 @@ function ImagePickerPopover({
   onPick,
   onClose
 }: {
-  candidates: Array<{ node: GraphNode; url: string }>
+  candidates: Array<{ node: GraphNode; url: string; video?: boolean }>
   anchor: { x: number; y: number }
   onPick: (nodeId: string) => void
   onClose: () => void
@@ -3159,17 +3162,23 @@ function ImagePickerPopover({
         <p className="px-1 pb-1 text-neutral-500">{t('timeline.addImageEmpty')}</p>
       ) : (
         <div className="max-h-56 overflow-y-auto">
-          {candidates.map(({ node, url }) => (
+          {candidates.map(({ node, url, video }) => (
             <button
               key={node.id}
               onClick={() => onPick(node.id)}
               className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-neutral-800"
             >
-              <img
-                src={url}
-                alt=""
-                className="h-8 w-12 flex-shrink-0 rounded border border-neutral-800 object-cover"
-              />
+              {video ? (
+                <span className="h-8 w-12 flex-shrink-0 overflow-hidden rounded border border-neutral-800">
+                  <VideoThumb src={url} overlay={false} className="h-full w-full object-cover" />
+                </span>
+              ) : (
+                <img
+                  src={url}
+                  alt=""
+                  className="h-8 w-12 flex-shrink-0 rounded border border-neutral-800 object-cover"
+                />
+              )}
               <span className="truncate text-neutral-200">
                 {node.label ?? getModel(node.modelId)?.label ?? node.key}
               </span>
