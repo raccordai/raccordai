@@ -441,7 +441,14 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         const { filter, usesCursor } = buildScreenMotionFilter(
           asset.demoEvents,
           rawProbe.durationSeconds,
-          { width: rawProbe.width, height: rawProbe.height, fps: rawProbe.fps ?? 30 }
+          {
+            width: rawProbe.width,
+            height: rawProbe.height,
+            fps: rawProbe.fps ?? 30,
+            // Screen takes have the real OS cursor in their pixels — the
+            // synthetic one would double it.
+            cursor: asset.demoSource !== 'screen'
+          }
         )
         if (usesCursor && !cursorPath) {
           cursorPath = join(workDir, 'demo-cursor.png')
