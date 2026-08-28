@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.4.0](https://github.com/raccordai/raccordai/compare/v1.3.0...v1.4.0) (2026-08-26)
+
+
+### Features
+
+* **editor:** filter the history by media type ([4178e93](https://github.com/raccordai/raccordai/commit/4178e9393dd386c8296f0b345a72e1db327ed5c8))
+* **editor:** jump the timeline to the selected video node ([49250cc](https://github.com/raccordai/raccordai/commit/49250cc325687a2ccdf50b86f5620414df7c2fa7))
+* **export:** headless FCPXML export tool ([d2545ea](https://github.com/raccordai/raccordai/commit/d2545ea19a645032c6047dcfd2ca397ad2a1d91d))
+* **generations:** Remove a specific generation from the queue ([b44525a](https://github.com/raccordai/raccordai/commit/b44525ac6834d82faf5aeb9f0dd332f5fbb8f95e))
+* **mcp:** add batch_edit single-undo-step tool ([12ec570](https://github.com/raccordai/raccordai/commit/12ec570559ebcdc58d7de1bfc7d6bcac410da353))
+* **mcp:** add create_video_from_template tool ([c6a1f9d](https://github.com/raccordai/raccordai/commit/c6a1f9dd81bb398a2339617977961d7028411792))
+* **mcp:** add export_image tool ([1d809c5](https://github.com/raccordai/raccordai/commit/1d809c5a5254c391ade6d67683f8d6b8a7a5a27d))
+* **mcp:** add export_publish_kit tool ([daa4671](https://github.com/raccordai/raccordai/commit/daa46719ec30145b3a3ab9b3285c95a107101fd5))
+* **mcp:** add get_app_status tool ([2afaf92](https://github.com/raccordai/raccordai/commit/2afaf92e5896560057322313930906c88965505d))
+* **mcp:** add get_changes change feed tool ([ec590ae](https://github.com/raccordai/raccordai/commit/ec590ae957d855821279e1f306988f1428a552b7))
+* **mcp:** add get_history tool ([143cbe6](https://github.com/raccordai/raccordai/commit/143cbe61aae8970ace829eb49b6f60ee7e66ae0d))
+* **mcp:** add plan_only dry run to link_shots ([bee582f](https://github.com/raccordai/raccordai/commit/bee582fd6b5010e64226548bd3e23bef1dce47bb))
+* **mcp:** add plan_render dry-run tool ([f3c4c68](https://github.com/raccordai/raccordai/commit/f3c4c68613fc906d7d8dff4e4f8a2bcf552925bc))
+* **mcp:** add preview_prompt tool ([2bf994c](https://github.com/raccordai/raccordai/commit/2bf994c9293cf7c8b6d730ca29cb12f510252b9b))
+* **mcp:** add refine_image_prompt tool ([cc38158](https://github.com/raccordai/raccordai/commit/cc381585ee20b155b264bae3dda37f8d9d111106))
+* **mcp:** add timeline frame and contact sheet tools ([c7c2b4a](https://github.com/raccordai/raccordai/commit/c7c2b4a131ddb5bd41e431edfa6c351772c43db3))
+* **mcp:** add wait_for_generations long-poll tool ([1d75078](https://github.com/raccordai/raccordai/commit/1d75078a447d868b77c5e745cf984d6f63323fb3))
+* **mcp:** expose generation media to agents ([89345e9](https://github.com/raccordai/raccordai/commit/89345e9fb13139d6a83aab0ddc46805650bbcc21))
+* **models:** add seedance 2.5 ([fbd3f2b](https://github.com/raccordai/raccordai/commit/fbd3f2b4995c14a258782d656a4adaba73492501))
+* **niches:** expose competitor thumbnails and feed preview to agents ([05697fd](https://github.com/raccordai/raccordai/commit/05697fd99e340f58ed08041ba4fc0bcb6a77160c))
+* **niches:** SERP opportunity analysis and competitor comparison ([542b267](https://github.com/raccordai/raccordai/commit/542b2675fd2eb907d5fe23e3db0ed0b1b56ac674))
+* **qc:** add review_clip vision QC for video generations ([ca13e65](https://github.com/raccordai/raccordai/commit/ca13e653fbe222181ecefdcd3a6e67b39ee58fe1))
+* **search:** add cross-app search tool ([f445c7b](https://github.com/raccordai/raccordai/commit/f445c7b9bbababfbb736df8897f3e07a19a8b1e9))
+* **timeline:** FCP-style shuttle playback with the L key ([c317d0d](https://github.com/raccordai/raccordai/commit/c317d0d6f01003a3ba3b5ce91d47e2b290a6daeb))
+* **updater:** app-wide banner when an update is ready to install ([c9f5f82](https://github.com/raccordai/raccordai/commit/c9f5f823532ab6e2314ab0c11fe308a1953ec23d))
+
+
+### Bug Fixes
+
+* **main:** fence startup, generation queue and settle path against crashes ([607aff7](https://github.com/raccordai/raccordai/commit/607aff7c5394bc9a847ba20555766909580844a8))
+
+
+### Performance Improvements
+
+* **renderer:** scope query invalidation to the event's video ([f701982](https://github.com/raccordai/raccordai/commit/f701982699d10df6b2c1ab223476d1f3a287e7c8))
+
 ## [1.3.0](https://github.com/raccordai/raccordai/compare/v1.2.0...v1.3.0) (2026-08-19)
 
 
