@@ -68,6 +68,7 @@ export function registerIpcHandlers(): void {
 
   // Demo mode (§9) — the app records itself (RACCORD_DEMO=1 only).
   handle('demo:start', (input) => demoService.startDemo(input))
+  handle('demo:listDisplays', () => demoService.listDemoDisplays())
   handle('demo:appendChunk', (input) => demoService.appendDemoChunk(input))
   handle('demo:finish', (input) => demoService.finishDemo(input))
   handle('demo:stop', () => demoService.stopDemo())

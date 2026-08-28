@@ -214,6 +214,8 @@ export const assetSchema = z.object({
   designSubject: z.string().nullable(),
   /** Demo mode (§9): the recording's input-event journal (screen-motion feed). */
   demoEvents: z.array(demoEventSchema).nullable().optional(),
+  /** What the take captured: 'screen' keeps the real OS cursor (no synthetic one at render). */
+  demoSource: z.enum(['self', 'screen']).nullish(),
   createdAt: z.number(),
   updatedAt: z.number().nullable()
 })
@@ -938,13 +940,36 @@ export const ipcContracts = {
     input: z.object({
       /** Import the recording into this project; omitted = files land in Downloads. */
       projectId: z.string().optional(),
-      /** Content size pinned during the take (even values; default 1280x720). */
+      /**
+       * 'self' (default) records Raccord's own window; 'screen' records a
+       * whole display (any application — put it fullscreen) with the input
+       * journal collected by a GLOBAL hook (macOS: needs Accessibility;
+       * missing permission ⇒ the take still records, with a warning and no
+       * journal). Screen capture triggers the OS Screen Recording prompt.
+       */
+      sourceKind: z.enum(['self', 'screen']).optional(),
+      /** Display to capture in 'screen' mode (demo:listDisplays; default: primary). */
+      displayId: z.number().int().optional(),
+      /** Content size pinned during a SELF take (even values; default 1280x720). */
       width: z.number().int().min(640).max(3840).optional(),
       height: z.number().int().min(480).max(2160).optional(),
       /** Driver mode: no broadcast, no resize — the caller streams the media itself. */
       external: z.boolean().optional()
     }),
     output: z.object({ sessionId: z.string() })
+  },
+  /** The machine's displays — pick one for a 'screen' demo take. */
+  'demo:listDisplays': {
+    input: z.void(),
+    output: z.array(
+      z.object({
+        id: z.number(),
+        label: z.string(),
+        bounds: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+        scaleFactor: z.number(),
+        primary: z.boolean()
+      })
+    )
   },
   /** One base64 slice of the webm (≤ ~4 MB); seq must be the next expected index. */
   'demo:appendChunk': {
@@ -964,6 +989,8 @@ export const ipcContracts = {
       sessionId: z.string(),
       durationSec: z.number().min(0),
       events: z.array(demoEventSchema),
+      /** Date.now() at recorder.onstart — the base main rebases GLOBAL-hook events onto. */
+      captureStartEpochMs: z.number().optional(),
       error: z.string().optional()
     }),
     output: z.void()
@@ -982,6 +1009,9 @@ export const ipcContracts = {
       eventsPath: z.string().nullable(),
       durationSec: z.number(),
       format: z.enum(['mp4', 'webm']),
+      source: z.enum(['self', 'screen']),
+      /** Degradations worth telling the user (e.g. global hook unavailable → no journal). */
+      warnings: z.array(z.string()),
       events: z.array(demoEventSchema)
     })
   },
@@ -2073,6 +2103,8 @@ export interface NavigatePayload {
 export interface DemoControlPayload {
   action: 'start' | 'stop'
   sessionId: string
+  /** 'screen' = the journal is collected by main's GLOBAL hook — the renderer records video only. */
+  capture?: 'self' | 'screen'
 }
 
 /** Progress of an MP4 render. One terminal event is always sent: done or error. */

@@ -53,6 +53,8 @@ interface ActiveCapture {
   queue: Promise<void>
   seq: number
   t0: number
+  /** Date.now() at recorder.onstart — main rebases global-hook events onto it. */
+  startEpochMs: number
   aborted: boolean
   detach: () => void
 }
@@ -127,6 +129,7 @@ async function finish(active: ActiveCapture, durationSec: number, error?: string
       sessionId: active.sessionId,
       durationSec,
       events: error ? [] : active.events,
+      captureStartEpochMs: active.startEpochMs,
       ...(error ? { error } : {})
     })
   } catch (finishError) {
@@ -134,7 +137,7 @@ async function finish(active: ActiveCapture, durationSec: number, error?: string
   }
 }
 
-async function startCapture(sessionId: string): Promise<void> {
+async function startCapture(sessionId: string, captureKind: 'self' | 'screen'): Promise<void> {
   let stream: MediaStream
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
@@ -164,6 +167,7 @@ async function startCapture(sessionId: string): Promise<void> {
     queue: Promise.resolve(),
     seq: 0,
     t0: performance.now(),
+    startEpochMs: Date.now(),
     aborted: false,
     detach: () => undefined
   }
@@ -171,7 +175,10 @@ async function startCapture(sessionId: string): Promise<void> {
 
   recorder.onstart = () => {
     active.t0 = performance.now()
-    active.detach = attachJournal(active)
+    active.startEpochMs = Date.now()
+    // Screen takes journal through main's GLOBAL hook — our window listeners
+    // would only see Raccord and duplicate coordinates in the wrong space.
+    active.detach = captureKind === 'screen' ? () => undefined : attachJournal(active)
     setState({ recording: true, sessionId, startedAt: Date.now() })
   }
   recorder.ondataavailable = (e) => {
@@ -193,7 +200,7 @@ export function handleDemoControl(payload: DemoControlPayload): void {
   if (payload.action === 'start') {
     if (capture?.sessionId === payload.sessionId) return
     if (capture) return // another take is live — main refuses double starts anyway
-    void startCapture(payload.sessionId)
+    void startCapture(payload.sessionId, payload.capture ?? 'self')
     return
   }
   if (capture?.sessionId === payload.sessionId && capture.recorder.state !== 'inactive') {

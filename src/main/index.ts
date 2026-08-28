@@ -1,6 +1,7 @@
 import { join } from 'node:path'
-import { BrowserWindow, app, dialog, safeStorage, shell } from 'electron'
+import { BrowserWindow, app, desktopCapturer, dialog, safeStorage, shell } from 'electron'
 import { openDatabase } from './db/client'
+import * as demoService from './services/demo'
 import { logError } from './services/logger'
 import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocolHandler, registerMediaProtocolPrivileges } from './media/protocol'
@@ -65,13 +66,28 @@ function createWindow(): void {
   window.on('ready-to-show', () => window.show())
 
   // Demo mode (§9): getDisplayMedia needs a main-side grant on Electron. The
-  // handler only ever answers our own renderer and hands it its own frame —
-  // tab-style capture: no picker, no window chrome, no OS cursor, and no
-  // macOS Screen Recording prompt (nothing outside our contents is read).
-  // If frame capture ever regresses, the fallback is desktopCapturer window
-  // sources matched on window.getMediaSourceId() — that path DOES hit TCC.
+  // handler only ever answers our own renderer. SELF takes get their own
+  // frame — tab-style capture: no picker, no window chrome, no OS cursor,
+  // and no macOS Screen Recording prompt (nothing outside our contents is
+  // read). SCREEN takes (external demo of another application) get the
+  // desktopCapturer source of the session's display — THAT path triggers the
+  // macOS Screen Recording prompt on first use, by design.
   window.webContents.session.setDisplayMediaRequestHandler(
-    (request, callback) => callback(request.frame ? { video: request.frame } : {}),
+    (request, callback) => {
+      const displayId = demoService.pendingScreenCaptureDisplayId()
+      if (displayId === null) {
+        callback(request.frame ? { video: request.frame } : {})
+        return
+      }
+      desktopCapturer
+        .getSources({ types: ['screen'] })
+        .then((sources) => {
+          const match =
+            sources.find((s) => s.display_id === String(displayId)) ?? sources[0] ?? null
+          callback(match ? { video: match } : {})
+        })
+        .catch(() => callback({}))
+    },
     { useSystemPicker: false }
   )
 

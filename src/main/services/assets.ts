@@ -134,6 +134,7 @@ export function importAssetFromFile(projectId: string, sourcePath: string): Asse
     designSubject: null,
     contentHash: hashFile(filePath),
     demoEvents: null,
+    demoSource: null,
     createdAt: Date.now(),
     updatedAt: null
   }
@@ -202,6 +203,7 @@ export async function importAssetFromUrl(
     designSubject: null,
     contentHash: createHash('sha256').update(bytes).digest('hex'),
     demoEvents: null,
+    demoSource: null,
     createdAt: Date.now(),
     updatedAt: null
   }
@@ -258,6 +260,7 @@ export function importAssetFromBytes(args: {
     designSubject,
     contentHash: createHash('sha256').update(args.bytes).digest('hex'),
     demoEvents: null,
+    demoSource: null,
     createdAt: Date.now(),
     updatedAt: null
   }
@@ -346,6 +349,7 @@ export async function promoteGeneration(
     designSubject,
     contentHash: hashFile(filePath),
     demoEvents: null,
+    demoSource: null,
     createdAt: Date.now(),
     updatedAt: null
   }
@@ -364,11 +368,19 @@ export function updateAsset(
     .run()
 }
 
-/** Demo mode (§9): store the recording's input-event journal on its asset row. */
-export function setAssetDemoEvents(assetId: string, events: DemoEvent[]): void {
+/**
+ * Demo mode (§9): store the recording's input-event journal and its capture
+ * provenance on the asset row ('screen' takes keep their real OS cursor —
+ * the render's camera bake skips the synthetic one).
+ */
+export function setAssetDemoEvents(
+  assetId: string,
+  events: DemoEvent[],
+  source: 'self' | 'screen' = 'self'
+): void {
   getDb()
     .update(assets)
-    .set({ demoEvents: events, updatedAt: Date.now() })
+    .set({ demoEvents: events, demoSource: source, updatedAt: Date.now() })
     .where(eq(assets.id, assetId))
     .run()
 }

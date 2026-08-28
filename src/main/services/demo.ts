@@ -3,12 +3,13 @@ import { createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, screen } from 'electron'
 import type { DemoEvent } from '@shared/screenMotion'
 import { ffmpegPath } from '../media/ffbin'
 import { broadcastDemoControl } from '../events'
 import { buildDemoTranscodeArgs } from './renderPlan'
 import { importAssetFromBytes, setAssetDemoEvents } from './assets'
+import { startGlobalJournal, stopGlobalJournal } from './demoGlobalHook'
 import { logError, logInfo } from './logger'
 
 /**
@@ -38,6 +39,8 @@ export interface DemoStopResult {
   eventsPath: string | null
   durationSec: number
   format: 'mp4' | 'webm'
+  source: 'self' | 'screen'
+  warnings: string[]
   events: DemoEvent[]
 }
 
@@ -45,6 +48,12 @@ interface DemoSession {
   sessionId: string
   external: boolean
   projectId: string | null
+  /** 'screen' = external take of a whole display (journal from the global hook). */
+  sourceKind: 'self' | 'screen'
+  /** Captured display in 'screen' mode — the journal's normalization space. */
+  displayId: number | null
+  hookRunning: boolean
+  warnings: string[]
   tmpDir: string
   webmPath: string
   stream: ReturnType<typeof createWriteStream>
@@ -52,6 +61,7 @@ interface DemoSession {
   startedAt: number
   prevBounds: Electron.Rectangle | null
   prevResizable: boolean | null
+  prevBackgroundThrottling: boolean | null
   pending: {
     resolve: (result: DemoStopResult) => void
     reject: (error: Error) => void
@@ -77,12 +87,20 @@ function restoreWindow(session: DemoSession): void {
   if (!window || window.isDestroyed()) return
   if (session.prevResizable !== null) window.setResizable(session.prevResizable)
   if (session.prevBounds) window.setBounds(session.prevBounds)
+  if (session.prevBackgroundThrottling !== null) {
+    window.webContents.setBackgroundThrottling(session.prevBackgroundThrottling)
+  }
   session.prevBounds = null
   session.prevResizable = null
+  session.prevBackgroundThrottling = null
 }
 
 function cleanup(session: DemoSession): void {
   restoreWindow(session)
+  if (session.hookRunning) {
+    stopGlobalJournal()
+    session.hookRunning = false
+  }
   if (session.pending) {
     clearTimeout(session.pending.timer)
     session.pending = null
@@ -91,14 +109,53 @@ function cleanup(session: DemoSession): void {
   if (active?.sessionId === session.sessionId) active = null
 }
 
+/** The machine's displays — what a 'screen' take can capture. */
+export function listDemoDisplays(): Array<{
+  id: number
+  label: string
+  bounds: { x: number; y: number; width: number; height: number }
+  scaleFactor: number
+  primary: boolean
+}> {
+  const primaryId = screen.getPrimaryDisplay().id
+  return screen.getAllDisplays().map((d) => ({
+    id: d.id,
+    label: d.label || `Display ${d.id}`,
+    bounds: d.bounds,
+    scaleFactor: d.scaleFactor,
+    primary: d.id === primaryId
+  }))
+}
+
+/**
+ * The display the ACTIVE screen-mode session captures — consulted by the
+ * display-media handler in main/index.ts to answer getDisplayMedia with the
+ * right screen source (self sessions return null → frame capture).
+ */
+export function pendingScreenCaptureDisplayId(): number | null {
+  return active?.sourceKind === 'screen' ? active.displayId : null
+}
+
 export function startDemo(input: {
   projectId?: string
+  sourceKind?: 'self' | 'screen'
+  displayId?: number
   width?: number
   height?: number
   external?: boolean
 }): { sessionId: string } {
   if (!isDemoEnabled()) throw new Error('Demo mode is not enabled (launch with RACCORD_DEMO=1).')
   if (active) throw new Error('A demo recording is already in progress.')
+  const sourceKind = input.sourceKind ?? 'self'
+
+  let display: Electron.Display | null = null
+  if (sourceKind === 'screen') {
+    display =
+      input.displayId !== undefined
+        ? (screen.getAllDisplays().find((d) => d.id === input.displayId) ?? null)
+        : screen.getPrimaryDisplay()
+    if (!display) throw new Error(`Unknown displayId ${input.displayId} (see demo:listDisplays).`)
+  }
 
   const tmpDir = mkdtempSync(join(tmpdir(), 'raccord-demo-'))
   const webmPath = join(tmpDir, 'capture.webm')
@@ -107,6 +164,10 @@ export function startDemo(input: {
     sessionId,
     external: input.external === true,
     projectId: input.projectId ?? null,
+    sourceKind,
+    displayId: display?.id ?? null,
+    hookRunning: false,
+    warnings: [],
     tmpDir,
     webmPath,
     stream: createWriteStream(webmPath),
@@ -114,22 +175,40 @@ export function startDemo(input: {
     startedAt: Date.now(),
     prevBounds: null,
     prevResizable: null,
+    prevBackgroundThrottling: null,
     pending: null,
     result: null
   }
   active = session
 
+  if (sourceKind === 'screen' && display) {
+    // The journal comes from the machine-wide hook — Raccord will be in the
+    // background while the user demos the other application.
+    const hook = startGlobalJournal(display.bounds)
+    if (hook.ok) session.hookRunning = true
+    else session.warnings.push(hook.reason)
+  }
+
   if (!session.external) {
     const window = mainWindow()
     if (window && !window.isDestroyed()) {
-      session.prevBounds = window.getBounds()
-      session.prevResizable = window.isResizable()
-      window.setContentSize(input.width ?? DEFAULT_WIDTH, input.height ?? DEFAULT_HEIGHT)
-      window.setResizable(false)
+      if (sourceKind === 'self') {
+        session.prevBounds = window.getBounds()
+        session.prevResizable = window.isResizable()
+        window.setContentSize(input.width ?? DEFAULT_WIDTH, input.height ?? DEFAULT_HEIGHT)
+        window.setResizable(false)
+      } else {
+        // The renderer keeps recording while Raccord is unfocused.
+        session.prevBackgroundThrottling = window.webContents.getBackgroundThrottling()
+        window.webContents.setBackgroundThrottling(false)
+      }
     }
-    broadcastDemoControl({ action: 'start', sessionId })
+    broadcastDemoControl({ action: 'start', sessionId, capture: sourceKind })
   }
-  logInfo('demo', `recording started (${sessionId}${session.external ? ', external' : ''})`)
+  logInfo(
+    'demo',
+    `recording started (${sessionId}, ${sourceKind}${session.external ? ', external' : ''})`
+  )
   return { sessionId }
 }
 
@@ -172,10 +251,28 @@ export function stopDemo(): Promise<DemoStopResult> {
   })
 }
 
+/**
+ * Global-hook events carry provisional epoch-second times — rebase them onto
+ * the capture start (the renderer's recorder.onstart epoch, falling back to
+ * the session start), clamp into the take and sort.
+ */
+function rebaseGlobalEvents(
+  events: DemoEvent[],
+  startEpochMs: number,
+  durationSec: number
+): DemoEvent[] {
+  const startSec = startEpochMs / 1000
+  return events
+    .map((e) => ({ ...e, t: e.t - startSec }))
+    .filter((e) => e.t >= 0 && e.t <= durationSec)
+    .sort((a, b) => a.t - b.t)
+}
+
 export async function finishDemo(input: {
   sessionId: string
   durationSec: number
   events: DemoEvent[]
+  captureStartEpochMs?: number
   error?: string
 }): Promise<void> {
   const session = active
@@ -185,6 +282,18 @@ export async function finishDemo(input: {
 
   await new Promise<void>((resolve) => session.stream.end(resolve))
   restoreWindow(session)
+
+  // Screen takes journal through the machine-wide hook; the renderer only
+  // recorded the pixels (its events array is empty in that mode).
+  let events = input.events
+  if (session.hookRunning) {
+    session.hookRunning = false
+    events = rebaseGlobalEvents(
+      stopGlobalJournal(),
+      input.captureStartEpochMs ?? session.startedAt,
+      input.durationSec
+    )
+  }
 
   const settle = (outcome: DemoStopResult | { error: Error }): void => {
     if (session.pending) {
@@ -225,30 +334,37 @@ export async function finishDemo(input: {
         bytes: readFileSync(mediaPath),
         mimeType: format === 'mp4' ? 'video/mp4' : 'video/webm',
         name: label,
-        description: 'Demo-mode self recording (input-event journal attached).'
+        description:
+          session.sourceKind === 'screen'
+            ? 'Demo-mode screen recording (input-event journal attached).'
+            : 'Demo-mode self recording (input-event journal attached).'
       })
-      setAssetDemoEvents(asset.id, input.events)
+      setAssetDemoEvents(asset.id, events, session.sourceKind)
       settle({
         assetId: asset.id,
         path: asset.filePath ?? mediaPath,
         eventsPath: null,
         durationSec: input.durationSec,
         format,
-        events: input.events
+        source: session.sourceKind,
+        warnings: session.warnings,
+        events
       })
     } else {
       const base = join(app.getPath('downloads'), label.replace(/[: ]/g, '-'))
       const outPath = `${base}.${format}`
       const eventsPath = `${base}.events.json`
       writeFileSync(outPath, readFileSync(mediaPath))
-      writeFileSync(eventsPath, JSON.stringify(input.events, null, 2))
+      writeFileSync(eventsPath, JSON.stringify(events, null, 2))
       settle({
         assetId: null,
         path: outPath,
         eventsPath,
         durationSec: input.durationSec,
         format,
-        events: input.events
+        source: session.sourceKind,
+        warnings: session.warnings,
+        events
       })
     }
     logInfo('demo', `recording finished (${input.durationSec.toFixed(1)}s, ${format})`)

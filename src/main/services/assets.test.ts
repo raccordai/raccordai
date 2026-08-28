@@ -145,6 +145,7 @@ describe('setAssetDemoEvents', () => {
       name: 'Demo take'
     })
     expect(getAsset(asset.id)?.demoEvents).toBeNull()
+    expect(getAsset(asset.id)?.demoSource).toBeNull()
 
     const events = [
       { t: 1.2, type: 'click' as const, x: 0.25, y: 0.1 },
@@ -153,6 +154,11 @@ describe('setAssetDemoEvents', () => {
     ]
     setAssetDemoEvents(asset.id, events)
     expect(getAsset(asset.id)?.demoEvents).toEqual(events)
+    expect(getAsset(asset.id)?.demoSource).toBe('self')
+
+    // Screen takes record their provenance (the render keeps the real cursor).
+    setAssetDemoEvents(asset.id, events, 'screen')
+    expect(getAsset(asset.id)?.demoSource).toBe('screen')
   })
 })
 
