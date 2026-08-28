@@ -10,6 +10,7 @@ import { TEXT_ANIMATION_IDS, isTextAnimationId } from '@shared/textAnimations'
 import { SCREEN_DIRECTIONS, planScenario, type ScenarioBeat } from '@shared/scenario'
 import { broadcastFocusNode, broadcastNavigate, broadcastWorkflowChanged } from '../events'
 import * as assets from '../services/assets'
+import * as demo from '../services/demo'
 import * as generations from '../services/generations'
 import * as graph from '../services/graph'
 import * as graphHistory from '../services/graphHistory'
@@ -2321,6 +2322,37 @@ export const AGENT_TOOLS: AgentTool[] = [
         nodeIds: Array.isArray(nodeIds) ? nodeIds.map(String) : undefined,
         timeoutSec: typeof timeout_sec === 'number' ? timeout_sec : undefined
       })
+  },
+  {
+    name: 'record_demo',
+    description:
+      'Demo mode (§9, RACCORD_DEMO=1 builds only): start/stop a self-recording of the Raccord window. The app captures its own screen AND an input-event journal (clicks/moves, normalized coords); stop transcodes to mp4, imports it as a project video asset and stores the journal on it. projectId is ignored on stop (the session already owns it).',
+    inputSchema: obj(
+      {
+        action: { type: 'string', enum: ['start', 'stop'] },
+        projectId: str('Project the recording is imported into on stop'),
+        width: {
+          type: 'number',
+          description: 'Pinned content width during the take (default 1280)'
+        },
+        height: { type: 'number', description: 'Pinned content height (default 720)' }
+      },
+      ['action', 'projectId']
+    ),
+    scope: 'project',
+    risk: 'write',
+    execute: async ({ action, projectId, width, height }) => {
+      if (action === 'start') {
+        return demo.startDemo({
+          projectId: String(projectId),
+          ...(typeof width === 'number' ? { width } : {}),
+          ...(typeof height === 'number' ? { height } : {})
+        })
+      }
+      const result = await demo.stopDemo()
+      const { events, ...rest } = result
+      return { ...rest, eventCount: events.length }
+    }
   },
   {
     name: 'render_video',
