@@ -349,23 +349,90 @@ export function cursorOverlayFilter(keyframes: PanTarget[]): string | null {
 }
 
 /**
+ * Screen-Studio-style framing (§9): the capture sits inset over a gradient
+ * background, rounded and shadowed like a simple floating window, and the
+ * camera zooms the whole composition.
+ */
+export interface DemoFrameOptions {
+  /** Fraction of the output the capture occupies (default 0.85). */
+  scale?: number
+  /** Corner radius in pixels (default 16). */
+  radius?: number
+  /** Background gradient corners as 0xRRGGBB (default Raccord lavender → pink). */
+  background?: [string, string]
+}
+
+const FRAME_DEFAULTS = { scale: 0.85, radius: 16, background: ['0xb7b6ff', '0xff9bc6'] as const }
+
+/** Journal positions remapped onto the inset capture: p' = 0.5 + (p−0.5)·scale. */
+export function insetEvents(events: DemoEvent[], scale: number): DemoEvent[] {
+  return events.map((e) =>
+    typeof e.x === 'number' && typeof e.y === 'number'
+      ? { ...e, x: 0.5 + (e.x - 0.5) * scale, y: 0.5 + (e.y - 0.5) * scale }
+      : e
+  )
+}
+
+/** Rounded-rect alpha (1px anti-aliased edge) for a w×h surface with an inner rect iw×ih. */
+function roundedAlpha(w: number, h: number, innerW: number, innerH: number, r: number): string {
+  const dx = `max(abs(X-${w / 2})-${innerW / 2 - r},0)`
+  const dy = `max(abs(Y-${h / 2})-${innerH / 2 - r},0)`
+  return `255*clip(${r}+0.5-sqrt(${dx}*${dx}+${dy}*${dy}),0,1)`
+}
+
+/**
+ * The framing chain: [0:v] → [framed]. A gradient background, a blurred
+ * shadow silhouette, then the rounded inset capture (`shortest=1` so the
+ * composition ends with the take, not the infinite lavfi sources).
+ */
+function frameChain(
+  opts: { width: number; height: number; fps: number },
+  frame: DemoFrameOptions
+): string {
+  const scale = frame.scale ?? FRAME_DEFAULTS.scale
+  const radius = frame.radius ?? FRAME_DEFAULTS.radius
+  const [c0, c1] = frame.background ?? FRAME_DEFAULTS.background
+  const even = (v: number): number => Math.max(2, Math.round(v / 2) * 2)
+  const fgW = even(opts.width * scale)
+  const fgH = even(opts.height * scale)
+  const pad = 80
+  const shW = fgW + pad
+  const shH = fgH + pad
+  return [
+    `[0:v]scale=${fgW}:${fgH},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${roundedAlpha(fgW, fgH, fgW, fgH, radius)}'[fg]`,
+    `gradients=s=${opts.width}x${opts.height}:c0=${c0}:c1=${c1}:x0=0:y0=0:x1=${opts.width}:y1=${opts.height}:r=${opts.fps}[bg]`,
+    `color=c=black:s=${shW}x${shH}:r=${opts.fps},format=rgba,geq=r=0:g=0:b=0:a='${roundedAlpha(shW, shH, fgW, fgH, radius + 4)}',boxblur=0:0:0:0:18:2,colorchannelmixer=aa=0.45[sh]`,
+    `[bg][sh]overlay=x=${(opts.width - shW) / 2}:y=${(opts.height - shH) / 2 + 10}[b1]`,
+    `[b1][fg]overlay=x=${(opts.width - fgW) / 2}:y=${(opts.height - fgH) / 2}:shortest=1[framed]`
+  ].join(';')
+}
+
+/**
  * The full -filter_complex of a screen-motion pass: capture on input 0,
  * cursor image on input 1 (omitted when the track has no position — the
- * chain then starts from [0:v] directly). `cursor: false` skips the
- * synthetic cursor even with positioned events: an external SCREEN capture
- * already has the real OS cursor in its pixels, compositing ours would
- * double it.
+ * chain then starts from the capture directly). `frame` composes the
+ * Screen-Studio look first (journal positions are remapped onto the inset);
+ * `cursor: false` skips the synthetic cursor even with positioned events.
  */
 export function buildScreenMotionFilter(
   events: DemoEvent[],
   durationSec: number,
-  opts: { width: number; height: number; fps: number; cursor?: boolean } & ScreenMotionOptions
+  opts: {
+    width: number
+    height: number
+    fps: number
+    cursor?: boolean
+    frame?: DemoFrameOptions
+  } & ScreenMotionOptions
 ): { filter: string; usesCursor: boolean } {
-  const segments = planZoomSegments(events, durationSec, opts)
+  const mapped = opts.frame ? insetEvents(events, opts.frame.scale ?? FRAME_DEFAULTS.scale) : events
+  const segments = planZoomSegments(mapped, durationSec, opts)
   const zoom = zoompanFilter(segments, opts)
-  const cursor = opts.cursor === false ? null : cursorOverlayFilter(cursorKeyframes(events))
+  const cursor = opts.cursor === false ? null : cursorOverlayFilter(cursorKeyframes(mapped))
+  const base = opts.frame ? `${frameChain(opts, opts.frame)};[framed]` : '[0:v]'
   if (cursor) {
-    return { filter: `[0:v][1:v]${cursor}[comp];[comp]${zoom}[out]`, usesCursor: true }
+    const cursorIn = opts.frame ? `${frameChain(opts, opts.frame)};[framed][1:v]` : '[0:v][1:v]'
+    return { filter: `${cursorIn}${cursor}[comp];[comp]${zoom}[out]`, usesCursor: true }
   }
-  return { filter: `[0:v]${zoom}[out]`, usesCursor: false }
+  return { filter: `${base}${zoom}[out]`, usesCursor: false }
 }

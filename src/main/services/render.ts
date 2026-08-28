@@ -426,8 +426,12 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       const assetId = (node.params as { assetId?: string } | undefined)?.assetId
       const asset = assetId ? getAsset(assetId) : null
       if (!asset?.demoEvents || !demoCameraEnabled(node.params, asset.demoEvents)) return
-      if (bakedByPath.has(clip.path)) {
-        const baked = bakedByPath.get(clip.path)
+      // Screen-Studio framing (§9) is a per-clip params marker — two nodes
+      // sharing an asset may frame differently, so the memo key carries it.
+      const framed = (node.params as { demoFrame?: unknown } | undefined)?.demoFrame === true
+      const bakeKey = `${clip.path}|${framed ? 'framed' : 'plain'}`
+      if (bakedByPath.has(bakeKey)) {
+        const baked = bakedByPath.get(bakeKey)
         if (baked) clip.path = baked
         return
       }
@@ -435,7 +439,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       try {
         const rawProbe = await probeFile(active, rawPath)
         if (!rawProbe.width || !rawProbe.height || !rawProbe.durationSeconds) {
-          bakedByPath.set(rawPath, null)
+          bakedByPath.set(bakeKey, null)
           return
         }
         const { filter, usesCursor } = buildScreenMotionFilter(
@@ -445,9 +449,10 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
             width: rawProbe.width,
             height: rawProbe.height,
             fps: rawProbe.fps ?? 30,
-            // Screen takes have the real OS cursor in their pixels — the
-            // synthetic one would double it.
-            cursor: asset.demoSource !== 'screen'
+            // Synthetic cursor on every take: macOS screen capture
+            // (ScreenCaptureKit) excludes the real cursor from the pixels,
+            // so the journal-driven glide is the only cursor there is.
+            ...(framed ? { frame: {} } : {})
           }
         )
         if (usesCursor && !cursorPath) {
@@ -461,12 +466,12 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           ffmpegPath(),
           buildDemoCameraArgs(rawPath, usesCursor ? cursorPath : null, bakedPath, filter)
         )
-        bakedByPath.set(rawPath, bakedPath)
+        bakedByPath.set(bakeKey, bakedPath)
         clip.path = bakedPath
       } catch (error) {
         if (error instanceof RenderCancelledError) throw error
         logError('demo', 'camera bake failed — rendering the raw capture', error)
-        bakedByPath.set(rawPath, null)
+        bakedByPath.set(bakeKey, null)
       }
     }
 

@@ -5,6 +5,7 @@ import {
   cursorKeyframes,
   cursorOverlayFilter,
   demoCameraEnabled,
+  insetEvents,
   normalizeOnDisplay,
   planZoomSegments,
   sampleCamera,
@@ -197,5 +198,28 @@ describe('filter builders', () => {
     expect(screenTake.usesCursor).toBe(false)
     expect(screenTake.filter).toMatch(/^\[0:v\]zoompan=/)
     expect(screenTake.filter).not.toContain('overlay')
+  })
+
+  it('frame composes the Screen-Studio look and remaps the journal onto the inset', () => {
+    const framed = buildScreenMotionFilter([click(5, 1, 1)], 20, { ...opts, frame: {} })
+    // Gradient background + shadow + rounded inset, ended by the capture.
+    expect(framed.filter).toContain('gradients=s=1280x720:c0=0xb7b6ff:c1=0xff9bc6')
+    expect(framed.filter).toContain('boxblur=0:0:0:0:18:2')
+    expect(framed.filter).toContain('shortest=1[framed]')
+    // 1280×0.85 = 1088 even, 720×0.85 = 612 even.
+    expect(framed.filter).toContain('[0:v]scale=1088:612')
+    // The cursor rides the framed composition, then the camera zooms it all.
+    expect(framed.usesCursor).toBe(true)
+    expect(framed.filter).toContain('[framed][1:v]overlay')
+    expect(framed.filter).toContain('[comp]zoompan=')
+  })
+})
+
+describe('insetEvents', () => {
+  it('remaps positions toward the center by the inset scale, leaves keys alone', () => {
+    const [corner, key] = insetEvents([click(1, 1, 0), { t: 2, type: 'key' }], 0.8) as DemoEvent[]
+    expect(corner!.x).toBeCloseTo(0.9)
+    expect(corner!.y).toBeCloseTo(0.1)
+    expect(key).toEqual({ t: 2, type: 'key' })
   })
 })
