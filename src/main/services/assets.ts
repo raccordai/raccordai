@@ -15,6 +15,7 @@ import {
   mediaKindFor,
   mimeTypeFor
 } from '../media/files'
+import { downloadToFile } from '../media/download'
 
 type AssetRow = typeof assets.$inferSelect
 
@@ -155,20 +156,12 @@ const EXT_BY_MIME: Record<string, string> = {
   'audio/mp4': '.m4a'
 }
 
-/**
- * Download a remote media URL into the managed store and register it as an
- * asset (local-first: no remote reference that can expire).
- */
-export async function importAssetFromUrl(
-  projectId: string,
-  url: string,
-  name?: string,
-  description?: string
-): Promise<Asset> {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Download failed: HTTP ${res.status} for ${url}`)
-  const mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() ?? null
-  const urlPath = new URL(url).pathname
+/** MIME + extension + media kind of a remote file, from its response headers. */
+function classifyRemoteMedia(
+  contentType: string | null,
+  urlPath: string
+): { mimeType: string | null; ext: string; kind: 'image' | 'video' | 'audio' | null } {
+  const mimeType = contentType?.split(';')[0]?.trim() ?? null
   const ext = (mimeType && EXT_BY_MIME[mimeType]) || extname(urlPath).toLowerCase() || ''
   const kind = mimeType?.startsWith('image/')
     ? ('image' as const)
@@ -177,12 +170,36 @@ export async function importAssetFromUrl(
       : mimeType?.startsWith('audio/')
         ? ('audio' as const)
         : mediaKindFor(urlPath)
-  if (!kind) throw new Error(`Unsupported media type "${mimeType ?? 'unknown'}" for ${url}`)
+  return { mimeType, ext, kind }
+}
 
+/**
+ * Download a remote media URL into the managed store and register it as an
+ * asset (local-first: no remote reference that can expire). Streamed to disk
+ * (bounded RAM, byte cap, http(s) only — this is agent-reachable via
+ * add_asset_from_url); the type check runs on the response headers, before
+ * any byte lands.
+ */
+export async function importAssetFromUrl(
+  projectId: string,
+  url: string,
+  name?: string,
+  description?: string
+): Promise<Asset> {
+  const urlPath = new URL(url).pathname
   const id = randomUUID()
-  const bytes = new Uint8Array(await res.arrayBuffer())
-  const filePath = join(mediaDirFor(projectId), `${id}${ext}`)
-  writeFileSync(filePath, bytes)
+  const download = await downloadToFile(url, (contentType) => {
+    const media = classifyRemoteMedia(contentType, urlPath)
+    if (!media.kind) {
+      throw new Error(`Unsupported media type "${media.mimeType ?? 'unknown'}" for ${url}`)
+    }
+    return join(mediaDirFor(projectId), `${id}${media.ext}`)
+  })
+  // Same deterministic classification the callback used — the callback threw
+  // on a null kind, so this one can't be null.
+  const { mimeType, kind } = classifyRemoteMedia(download.contentType, urlPath)
+  if (!kind) throw new Error(`Unsupported media type "${mimeType ?? 'unknown'}" for ${url}`)
+  const filePath = download.path
 
   const resolvedName = name?.trim() || basename(urlPath, extname(urlPath)) || 'asset'
   const row: AssetRow = {
@@ -195,13 +212,13 @@ export async function importAssetFromUrl(
     filePath,
     sourceUrl: url,
     mimeType: mimeType ?? mimeTypeFor(filePath),
-    size: bytes.byteLength,
+    size: download.bytes,
     uploadedUrl: null,
     uploadedAt: null,
     tags: [],
     designId: null,
     designSubject: null,
-    contentHash: createHash('sha256').update(bytes).digest('hex'),
+    contentHash: hashFile(filePath),
     demoEvents: null,
     demoSource: null,
     createdAt: Date.now(),
@@ -312,15 +329,18 @@ export async function promoteGeneration(
     mimeType = gen.resultMimeType ?? mimeTypeFor(gen.resultPath)
     size = statSync(filePath).size
   } else if (gen.resultUrl) {
-    const res = await fetch(gen.resultUrl)
-    if (!res.ok) throw new Error(`Failed to fetch generation media: HTTP ${res.status}`)
-    mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() ?? gen.resultMimeType
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    const ext =
-      mimeType && mimeType.includes('/') ? `.${mimeType.split('/')[1]?.replace('jpeg', 'jpg')}` : ''
-    filePath = join(mediaDirFor(video.projectId), `${id}${ext}`)
-    writeFileSync(filePath, bytes)
-    size = bytes.byteLength
+    // Streamed to disk — same downloader as the run engine (byte cap, http(s) only).
+    const download = await downloadToFile(gen.resultUrl, (contentType) => {
+      const headerMime = contentType?.split(';')[0]?.trim() ?? gen.resultMimeType
+      const ext =
+        headerMime && headerMime.includes('/')
+          ? `.${headerMime.split('/')[1]?.replace('jpeg', 'jpg')}`
+          : ''
+      return join(mediaDirFor(video.projectId), `${id}${ext}`)
+    })
+    mimeType = download.contentType?.split(';')[0]?.trim() ?? gen.resultMimeType
+    filePath = download.path
+    size = download.bytes
   } else {
     throw new Error('Generation has no media — wait for it to finish, then retry.')
   }

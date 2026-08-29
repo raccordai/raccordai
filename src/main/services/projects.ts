@@ -3,8 +3,10 @@ import { desc, eq } from 'drizzle-orm'
 import type { Project } from '@shared/ipc/contracts'
 import { PROJECT_INSTRUCTIONS_MAX_CHARS } from '@shared/config'
 import { getDb } from '../db/client'
-import { projects } from '../db/schema'
+import { projects, videos } from '../db/schema'
 import { deleteProjectMedia } from '../media/files'
+import { cancelGenerationsForVideo } from './generationLifecycle'
+import { purgeHistory } from './graphHistory'
 
 export function listProjects(): Project[] {
   return getDb().select().from(projects).orderBy(desc(projects.updatedAt)).all()
@@ -51,7 +53,20 @@ export function setProjectInstructions(id: string, instructions: string | null):
 }
 
 export function deleteProject(id: string): void {
-  getDb().delete(projects).where(eq(projects.id, id)).run()
+  const db = getDb()
+  // The cascade is about to take every video: settle their in-flight
+  // generations first (queue slots released, pollers stopped) and drop the
+  // in-memory undo stacks.
+  const projectVideos = db
+    .select({ id: videos.id })
+    .from(videos)
+    .where(eq(videos.projectId, id))
+    .all()
+  for (const video of projectVideos) {
+    cancelGenerationsForVideo(video.id)
+    purgeHistory(video.id)
+  }
+  db.delete(projects).where(eq(projects.id, id)).run()
   // The whole managed store for the project (generation results, extracted
   // frames, imported assets) — nothing under it can outlive the project rows.
   deleteProjectMedia(id)

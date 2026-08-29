@@ -1375,13 +1375,15 @@ onGenerationSettled((event) => {
       event.status === 'success'
         ? `Generation ${event.generationId} (node ${event.nodeId}) finished successfully.${qcNote}`
         : `Generation ${event.generationId} (node ${event.nodeId}) FAILED: ${event.errorMessage ?? 'unknown error'}.`
+    // `continue`, not `return`: several threads can watch the same
+    // generation (a batch relaunched from another conversation) — every one
+    // of them gets its wake-up, not just the first the store returns.
     if (session.busy) {
       session.pending.push(note)
-      return
+      continue
     }
     injectSettleNotes(sessionKey, session, [note])
     void runTurn(sessionKey, session)
-    return
   }
 })
 

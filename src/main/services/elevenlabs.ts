@@ -4,6 +4,7 @@ import {
   type SpeechAlignment,
   type SpeechTranscript
 } from '@shared/speech'
+import { app } from 'electron'
 import { getElevenLabsApiKey } from './settings'
 
 /**
@@ -11,10 +12,14 @@ import { getElevenLabsApiKey } from './settings'
  * kie.ai's job queue, generation is SYNCHRONOUS: one POST returns the audio
  * (base64) plus a character-level alignment. The run engine therefore treats
  * an ElevenLabs "task" as already settled — see the elevenlabs branches in
- * runEngine.ts. RACCORD_ELEVENLABS_BASE overrides the host for the E2E mock.
+ * runEngine.ts. RACCORD_ELEVENLABS_BASE overrides the host for the E2E mock —
+ * dev/E2E only: a packaged build ignores it (an inherited env var must not
+ * redirect requests carrying the API key).
  */
 
-export const ELEVENLABS_BASE = process.env['RACCORD_ELEVENLABS_BASE'] ?? 'https://api.elevenlabs.io'
+export const ELEVENLABS_BASE =
+  (app.isPackaged ? undefined : process.env['RACCORD_ELEVENLABS_BASE']) ??
+  'https://api.elevenlabs.io'
 
 /** Every request asks for plain mp3 — the rest of the media pipeline expects it. */
 const OUTPUT_FORMAT = 'mp3_44100_128'

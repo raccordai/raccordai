@@ -51,6 +51,11 @@ function stacksFor(videoId: string): Stacks {
   return stacks
 }
 
+/** Drops a deleted video's stacks — in-memory, they would outlive the rows. */
+export function purgeHistory(videoId: string): void {
+  stacksByVideo.delete(videoId)
+}
+
 export function snapshotGraph(videoId: string): GraphSnapshot {
   const db = getDb()
   return {

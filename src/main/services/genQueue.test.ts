@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { GenerationQueue, isRetryableGenerationError, withRetry } from './genQueue'
+import {
+  GenerationQueue,
+  isRetryableGenerationError,
+  isTimeoutFailure,
+  maxPollAttemptsFor,
+  timeoutFailureMessage,
+  withRetry
+} from './genQueue'
 
 /** A task that records when it starts and resolves when told to. */
 function task(started: string[], id: string): () => Promise<void> {
@@ -162,6 +169,34 @@ describe('isRetryableGenerationError', () => {
   it('does not read bare numbers as status codes', () => {
     expect(isRetryableGenerationError('render node crashed at frame 403')).toBe(true)
     expect(isRetryableGenerationError('generation stalled (worker 512 died)')).toBe(true)
+  })
+})
+
+describe('poll timeout policy', () => {
+  it('gives video tasks twice the attempt budget', () => {
+    expect(maxPollAttemptsFor('video')).toBe(80)
+    expect(maxPollAttemptsFor('image')).toBe(40)
+    expect(maxPollAttemptsFor('audio')).toBe(40)
+    expect(maxPollAttemptsFor(undefined)).toBe(40)
+  })
+
+  it('recognizes its own timeout message', () => {
+    expect(isTimeoutFailure(timeoutFailureMessage(600))).toBe(true)
+    expect(timeoutFailureMessage(600)).toContain('600s')
+  })
+
+  it('does not mistake other failures for timeouts', () => {
+    expect(isTimeoutFailure(null)).toBe(false)
+    expect(isTimeoutFailure('kie.ai task failed')).toBe(false)
+    expect(isTimeoutFailure('Cancelled by user.')).toBe(false)
+    // A remote message merely mentioning a timeout is not OUR marker.
+    expect(isTimeoutFailure('upstream timed out')).toBe(false)
+  })
+
+  it('a timeout stays retry-classified as transient (never auto-retried by design)', () => {
+    // The poller never routes timeouts through smart retry; this only
+    // documents that the message alone wouldn't be classified permanent.
+    expect(isRetryableGenerationError(timeoutFailureMessage(600))).toBe(true)
   })
 })
 

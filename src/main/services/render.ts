@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { app } from 'electron'
 import { ffmpegPath, ffprobePath } from '../media/ffbin'
+import { downloadToFile } from '../media/download'
 import type { GraphNode } from '@shared/ipc/contracts'
 import {
   audioLaneStarts,
@@ -119,6 +120,15 @@ export function isRendering(videoId: string): boolean {
 }
 
 /**
+ * Kills every in-flight render — the app-quit path: without it the ffmpeg
+ * children outlive the app as orphans. Each renderVideo call still cleans up
+ * its own workDir through its finally block.
+ */
+export function cancelAllRenders(): void {
+  for (const videoId of [...activeRenders.keys()]) cancelRender(videoId)
+}
+
+/**
  * Default destination for headless callers (MCP) that have no save dialog:
  * Downloads/<video name>.mp4, suffixed instead of overwriting an existing file.
  */
@@ -184,12 +194,9 @@ async function probeFile(active: ActiveRender, path: string) {
 
 /** Downloads a remote result that was never cached locally into the work dir. */
 async function downloadTo(workDir: string, name: string, url: string): Promise<string> {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Download failed (${res.status}) for ${url}`)
   const ext = extname(new URL(url).pathname) || '.mp4'
-  const target = join(workDir, `${name}${ext}`)
-  writeFileSync(target, new Uint8Array(await res.arrayBuffer()))
-  return target
+  const { path } = await downloadToFile(url, join(workDir, `${name}${ext}`))
+  return path
 }
 
 /**
@@ -259,8 +266,11 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
   if (!video) throw new Error('Video not found')
 
   const active: ActiveRender = { proc: null, cancelled: false }
-  activeRenders.set(videoId, active)
+  // workDir first: a tmpdir failure with the map already holding the entry
+  // used to wedge "render already in progress" until restart (the finally
+  // block that clears it was never reached).
   const workDir = mkdtempSync(join(tmpdir(), 'raccord-render-'))
+  activeRenders.set(videoId, active)
 
   const progress = (spans: StageSpan[], step: RenderStep, fraction: number) =>
     broadcastRenderProgress({ videoId, percent: overallPercent(spans, step, fraction), step })

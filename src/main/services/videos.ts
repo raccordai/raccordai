@@ -7,6 +7,8 @@ import { getDb } from '../db/client'
 import { generations, nodes, videos } from '../db/schema'
 import { deleteMediaFile } from '../media/files'
 import { unbindThreadsOfVideo } from './chatStore'
+import { cancelGenerationsForVideo } from './generationLifecycle'
+import { purgeHistory } from './graphHistory'
 
 export type VideoRow = typeof videos.$inferSelect
 
@@ -119,6 +121,10 @@ export function renameVideo(id: string, name: string): void {
 
 export function deleteVideo(id: string): void {
   const db = getDb()
+  // In-flight generations settle FIRST (queue slots released, pollers
+  // stopped); their undo stacks are in-memory and go with the video.
+  cancelGenerationsForVideo(id)
+  purgeHistory(id)
   // The cascade only removes the generation ROWS — their media files are
   // collected first and deleted once the rows are gone (assets are
   // project-scoped and survive the video).

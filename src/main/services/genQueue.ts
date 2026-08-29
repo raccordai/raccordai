@@ -110,6 +110,35 @@ export function isRetryableGenerationError(message: string): boolean {
   return !PERMANENT_FAILURE.test(message)
 }
 
+// ── Poll timeout policy ──────────────────────────────────────────────────────
+
+/**
+ * Poll budget per model kind. The historical flat cap (40 × 15 s ≈ 10 min)
+ * regularly expired on long video renders whose credits were already spent —
+ * video tasks get twice the budget. Attempts, not milliseconds: the poller
+ * owns its interval.
+ */
+export function maxPollAttemptsFor(kind: 'video' | 'image' | 'audio' | undefined): number {
+  return kind === 'video' ? 80 : 40
+}
+
+const TIMEOUT_PREFIX = 'Timed out after '
+
+/**
+ * A poll timeout is NOT a remote failure: the task may still be running (or
+ * already done) on kie's side, credits spent either way. The message doubles
+ * as the marker `isTimeoutFailure` recognizes, which is what lets a status
+ * refresh re-query the remote task and recover the result.
+ */
+export function timeoutFailureMessage(seconds: number): string {
+  return `${TIMEOUT_PREFIX}${seconds}s with no result from kie.ai. The task may still be running — refresh the node's status to re-check.`
+}
+
+/** Whether a failed row was settled by a poll timeout (recoverable). */
+export function isTimeoutFailure(message: string | null): boolean {
+  return message !== null && message.startsWith(TIMEOUT_PREFIX)
+}
+
 export interface RetryOptions {
   attempts?: number
   baseDelayMs?: number

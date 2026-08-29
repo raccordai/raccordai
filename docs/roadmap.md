@@ -232,17 +232,24 @@ leverage — each is roughly one focused session. Items already tracked in §4
 
 ### 7.1 Security hardening (S — the two critical ones are ~15 lines total)
 
-| Fix                                                                                                                                                                                                                                                                                                                  | Sev | Where                                                        |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ------------------------------------------------------------ |
-| No `will-navigate` guard: a file dropped outside the canvas navigates the window to `file:///…`, and the loaded page inherits the full `window.api` bridge — including `settings:localApiInfo`, which returns the Bearer token in the clear. Add the guard + global `dragover`/`drop` preventDefault in the renderer | 🔴  | `src/main/index.ts:43-77`                                    |
-| `shell.openExternal` without a scheme allowlist, fed by assistant-rendered links (influenceable content): restrict to `http(s)`                                                                                                                                                                                      | 🔴  | `src/main/index.ts:67-70`                                    |
-| `render_video`'s `outputPath` is an unvalidated absolute path with `risk: 'write'` — arbitrary file write that bypasses the approval card. Constrain (extension + directory) and/or reclassify `destructive`; same, weaker, for `add_asset_from_file`                                                                | 🟠  | `src/main/mcp/registry.ts:1439-1497`, `render.ts:554`        |
-| Backup restore does not confine imported `file_path` rows under `userData/media` — a hostile `.raccord` can make `media://` (and `imageBlockFor` → kie upload) serve arbitrary local files                                                                                                                           | 🟠  | `src/main/services/backup.ts:208-234`, `protocol.ts:66-82`   |
-| `RACCORD_KIE_BASE` honoured in packaged builds — an env var redirects every request carrying the kie key. Gate on `!app.isPackaged` like the safeStorage override                                                                                                                                                    | 🟠  | `src/main/services/kie.ts:13-20`                             |
-| Local-API token stored unencrypted and shipped inside `.raccord` backups; never rotated on import. Exclude from the snapshot + regenerate after restore                                                                                                                                                              | 🟠  | `src/main/services/settings.ts:189-194`                      |
-| `sandbox: false` contradicts SECURITY.md; the preload only uses sandbox-compatible APIs — try `sandbox: true` against the E2E suite                                                                                                                                                                                  | 🟠  | `src/main/index.ts:60`                                       |
-| Unbounded remote downloads buffered in RAM (`arrayBuffer()` on results, asset-from-url, render `downloadTo`) — stream to disk with a byte cap, refuse non-http(s)                                                                                                                                                    | 🟠  | `runEngine.ts:480-485`, `assets.ts:165-180`, `render.ts:162` |
-| Low-severity batch: deny-all `setPermissionRequestHandler`, `base-uri`/`form-action`/`frame-ancestors` in the CSP, narrow `connect-src https:` to kie hosts, auth or strip `/health`, `timingSafeEqual` on the token, pin actions by SHA in `publish-release.yml`                                                    | 🟡  | various                                                      |
+Shipped (August 2026 reliability pass): the `will-navigate` guard (cross-
+document navigation denied — a dropped file used to load `file:///…` with the
+full `window.api` bridge attached — plus global `dragover`/`drop`
+preventDefault in the renderer); the `shell.openExternal` http(s)/mailto
+allowlist; `RACCORD_KIE_BASE`/`RACCORD_ELEVENLABS_BASE` ignored in packaged
+builds (an inherited env var could redirect every request carrying an API
+key); the local-API token stripped from backup snapshots at export AND from
+restored databases (regenerated on next use); and remote downloads streamed
+to disk through one shared helper (`src/main/media/download.ts`, tested:
+2 GiB cap, http(s) only) — runEngine results, `add_asset_from_url`,
+generation promotion and the render's `downloadTo`.
+
+| Fix                                                                                                                                                                                                                                                               | Sev | Where                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ---------------------------------------------------------- |
+| `render_video`'s `outputPath` is an unvalidated absolute path with `risk: 'write'` — arbitrary file write that bypasses the approval card. Constrain (extension + directory) and/or reclassify `destructive`; same, weaker, for `add_asset_from_file`             | 🟠  | `src/main/mcp/registry.ts:1439-1497`, `render.ts:554`      |
+| Backup restore does not confine imported `file_path` rows under `userData/media` — a hostile `.raccord` can make `media://` (and `imageBlockFor` → kie upload) serve arbitrary local files                                                                        | 🟠  | `src/main/services/backup.ts:208-234`, `protocol.ts:66-82` |
+| `sandbox: false` contradicts SECURITY.md — but the preload is an ESM bundle (`index.mjs`), which Electron only loads unsandboxed: flipping it means building the preload as CJS first, then running the E2E suite                                                 | 🟠  | `src/main/index.ts:60`                                     |
+| Low-severity batch: deny-all `setPermissionRequestHandler`, `base-uri`/`form-action`/`frame-ancestors` in the CSP, narrow `connect-src https:` to kie hosts, auth or strip `/health`, `timingSafeEqual` on the token, pin actions by SHA in `publish-release.yml` | 🟡  | various                                                    |
 
 Verified sound (do not "fix"): `media://` has no path traversal, the backup
 zip-slip guard is correct (absolute + Windows paths included), ffmpeg/ASS
@@ -252,17 +259,29 @@ bounded.
 
 ### 7.2 Generation reliability (M)
 
-| Fix                                                                                                                                                                                                                                                                                                                                  | Sev | Where                                            |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --- | ------------------------------------------------ |
-| Queue-slot leak: deleting a node/video/project with a run in flight never releases the slot (`pollGeneration` exits silently on a missing row, `release()` only fires on settle) — two deletions with the default limit of 2 and nothing generates until restart. Cancel before delete, or reconcile `queue.snapshot()` vs live rows | 🔴  | `runEngine.ts:54-59, 658-664`                    |
-| Poller timeout (10 min flat) marks possibly-succeeded generations `fail`, and `refreshStatus` never re-queries failed rows — credits spent, result unrecoverable. Kind-dependent cap + a re-queryable `timeout` status                                                                                                               | 🔴  | `runEngine.ts:44-45, 697-706, 889-901`           |
-| No graceful shutdown: `closeDatabase()`/`stopLocalApi()` never called on quit, active ffmpeg renders not killed — unchekpointed WAL, orphan processes. One `before-quit` handler                                                                                                                                                     | 🔴  | `src/main/index.ts:141-143`                      |
-| `activeRenders.set` before `mkdtempSync` outside the try: a tmpdir failure wedges "render already in progress" until restart                                                                                                                                                                                                         | 🔴  | `render.ts:216-217`                              |
-| Sync buffered media I/O freezes main (pollers, IPC, `media://`): whole MP4s through `writeFileSync`/`arrayBuffer`, `readFileSync` uploads, serial asset hashing — switch to streams                                                                                                                                                  | 🔴  | `runEngine.ts:485`, `kie.ts:285`, `assets.ts:21` |
-| Settle bus doesn't isolate listeners: one throwing subscriber starves queue release / OS notification / chat wake-up. try/catch per listener                                                                                                                                                                                         | 🟠  | `bus.ts:25-27`                                   |
-| A settle only wakes the FIRST watching thread (`return` instead of `continue` in the loop)                                                                                                                                                                                                                                           | 🟡  | `chat.ts:1313-1339`                              |
-| Failed result download is invisible: row stays `success` with null `resultPath`, retried only at next startup. Store the error + a "re-download" action                                                                                                                                                                              | 🟡  | `runEngine.ts:553-557`                           |
-| Unpurged in-memory state: undo stacks per deleted video, chat `sessions`, `retryCounts` — purge on delete + LRU                                                                                                                                                                                                                      | 🟡  | `graphHistory.ts:40-42`, `chat.ts:872`           |
+Shipped (August 2026 reliability pass): the queue-slot leak is closed at the
+source — deleting a node/video/project (and swapping a node's model) settles
+its in-flight generations FIRST through `services/generationLifecycle.ts`
+(the terminal transitions extracted from the engine so the delete paths can
+call them without an import cycle; tested), and the deleted video's undo
+stacks are purged with it. The poll timeout became kind-aware (video gets
+2× the budget) and RECOVERABLE: the timeout message is a marker
+(`isTimeoutFailure`, genQueue.ts) that lets `refreshStatus` re-query the
+newest timed-out row and resurrect it into the normal lifecycle (slot
+re-adopted, standard settle pipeline) — credits are no longer lost to a slow
+task. Graceful shutdown: a `will-quit` handler kills in-flight ffmpeg
+renders, stops the local API and closes the database (WAL checkpointed);
+`renderVideo` also creates its workDir before registering in `activeRenders`
+(a tmpdir failure used to wedge "render already in progress"). Result
+downloads now stream to disk (see §7.1); a settle wakes EVERY watching
+thread (`continue`, not `return`); the settle bus already isolated its
+listeners.
+
+| Fix                                                                                                                                                                    | Sev | Where                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ------------------------- |
+| Remaining sync I/O on the main thread: `readFileSync` uploads (kie file upload, asset hashing) — switch to streamed multipart / streamed hashing                       | 🟠  | `kie.ts:285`, `assets.ts` |
+| Failed result download is invisible: row stays `success` with null `resultPath`, retried only at next startup. Store the error + a "re-download" action                | 🟡  | `runEngine.ts:553-557`    |
+| Remaining unpurged in-memory state: chat `sessions` map (no LRU, no purge on thread delete); undo stacks are now purged on video delete, `retryCounts` clear on settle | 🟡  | `chat.ts:898`             |
 
 ### 7.3 Product bug quick wins (S)
 
@@ -368,10 +387,12 @@ extend the rule to hex literals.
 
 ## Suggested order
 
-1. **§7.1 security** — the two critical items are ~15 lines and close the
-   widest gap between SECURITY.md's stated model and reality.
-2. **§7.2 generation reliability** — the slot leak and the poller timeout
-   lose user credits today.
+1. **§7.1 security** — the critical items shipped (August 2026 pass); what
+   remains is the MCP output-path validation, backup `file_path` confinement,
+   the sandbox/ESM-preload question and the low-severity batch.
+2. **§7.2 generation reliability** — shipped in the same pass, except the
+   remaining sync uploads, download-failure visibility and the chat sessions
+   LRU.
 3. **§7.3 quick wins** — ⌘C/Space/invalidations/`closesOn`/`4K` are each
    small and user-visible.
 4. **Finish §1** — four GitHub-side actions plus the README visuals.

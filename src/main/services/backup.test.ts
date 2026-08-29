@@ -1,6 +1,7 @@
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import Database from 'better-sqlite3'
 import { zipSync, strToU8 } from 'fflate'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -9,6 +10,7 @@ import {
   importBackup,
   readBackupManifest,
   restoreFromStaging,
+  stripLocalApiToken,
   writeBackupArchive
 } from './backup'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
@@ -94,6 +96,42 @@ describe('backup archive round-trip', () => {
     writeFileSync(archivePath, evil)
 
     await expect(extractBackupArchive(archivePath, tmp())).rejects.toThrow(/unsafe path/)
+  })
+})
+
+describe('stripLocalApiToken', () => {
+  it('removes the token row and keeps every other setting', () => {
+    const dbPath = join(tmp(), 'snapshot.db')
+    const db = new Database(dbPath)
+    db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+    db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`).run('localApiToken', '"secret"')
+    db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`).run('locale', '"fr"')
+    db.close()
+
+    stripLocalApiToken(dbPath)
+
+    const check = new Database(dbPath, { readonly: true })
+    const keys = check
+      .prepare(`SELECT key FROM settings`)
+      .all()
+      .map((row) => (row as { key: string }).key)
+    check.close()
+    expect(keys).toEqual(['locale'])
+  })
+
+  it('tolerates a file that is not a SQLite database', () => {
+    const dbPath = join(tmp(), 'not-a-db')
+    writeFileSync(dbPath, 'plain text')
+    expect(() => stripLocalApiToken(dbPath)).not.toThrow()
+    expect(readFileSync(dbPath, 'utf8')).toBe('plain text')
+  })
+
+  it('tolerates a database without a settings table', () => {
+    const dbPath = join(tmp(), 'no-settings.db')
+    const db = new Database(dbPath)
+    db.exec(`CREATE TABLE other (id TEXT)`)
+    db.close()
+    expect(() => stripLocalApiToken(dbPath)).not.toThrow()
   })
 })
 
