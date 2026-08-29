@@ -214,8 +214,12 @@ export const assetSchema = z.object({
   designSubject: z.string().nullable(),
   /** Demo mode (§9): the recording's input-event journal (screen-motion feed). */
   demoEvents: z.array(demoEventSchema).nullable().optional(),
-  /** What the take captured: 'screen' keeps the real OS cursor (no synthetic one at render). */
-  demoSource: z.enum(['self', 'screen']).nullish(),
+  /**
+   * What the take captured: 'self' = Raccord window, 'screen' = a display,
+   * 'staged' = a window take driven by the gesture engine (its visible cursor
+   * is already in the pixels — the render bakes no synthetic one).
+   */
+  demoSource: z.enum(['self', 'screen', 'staged']).nullish(),
   createdAt: z.number(),
   updatedAt: z.number().nullable()
 })
@@ -1046,6 +1050,18 @@ export const ipcContracts = {
    */
   'demo:point': {
     input: z.object({ x: z.number(), y: z.number() }),
+    output: z.void()
+  },
+  /**
+   * Gesture engine (§9): the renderer's reply to an event:demoGesture request
+   * — main resolves the pending demo_gesture tool call with it.
+   */
+  'demo:gestureResult': {
+    input: z.object({
+      requestId: z.string(),
+      ok: z.boolean(),
+      error: z.string().optional()
+    }),
     output: z.void()
   },
   /** Recorder state — banner rehydration after a renderer reload, E2E assertions. */
@@ -2112,7 +2128,8 @@ export const ipcEvents = [
   'event:nichesChanged',
   'event:voicePersonasChanged',
   'event:updateStateChanged',
-  'event:demoControl'
+  'event:demoControl',
+  'event:demoGesture'
 ] as const
 export type IpcEvent = (typeof ipcEvents)[number]
 
@@ -2136,6 +2153,27 @@ export interface NavigatePayload {
 export interface DemoControlPayload {
   action: 'start' | 'stop'
   sessionId: string
+}
+
+/**
+ * Gesture engine (§9): one UI gesture the renderer must PERFORM — a visible
+ * cursor travels to the resolved element and real DOM events fire, so a
+ * driven demo shows actual interactions (menus opening, typing) instead of
+ * invisible tool mutations.
+ */
+export interface DemoGesturePayload {
+  requestId: string
+  gesture: {
+    kind: 'click' | 'type' | 'press' | 'hover'
+    /** Element query: title/visible text/placeholder, case- and accent-insensitive. */
+    target?: string
+    /** Text to type progressively (kind 'type'). */
+    text?: string
+    /** Key to press on the active element (kind 'press'): Enter, Escape, ArrowDown… */
+    key?: string
+    /** After typing, blur to commit controlled inputs (NodeParamsPanel prompt). */
+    commit?: boolean
+  }
 }
 
 /** Progress of an MP4 render. One terminal event is always sent: done or error. */

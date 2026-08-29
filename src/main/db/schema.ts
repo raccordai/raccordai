@@ -57,8 +57,8 @@ export const assets = sqliteTable(
     contentHash: text('content_hash'),
     /** Demo mode (§9): the recording's input-event journal, feed of the screen-motion compiler. */
     demoEvents: text('demo_events', { mode: 'json' }).$type<DemoEvent[]>(),
-    /** What the take captured: 'self' (Raccord window) or 'screen' (external display — real OS cursor in the pixels). */
-    demoSource: text('demo_source', { enum: ['self', 'screen'] }),
+    /** What the take captured: 'self' (Raccord window), 'screen' (external display) or 'staged' (gesture-driven — visible cursor in the pixels). */
+    demoSource: text('demo_source', { enum: ['self', 'screen', 'staged'] }),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at')
   },
