@@ -37,6 +37,11 @@ declare module '@tanstack/react-router' {
 
 async function bootstrap(): Promise<void> {
   installGlobalErrorHandlers()
+  // A file dropped outside an explicit drop zone must not navigate the window
+  // to file:///… (Chromium's default). Element-level drop handlers run first
+  // and are unaffected; main's will-navigate guard is the security backstop.
+  window.addEventListener('dragover', (event) => event.preventDefault())
+  window.addEventListener('drop', (event) => event.preventDefault())
   await initI18n()
 
   // Desktop replacement for Convex reactivity: the main process pushes an

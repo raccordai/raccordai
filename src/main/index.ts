@@ -1,11 +1,13 @@
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { BrowserWindow, app, desktopCapturer, dialog, safeStorage, shell } from 'electron'
-import { openDatabase } from './db/client'
+import { closeDatabase, openDatabase } from './db/client'
+import { cancelAllRenders } from './services/render'
 import * as demoService from './services/demo'
 import { logError } from './services/logger'
 import { registerIpcHandlers } from './ipc'
 import { registerMediaProtocolHandler, registerMediaProtocolPrivileges } from './media/protocol'
-import { startLocalApi } from './server'
+import { startLocalApi, stopLocalApi } from './server'
 import { initNotifications } from './services/notifications'
 import { resumePolling } from './services/runEngine'
 import { ensureDefaultThread } from './services/chat'
@@ -120,6 +122,20 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // Cross-document navigation is denied: the app is a single page (hash
+  // history — in-page navigations don't fire this event), so the only
+  // legitimate documents are the bundle itself and the dev server. Anything
+  // else — typically a file dropped outside a drop zone navigating the window
+  // to file:///… — would load a foreign page with the full window.api bridge
+  // attached, including the local-API bearer token behind it.
+  const devServerUrl = !app.isPackaged ? process.env['ELECTRON_RENDERER_URL'] : undefined
+  const bundleUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).href
+  window.webContents.on('will-navigate', (event, url) => {
+    const allowed =
+      url.startsWith(bundleUrl) || (devServerUrl !== undefined && url.startsWith(devServerUrl))
+    if (!allowed) event.preventDefault()
+  })
+
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     void window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -211,5 +227,23 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
+  })
+
+  // Graceful shutdown: kill in-flight ffmpeg renders (orphans otherwise), free
+  // the local-API socket and checkpoint the SQLite WAL. Each step is fenced —
+  // quitting must never hang on a broken subsystem. In-flight generations are
+  // deliberately NOT touched: their rows resume via resumePolling() next boot.
+  app.on('will-quit', () => {
+    for (const [name, step] of [
+      ['renders', cancelAllRenders],
+      ['local-api', stopLocalApi],
+      ['database', closeDatabase]
+    ] as const) {
+      try {
+        step()
+      } catch (error) {
+        logError('shutdown', `${name} cleanup failed`, error)
+      }
+    }
   })
 }

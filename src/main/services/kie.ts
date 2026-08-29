@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { basename } from 'node:path'
+import { app } from 'electron'
 import { getKieApiKey } from './settings'
 import { mimeTypeFor } from '../media/files'
 
@@ -7,17 +8,22 @@ import { mimeTypeFor } from '../media/files'
  * kie.ai client — port of video-studio's convex/lib/kie.ts, plus the File
  * Upload API (local desktop media has no public URL, so inputs are uploaded
  * on demand; uploads expire after ~3 days on kie's side).
- * RACCORD_KIE_BASE overrides the host for integration tests (mock server).
+ * RACCORD_KIE_BASE overrides the host for integration tests (mock server) —
+ * DEV/E2E ONLY: in a packaged build an inherited env var must not be able to
+ * redirect every request carrying the API key (same gate as the safeStorage
+ * override in main/index.ts).
  */
 
-export const KIE_BASE = process.env['RACCORD_KIE_BASE'] ?? 'https://api.kie.ai'
+const testBase = app.isPackaged ? undefined : process.env['RACCORD_KIE_BASE']
+
+export const KIE_BASE = testBase ?? 'https://api.kie.ai'
 
 /**
  * The File Upload API lives on its own host (kieai.redpandaai.co) — api.kie.ai
  * 404s on /api/file-stream-upload. The test override still routes uploads to
  * the same mock server as everything else.
  */
-export const KIE_UPLOAD_BASE = process.env['RACCORD_KIE_BASE'] ?? 'https://kieai.redpandaai.co'
+export const KIE_UPLOAD_BASE = testBase ?? 'https://kieai.redpandaai.co'
 
 function getApiKey(): string {
   const key = getKieApiKey()

@@ -18,8 +18,16 @@ import {
   broadcastQueueChanged
 } from '../events'
 import { ffmpegPath } from '../media/ffbin'
+import { downloadToFile } from '../media/download'
 import { mediaDirFor, mimeTypeFor } from '../media/files'
-import { GenerationQueue, isRetryableGenerationError, withRetry } from './genQueue'
+import {
+  GenerationQueue,
+  isRetryableGenerationError,
+  isTimeoutFailure,
+  maxPollAttemptsFor,
+  timeoutFailureMessage,
+  withRetry
+} from './genQueue'
 import { composeRunParams } from './runParams'
 import { logError, logInfo, logWarn } from './logger'
 import { buildLastFrameArgs } from './renderPlan'
@@ -33,6 +41,7 @@ import {
   parseResultUrl
 } from './kie'
 import { type GenerationRow } from './generations'
+import { failGeneration } from './generationLifecycle'
 import { elevenlabsGenerateAudio } from './elevenlabs'
 import { maybeRunQcOnSettle } from './qc'
 import { getElevenLabsApiKey, getKieApiKey, getMaxConcurrentGenerations } from './settings'
@@ -47,7 +56,8 @@ import { getElevenLabsApiKey, getKieApiKey, getMaxConcurrentGenerations } from '
  */
 
 const POLL_INTERVAL_MS = 15_000
-const MAX_POLL_ATTEMPTS = 40 // ~10 min, matching the client-side wait cap
+// Poll attempt budget is kind-dependent (maxPollAttemptsFor in genQueue.ts):
+// ~10 min for images/audio, ~20 min for video tasks that legitimately run long.
 /** kie.ai deletes uploads after ~3 days; refresh well before that. */
 const UPLOAD_TTL_MS = 48 * 60 * 60 * 1000
 
@@ -553,15 +563,17 @@ async function downloadResult(generationId: string): Promise<void> {
     rmSync(source, { force: true })
     mediaMime = mimeTypeFor(target)
   } else {
-    const res = await fetch(gen.resultUrl)
-    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
-    const contentType = res.headers.get('content-type')
-    const ext = extForContentType(contentType, gen.resultUrl, kind ? EXT_BY_KIND[kind] : undefined)
-    target = join(mediaDirFor(video.projectId), `gen-${gen.id}${ext}`)
-    writeFileSync(target, new Uint8Array(await res.arrayBuffer()))
+    const resultUrl = gen.resultUrl
+    // Streamed to disk (bounded RAM, byte cap) — a multi-hundred-MB clip used
+    // to sit in an arrayBuffer and freeze main for the duration.
+    const download = await downloadToFile(resultUrl, (contentType) => {
+      const ext = extForContentType(contentType, resultUrl, kind ? EXT_BY_KIND[kind] : undefined)
+      return join(mediaDirFor(video.projectId), `gen-${gen.id}${ext}`)
+    })
+    target = download.path
     // Store a *media* mime only — the protocol handler serves it as Content-Type
     // (a generic application/octet-stream would make <video> undecodable).
-    const headerMime = contentType?.split(';')[0]?.trim() ?? ''
+    const headerMime = download.contentType?.split(';')[0]?.trim() ?? ''
     mediaMime = /^(video|audio|image)\//.test(headerMime) ? headerMime : mimeTypeFor(target)
   }
   db.update(generations)
@@ -712,25 +724,6 @@ function completeFromKie(
   return { transitioned: true }
 }
 
-function failGeneration(generationId: string, errorMessage: string): void {
-  const db = getDb()
-  const gen = db.select().from(generations).where(eq(generations.id, generationId)).get()
-  db.update(generations)
-    .set({ status: 'failed', errorMessage, completedAt: Date.now() })
-    .where(eq(generations.id, generationId))
-    .run()
-  if (gen) {
-    broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
-    emitGenerationSettled({
-      generationId,
-      videoId: gen.videoId,
-      nodeId: gen.nodeId,
-      status: 'failed',
-      errorMessage
-    })
-  }
-}
-
 // ── Poller (the completion path — no webhook on desktop) ─────────────────────
 
 const pollTimers = new Map<string, NodeJS.Timeout>()
@@ -760,6 +753,7 @@ async function pollGeneration(generationId: string, attempt: number): Promise<vo
     return
   }
 
+  const maxAttempts = maxPollAttemptsFor(getModel(node.modelId)?.kind)
   let result: Awaited<ReturnType<typeof checkRemoteStatus>> | undefined
   try {
     result = await checkRemoteStatus(node.modelId, gen.kieTaskId)
@@ -768,7 +762,7 @@ async function pollGeneration(generationId: string, attempt: number): Promise<vo
     // be invisible: 40 silent failures then a bare timeout).
     logWarn(
       'run-engine',
-      `poll ${attempt}/${MAX_POLL_ATTEMPTS} failed for ${generationId}: ${err instanceof Error ? err.message : err}`
+      `poll ${attempt}/${maxAttempts} failed for ${generationId}: ${err instanceof Error ? err.message : err}`
     )
     result = undefined
   }
@@ -786,12 +780,14 @@ async function pollGeneration(generationId: string, attempt: number): Promise<vo
     }
     return
   }
-  if (attempt >= MAX_POLL_ATTEMPTS) {
+  if (attempt >= maxAttempts) {
+    // The task may still finish remotely — the message is the marker
+    // refreshStatus recognizes to re-query the row and recover the result.
     completeFromKie(
       generationId,
       'fail',
       undefined,
-      `Timed out after ${Math.round((MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000)}s with no result from kie.ai.`
+      timeoutFailureMessage(Math.round((maxAttempts * POLL_INTERVAL_MS) / 1000))
     )
     pollTimers.delete(generationId)
     return
@@ -1047,7 +1043,17 @@ export async function refreshStatus(nodeId: string): Promise<{ status: string }>
     .orderBy(desc(generations.createdAt))
     .all()
   const gen = rows.find((g) => g.status === 'running' || g.status === 'pending')
-  if (!gen) return { status: 'none' }
+  if (!gen) {
+    // A poll timeout is not a remote verdict: credits were spent and the task
+    // may have finished after the poller gave up. The newest timed-out row
+    // gets one more remote query and, if the task lives, re-enters the normal
+    // lifecycle.
+    const timedOut = rows.find(
+      (g) => g.status === 'failed' && g.kieTaskId && isTimeoutFailure(g.errorMessage)
+    )
+    if (timedOut) return recoverTimedOutGeneration(timedOut)
+    return { status: 'none' }
+  }
   if (!gen.kieTaskId) return { status: gen.status }
   const node = db.select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
   if (!node) return { status: gen.status }
@@ -1076,21 +1082,57 @@ export async function refreshStatus(nodeId: string): Promise<{ status: string }>
 }
 
 /**
- * Cancels EVERY run in flight on the node — a variants batch (§6.6) puts N of
- * them there and one Cancel click must stop the whole exploration, not peel
- * candidates off one at a time.
+ * Re-queries a generation the poller settled as a timeout (refreshStatus's
+ * recovery path). If the remote task is alive or done, the row is resurrected
+ * into the NORMAL lifecycle — back to 'running' with its queue slot
+ * re-adopted — so completion flows through the standard settle pipeline
+ * (auto-select, download, QC, settle event). A definitive remote failure
+ * replaces the timeout message so the next refresh stops re-querying.
  */
-export function cancelGeneration(nodeId: string): { cancelled: boolean } {
-  const inFlight = getDb()
-    .select()
-    .from(generations)
-    .where(eq(generations.nodeId, nodeId))
-    .orderBy(desc(generations.createdAt))
-    .all()
-    .filter((g) => g.status === 'running' || g.status === 'pending')
-  for (const gen of inFlight) failGeneration(gen.id, 'Cancelled by user.')
-  return { cancelled: inFlight.length > 0 }
+async function recoverTimedOutGeneration(gen: GenerationRow): Promise<{ status: string }> {
+  const db = getDb()
+  const node = db.select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
+  if (!node || !gen.kieTaskId) return { status: 'failed' }
+
+  let result: Awaited<ReturnType<typeof checkRemoteStatus>>
+  try {
+    result = await checkRemoteStatus(node.modelId, gen.kieTaskId)
+  } catch (err) {
+    throw new Error(
+      `kie.ai status check failed: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err }
+    )
+  }
+
+  if (result.state === 'fail') {
+    if (result.failMsg) {
+      db.update(generations)
+        .set({ errorMessage: result.failMsg })
+        .where(eq(generations.id, gen.id))
+        .run()
+      broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
+    }
+    return { status: 'failed' }
+  }
+
+  db.update(generations)
+    .set({ status: 'running', errorMessage: null, completedAt: null })
+    .where(eq(generations.id, gen.id))
+    .run()
+  queue.adopt(gen.id)
+  broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
+  if (result.state === 'success') {
+    completeFromKie(gen.id, 'success', result.resultUrl)
+    return { status: 'success' }
+  }
+  schedulePoll(gen.id, 1)
+  return { status: 'running' }
 }
+
+// Terminal transitions (cancel, fail) live in generationLifecycle.ts so the
+// delete paths (node/video/project) can settle in-flight rows without
+// importing the engine; re-exported here for the IPC/MCP surface.
+export { cancelGeneration, cancelGenerationsForVideo } from './generationLifecycle'
 
 /**
  * Removes ONE queued-but-unsubmitted generation from the run queue and deletes
