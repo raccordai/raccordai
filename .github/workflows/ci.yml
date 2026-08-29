@@ -22,7 +22,7 @@ jobs:
       - name: Install uiohook-napi build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libxt-dev libxinerama-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev
+          sudo apt-get install -y libx11-dev libxrandr-dev libxtst-dev libxt-dev
 
       # postinstall runs electron-builder install-app-deps, so better-sqlite3
       # is built for Electron's ABI — tests run through Electron's node
@@ -72,7 +72,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1
-          sudo apt-get install -y libx11-dev libxtst-dev libxt-dev libxinerama-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev
+          sudo apt-get install -y libx11-dev libxrandr-dev libxtst-dev libxt-dev
           sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2
 
       - run: pnpm install --frozen-lockfile
