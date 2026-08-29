@@ -12,6 +12,7 @@ import type {
   QueueState,
   TextLayer
 } from '@shared/ipc/contracts'
+import type { DemoEvent } from '@shared/screenMotion'
 import { invoke } from '@renderer/lib/ipc'
 
 /**
@@ -58,27 +59,38 @@ export function useTimelineFallbackImages(videoId: string): UseQueryResult<Recor
  * (a real clip) from an image still (kind). Refreshed with the graph key so
  * a swapped asset follows.
  */
+export interface AssetNodeMedia {
+  url: string
+  mimeType: string | null
+  kind: 'image' | 'video' | 'audio'
+  /** Demo take (§9): the journal + provenance the camera preview replays. */
+  demoEvents: DemoEvent[] | null
+  demoSource: 'self' | 'screen' | 'staged' | null
+}
+
 export function useAssetNodeMedia(
   videoId: string,
   nodes: GraphNode[]
-): UseQueryResult<
-  Record<string, { url: string; mimeType: string | null; kind: 'image' | 'video' | 'audio' }>
-> {
+): UseQueryResult<Record<string, AssetNodeMedia>> {
   const assetNodes = nodes.filter((n) => n.modelId === 'studio/asset')
   const ids = assetNodes.map((n) => n.id).join('|')
   return useQuery({
     queryKey: [...graphKeys.graph(videoId), 'assetNodeMedia', ids],
     queryFn: async () => {
-      const out: Record<
-        string,
-        { url: string; mimeType: string | null; kind: 'image' | 'video' | 'audio' }
-      > = {}
+      const out: Record<string, AssetNodeMedia> = {}
       for (const node of assetNodes) {
         const assetId = (node.params as { assetId?: string } | undefined)?.assetId
         if (!assetId) continue
         const asset = await invoke('assets:get', { assetId })
-        if (asset?.url)
-          out[node.id] = { url: asset.url, mimeType: asset.mimeType, kind: asset.kind }
+        if (asset?.url) {
+          out[node.id] = {
+            url: asset.url,
+            mimeType: asset.mimeType,
+            kind: asset.kind,
+            demoEvents: asset.demoEvents ?? null,
+            demoSource: asset.demoSource ?? null
+          }
+        }
       }
       return out
     }

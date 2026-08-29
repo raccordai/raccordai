@@ -225,6 +225,18 @@ export function sampleCamera(
   }
 }
 
+/**
+ * The camera as a CSS transform (preview parity — the render's zoompan and
+ * this share sampleCamera as their single source of truth, the looks-registry
+ * doctrine). Apply with `transform-origin: center` on the composition.
+ */
+export function cameraTransform(camera: { zoom: number; cx: number; cy: number }): string {
+  if (camera.zoom === 1) return 'none'
+  const tx = ((0.5 - camera.cx) * 100).toFixed(3)
+  const ty = ((0.5 - camera.cy) * 100).toFixed(3)
+  return `scale(${camera.zoom.toFixed(4)}) translate(${tx}%, ${ty}%)`
+}
+
 /** Formats a number for an ffmpeg expression (fixed, locale-proof). */
 const n = (v: number): string => v.toFixed(4)
 
@@ -362,7 +374,11 @@ export interface DemoFrameOptions {
   background?: [string, string]
 }
 
-const FRAME_DEFAULTS = { scale: 0.85, radius: 16, background: ['0xb7b6ff', '0xff9bc6'] as const }
+export const FRAME_DEFAULTS = {
+  scale: 0.85,
+  radius: 16,
+  background: ['0xb7b6ff', '0xff9bc6'] as const
+}
 
 /** Journal positions remapped onto the inset capture: p' = 0.5 + (p−0.5)·scale. */
 export function insetEvents(events: DemoEvent[], scale: number): DemoEvent[] {

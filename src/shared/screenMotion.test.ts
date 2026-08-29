@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildScreenMotionFilter,
+  cameraTransform,
   createMoveThrottle,
   cursorKeyframes,
   cursorOverlayFilter,
@@ -212,6 +213,16 @@ describe('filter builders', () => {
     expect(framed.usesCursor).toBe(true)
     expect(framed.filter).toContain('[framed][1:v]overlay')
     expect(framed.filter).toContain('[comp]zoompan=')
+  })
+})
+
+describe('cameraTransform', () => {
+  it('is identity at zoom 1 and centers the camera target otherwise', () => {
+    expect(cameraTransform({ zoom: 1, cx: 0.5, cy: 0.5 })).toBe('none')
+    // Zooming on (0.75, 0.5): the content shifts left by 25% then scales ×2.
+    expect(cameraTransform({ zoom: 2, cx: 0.75, cy: 0.5 })).toBe(
+      'scale(2.0000) translate(-25.000%, 0.000%)'
+    )
   })
 })
 

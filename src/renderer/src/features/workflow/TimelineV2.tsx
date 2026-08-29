@@ -77,6 +77,7 @@ import { invoke } from '../../lib/ipc'
 import { useDismissable } from '../../components/ui/useDismissable'
 import { useShortcut } from '../../components/ui/useShortcut'
 import { VideoThumb } from '../../components/VideoThumb'
+import { DemoCameraStage, demoCameraInfoFor, type DemoCameraInfo } from './DemoCameraPreview'
 
 /** Timeline clock formatting: tenth-of-a-second precision, never raw floats. */
 const fmt = formatSeconds
@@ -1289,6 +1290,21 @@ export function TimelineV2({
     return out
   }, [clips, engine.starts, displaySlot])
 
+  // Demo camera preview (§9): replay the automatic camera (zooms, cursor,
+  // framing) on demo-take clips with the same pure math the render bakes.
+  const demoCameraByNode = useMemo(() => {
+    const out: Record<string, DemoCameraInfo> = {}
+    for (const node of graph.nodes) {
+      const info = demoCameraInfoFor(node.params, assetMedia?.[node.id])
+      if (info) out[node.id] = info
+    }
+    return out
+  }, [graph.nodes, assetMedia])
+  const getActiveMediaTime = useCallback((): number => {
+    const el = engine.activeSlot === 'A' ? engine.videoARef.current : engine.videoBRef.current
+    return el?.currentTime ?? 0
+  }, [engine.activeSlot, engine.videoARef, engine.videoBRef])
+
   if (collapsed) {
     return (
       <div className="island flex items-center gap-3 overflow-hidden px-3 py-1.5 text-[11px]">
@@ -1345,6 +1361,8 @@ export function TimelineV2({
   }
 
   const activeClip = clips[engine.activeIdx]
+  const activeDemoInfo =
+    activeClip && !activeClip.still ? (demoCameraByNode[activeClip.node.id] ?? null) : null
   // Live approximation of the clip's baked colour look (render parity: the
   // registry declares both the ffmpeg fragment and this CSS equivalent).
   const lookFilter = activeClip ? lookCssFilter(clipLook(activeClip.node)) : 'none'
@@ -1538,22 +1556,24 @@ export function TimelineV2({
             onClick={() => (engine.playing ? engine.pause() : engine.play())}
             title={t('timeline.playPause')}
           >
-            <video
-              ref={engine.videoARef}
-              onEnded={engine.advance}
-              playsInline
-              muted={muted}
-              style={{ filter: lookFilter, ...videoFadeStyle }}
-              className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'A' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-            />
-            <video
-              ref={engine.videoBRef}
-              onEnded={engine.advance}
-              playsInline
-              muted={muted || engine.activeSlot === 'A'}
-              style={{ filter: lookFilter, ...videoFadeStyle }}
-              className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-            />
+            <DemoCameraStage info={activeDemoInfo} getMediaTime={getActiveMediaTime}>
+              <video
+                ref={engine.videoARef}
+                onEnded={engine.advance}
+                playsInline
+                muted={muted}
+                style={{ filter: lookFilter, ...videoFadeStyle }}
+                className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'A' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+              />
+              <video
+                ref={engine.videoBRef}
+                onEnded={engine.advance}
+                playsInline
+                muted={muted || engine.activeSlot === 'A'}
+                style={{ filter: lookFilter, ...videoFadeStyle }}
+                className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+              />
+            </DemoCameraStage>
             <audio ref={engine.audioRef} className="hidden" />
             <audio ref={engine.speechRef} className="hidden" />
             {/* Still slot: the image itself covers the (paused) video stack. */}
