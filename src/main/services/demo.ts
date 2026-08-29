@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -272,7 +273,7 @@ export async function startDemo(input: {
 
   const tmpDir = mkdtempSync(join(tmpdir(), 'raccord-demo-'))
   const webmPath = join(tmpDir, 'capture.webm')
-  const sessionId = `demo_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  const sessionId = `demo_${randomUUID()}`
   const session: DemoSession = {
     sessionId,
     external: input.external === true,
@@ -371,7 +372,7 @@ export function performGesture(gesture: DemoGesturePayload['gesture']): Promise<
   if (!window || window.isDestroyed()) {
     return Promise.reject(new Error('No app window to perform the gesture in.'))
   }
-  const requestId = `g_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  const requestId = `g_${randomUUID()}`
   return new Promise((resolve, reject) => {
     pendingGestures.set(requestId, {
       resolve: () => resolve({ ok: true }),
