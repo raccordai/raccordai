@@ -25,7 +25,7 @@ import {
   type TimelineEntry
 } from '@shared/timeline'
 import { xfadeNameFor } from '@shared/transitions'
-import { buildScreenMotionFilter, demoCameraEnabled } from '@shared/screenMotion'
+import { bakeTargetSize, buildScreenMotionFilter, demoCameraEnabled } from '@shared/screenMotion'
 import type { SpeechTranscript } from '@shared/speech'
 import { broadcastRenderProgress } from '../events'
 import { resolveMediaUrlToFile } from '../media/protocol'
@@ -408,7 +408,25 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     const hasAudioLane = musicTracks.length > 0 || speechTracks.length > 0
 
     // ── Probe ────────────────────────────────────────────────────────────
-    const probeSpansGuess = computeStageSpans(true, hasAudioLane)
+    // Demo bakes are known BEFORE probing (journal + markers live in the db),
+    // so the progress bar can budget them a real span up front.
+    const demoBakeKeyFor = (clip: PlannedClip, node: GraphNode): string | null => {
+      if (clip.isStill || node.modelId !== 'studio/asset') return null
+      const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+      const asset = assetId ? getAsset(assetId) : null
+      if (!asset?.demoEvents || !demoCameraEnabled(node.params, asset.demoEvents)) return null
+      // The framed look (§9) is a per-clip params marker — two nodes
+      // sharing an asset may frame differently, so the key carries it.
+      const framed = (node.params as { demoFrame?: unknown } | undefined)?.demoFrame === true
+      return `${clip.path}|${framed ? 'framed' : 'plain'}`
+    }
+    const demoBakeKeys = new Set<string>()
+    for (const [i, clip] of clips.entries()) {
+      const key = demoBakeKeyFor(clip, clipEntries[i]!.node)
+      if (key) demoBakeKeys.add(key)
+    }
+    const hasDemoBakes = demoBakeKeys.size > 0
+    const probeSpansGuess = computeStageSpans(true, hasAudioLane, { hasDemoBakes })
     progress(probeSpansGuess, 'probe', 0)
 
     // Demo camera (§9): a clip whose asset carries an input-event journal is
@@ -422,14 +440,11 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     let cursorPath: string | null = null
     let bakeIndex = 0
     const bakeDemoCamera = async (clip: PlannedClip, node: GraphNode): Promise<void> => {
-      if (node.modelId !== 'studio/asset') return
+      const bakeKey = demoBakeKeyFor(clip, node)
+      if (!bakeKey) return
       const assetId = (node.params as { assetId?: string } | undefined)?.assetId
-      const asset = assetId ? getAsset(assetId) : null
-      if (!asset?.demoEvents || !demoCameraEnabled(node.params, asset.demoEvents)) return
-      // The framed look (§9) is a per-clip params marker — two nodes
-      // sharing an asset may frame differently, so the memo key carries it.
-      const framed = (node.params as { demoFrame?: unknown } | undefined)?.demoFrame === true
-      const bakeKey = `${clip.path}|${framed ? 'framed' : 'plain'}`
+      const asset = getAsset(assetId!)!
+      const framed = bakeKey.endsWith('|framed')
       if (bakedByPath.has(bakeKey)) {
         const baked = bakedByPath.get(bakeKey)
         if (baked) clip.path = baked
@@ -442,12 +457,15 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           bakedByPath.set(bakeKey, null)
           return
         }
+        // Retina captures come in at 2× — bake at the capped size (the whole
+        // downstream pipeline inherits the baked resolution).
+        const target = bakeTargetSize(rawProbe.width, rawProbe.height)
         const { filter, usesCursor } = buildScreenMotionFilter(
-          asset.demoEvents,
+          asset.demoEvents!,
           rawProbe.durationSeconds,
           {
-            width: rawProbe.width,
-            height: rawProbe.height,
+            width: target.width,
+            height: target.height,
             fps: rawProbe.fps ?? 30,
             // Synthetic cursor unless the take was gesture-driven ('staged'):
             // the gesture engine's visible cursor is already in the pixels.
@@ -463,10 +481,21 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         }
         bakeIndex += 1
         const bakedPath = join(workDir, `demo-cam-${String(bakeIndex).padStart(2, '0')}.mp4`)
+        // Real encode progress on the 'demo' span — a bake re-encodes the
+        // whole take, easily the longest part of a demo export.
+        const done = bakeIndex - 1
+        const bakeDuration = rawProbe.durationSeconds
+        progress(probeSpansGuess, 'demo', done / demoBakeKeys.size)
         await run(
           active,
           ffmpegPath(),
-          buildDemoCameraArgs(rawPath, usesCursor ? cursorPath : null, bakedPath, filter)
+          buildDemoCameraArgs(rawPath, usesCursor ? cursorPath : null, bakedPath, filter),
+          (line) => {
+            const seconds = parseProgressLine(line)
+            if (seconds === null) return
+            const local = Math.min(1, seconds / bakeDuration)
+            progress(probeSpansGuess, 'demo', (done + local) / demoBakeKeys.size)
+          }
         )
         bakedByPath.set(bakeKey, bakedPath)
         clip.path = bakedPath
@@ -676,7 +705,8 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     const spans = computeStageSpans(!lossless, hasAudioLane, {
       hasTransitions: hasCrossfades(clips),
       hasSubtitles: hasBurnPass,
-      hasOverlays: overlays.length > 0
+      hasOverlays: overlays.length > 0,
+      hasDemoBakes
     })
 
     // ── Normalize (heterogeneous clips only) ─────────────────────────────

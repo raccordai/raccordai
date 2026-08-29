@@ -898,6 +898,7 @@
     "renderSkipped": "Slots without usable media were skipped: {{clips}}",
     "renderStep": {
       "probe": "Probing clips",
+      "demo": "Demo camera",
       "normalize": "Normalizing",
       "transition": "Blending transitions",
       "concat": "Assembling",

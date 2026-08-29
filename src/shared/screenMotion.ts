@@ -411,6 +411,24 @@ export interface FrameLayout {
 
 const even = (v: number): number => Math.max(2, Math.round(v / 2) * 2)
 
+/**
+ * The resolution the demo bake encodes at. Retina captures come in at 2× the
+ * logical size (a 1440×885 window is a 2880×1770 file) — baking at native
+ * size roughly quadruples the encode work AND locks the whole downstream
+ * render to that resolution, for a demo that ships at 1080p anyway.
+ */
+export const BAKE_MAX_HEIGHT = 1080
+
+/** Capture size for the bake: downscaled to the cap, never upscaled. */
+export function bakeTargetSize(
+  width: number,
+  height: number,
+  maxHeight = BAKE_MAX_HEIGHT
+): { width: number; height: number } {
+  if (height <= maxHeight) return { width: even(width), height: even(height) }
+  return { width: even((width * maxHeight) / height), height: even(maxHeight) }
+}
+
 export function frameLayout(
   captureW: number,
   captureH: number,

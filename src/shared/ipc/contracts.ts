@@ -2179,9 +2179,9 @@ export interface DemoGesturePayload {
 /** Progress of an MP4 render. One terminal event is always sent: done or error. */
 export interface RenderProgressPayload {
   videoId: string
-  /** 0–100 across the whole pipeline (probe → normalize → transition → concat → subtitles → overlay → mux). */
+  /** 0–100 across the whole pipeline (probe → demo → normalize → transition → concat → subtitles → overlay → mux). */
   percent: number
-  step: 'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
+  step: 'probe' | 'demo' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
   done?: boolean
   /** Set on the terminal event when the render failed (or was cancelled). */
   error?: string

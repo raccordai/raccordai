@@ -6,6 +6,7 @@ import {
   cursorKeyframes,
   cursorOverlayFilter,
   demoCameraEnabled,
+  bakeTargetSize,
   frameLayout,
   mapEventsToFrame,
   normalizeOnDisplay,
@@ -251,6 +252,13 @@ describe('cameraTransform', () => {
     expect(cameraTransform({ zoom: 2, cx: 0.75, cy: 0.5 })).toBe(
       'scale(2.0000) translate(-25.000%, 0.000%)'
     )
+  })
+})
+
+describe('bakeTargetSize', () => {
+  it('halves a Retina capture to the 1080p cap, keeps small ones untouched', () => {
+    expect(bakeTargetSize(2880, 1770)).toEqual({ width: 1758, height: 1080 })
+    expect(bakeTargetSize(1440, 885)).toEqual({ width: 1440, height: 886 })
   })
 })
 

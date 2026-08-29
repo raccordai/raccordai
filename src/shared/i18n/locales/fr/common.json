@@ -898,6 +898,7 @@
     "renderSkipped": "Plans sans média utilisable, ignorés au rendu : {{clips}}",
     "renderStep": {
       "probe": "Analyse des clips",
+      "demo": "Caméra démo",
       "normalize": "Normalisation",
       "transition": "Fondu des transitions",
       "concat": "Assemblage",

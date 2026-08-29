@@ -948,6 +948,8 @@ export function buildDemoCameraArgs(
     '-pix_fmt',
     'yuv420p',
     '-an',
+    '-progress',
+    'pipe:1',
     '-movflags',
     '+faststart',
     outputPath
@@ -1157,7 +1159,7 @@ export function parseProgressLine(line: string): number | null {
 }
 
 export type RenderStep =
-  'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
+  'probe' | 'demo' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
 
 export interface StageSpan {
   step: RenderStep
@@ -1172,11 +1174,18 @@ export interface StageSpan {
 export function computeStageSpans(
   needsNormalize: boolean,
   hasMusic: boolean,
-  extras: { hasTransitions?: boolean; hasSubtitles?: boolean; hasOverlays?: boolean } = {}
+  extras: {
+    hasTransitions?: boolean
+    hasSubtitles?: boolean
+    hasOverlays?: boolean
+    hasDemoBakes?: boolean
+  } = {}
 ): StageSpan[] {
   const weights: Array<[RenderStep, number]> = needsNormalize
     ? [
         ['probe', 4],
+        // A demo bake re-encodes each take in full — normalize-scale work.
+        ['demo', extras.hasDemoBakes ? 40 : 0],
         ['normalize', 66],
         ['transition', extras.hasTransitions ? 12 : 0],
         ['concat', 15],
@@ -1186,6 +1195,7 @@ export function computeStageSpans(
       ]
     : [
         ['probe', 10],
+        ['demo', extras.hasDemoBakes ? 40 : 0],
         ['concat', 60],
         ['subtitles', extras.hasSubtitles ? 15 : 0],
         ['overlay', extras.hasOverlays ? 15 : 0],

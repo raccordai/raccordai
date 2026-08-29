@@ -405,6 +405,18 @@ describe('progress mapping', () => {
     }
   })
 
+  it('budgets a real span for demo bakes, absent otherwise', () => {
+    for (const normalize of [true, false]) {
+      const spans = computeStageSpans(normalize, false, { hasDemoBakes: true })
+      const demo = spans.find((s) => s.step === 'demo')
+      expect(demo).toBeDefined()
+      // The bake re-encodes each take in full — it deserves a visible share.
+      expect(demo!.to - demo!.from).toBeGreaterThan(20)
+      expect(spans.at(-1)!.to).toBeCloseTo(100)
+      expect(computeStageSpans(normalize, false).some((s) => s.step === 'demo')).toBe(false)
+    }
+  })
+
   it('maps a stage-local fraction to the overall percent, clamped', () => {
     const spans = computeStageSpans(true, true)
     expect(overallPercent(spans, 'probe', 0)).toBe(0)
@@ -470,6 +482,8 @@ describe('demo camera builders', () => {
     expect(joined).toContain('-c:v libx264')
     expect(joined).toContain('-pix_fmt yuv420p')
     expect(joined).toContain('-an')
+    // Machine-readable encode progress — the render maps it onto the bar.
+    expect(joined).toContain('-progress pipe:1')
     expect(args.at(-1)).toBe('/tmp/demo-cam-01.mp4')
   })
 
