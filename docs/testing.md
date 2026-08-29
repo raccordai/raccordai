@@ -39,10 +39,19 @@ Principles:
 
 ## Test pyramid
 
-| Level | Target                                                                                                                       | Tool                                                                               |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Unit  | pure logic in `src/shared/` (models, i18n), SQLite services (`graph`, `projects`, `videos`), helpers (`media/files`, `lib/`) | Vitest                                                                             |
-| E2E   | full flows: generation + poller, assistant, IPC/MCP, `media://`, MP4 render                                                  | Playwright `_electron` + the kie.ai mock (`RACCORD_KIE_BASE`), see `e2e/README.md` |
+| Level     | Target                                                                                                                        | Tool                                                                               |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Unit      | pure logic in `src/shared/` (models, i18n), SQLite services (`graph`, `projects`, `videos`), helpers (`media/files`, `lib/`)  | Vitest                                                                             |
+| Component | renderer components with real user value in their handlers (the timeline popovers): render + interact, assert the IPC payload | Vitest + jsdom + `@testing-library/react` (per-file `@vitest-environment jsdom`)   |
+| E2E       | full flows: generation + poller, assistant, IPC/MCP, `media://`, MP4 render                                                   | Playwright `_electron` + the kie.ai mock (`RACCORD_KIE_BASE`), see `e2e/README.md` |
+
+Component tests (`src/**/*.test.tsx`) mock exactly two seams:
+`react-i18next` (t returns the key — assertions target keys, immune to copy
+changes) and the preload bridge (`tests/helpers/rendererTest.ts` installs a
+`window.api` stub), so a test drives the real component through the real typed
+`invoke()` facade and asserts the exact channel + payload main would receive.
+They stay OUT of `coverage.include` (same doctrine as the IPC wiring): they
+protect behavior, they don't gate a number.
 
 The generation engine (`runEngine.ts`, `kie.ts`), the chat (`chat.ts`), the
 render process wrapper (`render.ts`) and the IPC/MCP wiring are deliberately
