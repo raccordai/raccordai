@@ -377,14 +377,22 @@ export interface DemoFrameOptions {
 export const FRAME_DEFAULTS = {
   scale: 0.85,
   radius: 16,
-  background: ['0xb7b6ff', '0xff9bc6'] as const
+  background: ['0xb7b6ff', '0xff9bc6'] as const,
+  /** Fake macOS title bar height as a fraction of the output height. */
+  barFrac: 0.045,
+  chrome: '0x2b2b36',
+  trafficLights: ['0xff5f57', '0xfebc2e', '0x28c840'] as const
 }
 
-/** Journal positions remapped onto the inset capture: p' = 0.5 + (p−0.5)·scale. */
-export function insetEvents(events: DemoEvent[], scale: number): DemoEvent[] {
+/**
+ * Journal positions remapped onto the inset capture: p' = 0.5 + (p−0.5)·scale
+ * (+ a vertical offset when the window chrome pushes the capture down — the
+ * bar sits above it, so the capture's center is barFrac/2 below the frame's).
+ */
+export function insetEvents(events: DemoEvent[], scale: number, offsetY = 0): DemoEvent[] {
   return events.map((e) =>
     typeof e.x === 'number' && typeof e.y === 'number'
-      ? { ...e, x: 0.5 + (e.x - 0.5) * scale, y: 0.5 + (e.y - 0.5) * scale }
+      ? { ...e, x: 0.5 + (e.x - 0.5) * scale, y: 0.5 + (e.y - 0.5) * scale + offsetY }
       : e
   )
 }
@@ -396,30 +404,82 @@ function roundedAlpha(w: number, h: number, innerW: number, innerH: number, r: n
   return `255*clip(${r}+0.5-sqrt(${dx}*${dx}+${dy}*${dy}),0,1)`
 }
 
+/** Filled-circle alpha (1px anti-aliased edge) centered on a d×d surface. */
+function circleAlpha(d: number): string {
+  return `255*clip(${d / 2}-0.5-hypot(X-${d / 2},Y-${d / 2}),0,1)`
+}
+
 /**
  * The framing chain: [0:v] → [framed]. A gradient background, a blurred
- * shadow silhouette, then the rounded inset capture (`shortest=1` so the
- * composition ends with the take, not the infinite lavfi sources).
+ * shadow silhouette, then a fake macOS WINDOW — title bar with the three
+ * traffic lights above the capture, the whole thing rounded together.
+ *
+ * Performance doctrine: every STATIC element (gradient, shadow, dots, the
+ * rounding mask) is generated at 2 fps — its per-pixel geq runs 15× less —
+ * then duplicated to full rate by `fps`; the rounding itself is applied by
+ * `alphamerge` against that static mask (a plane copy per frame) instead of
+ * a per-frame geq. Every lavfi source is BOUNDED by the take's duration so
+ * the output can never outrun the capture.
  */
 function frameChain(
   opts: { width: number; height: number; fps: number },
-  frame: DemoFrameOptions
+  frame: DemoFrameOptions,
+  durationSec: number
 ): string {
   const scale = frame.scale ?? FRAME_DEFAULTS.scale
   const radius = frame.radius ?? FRAME_DEFAULTS.radius
   const [c0, c1] = frame.background ?? FRAME_DEFAULTS.background
   const even = (v: number): number => Math.max(2, Math.round(v / 2) * 2)
+  // One frame of slack so rounding never cuts the last capture frame; the
+  // final shortest=1 overlays clamp the output to the take itself.
+  const dur = Number.isFinite(durationSec) ? (durationSec + 0.05).toFixed(3) : '3600'
   const fgW = even(opts.width * scale)
   const fgH = even(opts.height * scale)
+  const barH = even(opts.height * FRAME_DEFAULTS.barFrac)
+  const winW = fgW
+  const winH = fgH + barH
+  const winX = (opts.width - winW) / 2
+  const winY = (opts.height - winH) / 2
   const pad = 80
-  const shW = fgW + pad
-  const shH = fgH + pad
+  const shW = winW + pad
+  const shH = winH + pad
+  const dot = Math.max(6, even(Math.round(barH * 0.34)))
+  const dotY = (barH - dot) / 2
+  // Static generator: cheap 2 fps geq, duplicated to the real rate.
+  const stillSrc = (src: string, chain: string): string =>
+    `${src}:r=2:d=${dur},${chain},fps=${opts.fps}`
+  const rgba = "format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)'"
+  const [red, yellow, green] = FRAME_DEFAULTS.trafficLights
+  const lights = [red, yellow, green]
+    .map(
+      (c, i) =>
+        `${stillSrc(`color=c=${c}:s=${dot}x${dot}`, `${rgba}:a='${circleAlpha(dot)}'`)}[dot${i}]`
+    )
+    .join(';')
+  const lightOverlays = [0, 1, 2]
+    .map(
+      (i) =>
+        `[w${i}][dot${i}]overlay=x=${Math.round(barH * 0.5) + i * (dot + Math.round(dot * 0.8))}:y=${dotY}[w${i + 1}]`
+    )
+    .join(';')
   return [
-    `[0:v]scale=${fgW}:${fgH},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${roundedAlpha(fgW, fgH, fgW, fgH, radius)}'[fg]`,
-    `gradients=s=${opts.width}x${opts.height}:c0=${c0}:c1=${c1}:x0=0:y0=0:x1=${opts.width}:y1=${opts.height}:r=${opts.fps}[bg]`,
-    `color=c=black:s=${shW}x${shH}:r=${opts.fps},format=rgba,geq=r=0:g=0:b=0:a='${roundedAlpha(shW, shH, fgW, fgH, radius + 4)}',boxblur=0:0:0:0:18:2,colorchannelmixer=aa=0.45[sh]`,
+    `[0:v]scale=${fgW}:${fgH}[cap]`,
+    // The window: chrome-colored canvas, capture below the bar, dots on top.
+    `color=c=${FRAME_DEFAULTS.chrome}:s=${winW}x${winH}:r=${opts.fps}:d=${dur}[winbase]`,
+    `[winbase][cap]overlay=x=0:y=${barH}:shortest=1[w0]`,
+    lights,
+    lightOverlays,
+    // Rounded as one via a STATIC mask + alphamerge (never a per-frame geq).
+    `${stillSrc(`color=c=white:s=${winW}x${winH}`, `format=gray,geq=lum='${roundedAlpha(winW, winH, winW, winH, radius)}'`)}[mask]`,
+    `[w3]format=rgba[w3f]`,
+    `[w3f][mask]alphamerge[win]`,
+    `${stillSrc(`gradients=s=${opts.width}x${opts.height}:c0=${c0}:c1=${c1}:x0=0:y0=0:x1=${opts.width}:y1=${opts.height}`, 'null')}[bg]`,
+    `${stillSrc(`color=c=black:s=${shW}x${shH}`, `format=rgba,geq=r=0:g=0:b=0:a='${roundedAlpha(shW, shH, winW, winH, radius + 4)}',boxblur=0:0:0:0:18:2,colorchannelmixer=aa=0.45`)}[sh]`,
     `[bg][sh]overlay=x=${(opts.width - shW) / 2}:y=${(opts.height - shH) / 2 + 10}[b1]`,
-    `[b1][fg]overlay=x=${(opts.width - fgW) / 2}:y=${(opts.height - fgH) / 2}:shortest=1[framed]`
+    // trim bounds the composition DETERMINISTICALLY: lavfi frame durations
+    // (2 fps stills) otherwise pad the tail past the take via repeatlast.
+    `[b1][win]overlay=x=${winX}:y=${winY}:shortest=1[fr0]`,
+    `[fr0]trim=end=${Number.isFinite(durationSec) ? durationSec.toFixed(3) : '3600'},setpts=PTS-STARTPTS[framed]`
   ].join(';')
 }
 
@@ -441,13 +501,17 @@ export function buildScreenMotionFilter(
     frame?: DemoFrameOptions
   } & ScreenMotionOptions
 ): { filter: string; usesCursor: boolean } {
-  const mapped = opts.frame ? insetEvents(events, opts.frame.scale ?? FRAME_DEFAULTS.scale) : events
+  const mapped = opts.frame
+    ? insetEvents(events, opts.frame.scale ?? FRAME_DEFAULTS.scale, FRAME_DEFAULTS.barFrac / 2)
+    : events
   const segments = planZoomSegments(mapped, durationSec, opts)
   const zoom = zoompanFilter(segments, opts)
   const cursor = opts.cursor === false ? null : cursorOverlayFilter(cursorKeyframes(mapped))
-  const base = opts.frame ? `${frameChain(opts, opts.frame)};[framed]` : '[0:v]'
+  const base = opts.frame ? `${frameChain(opts, opts.frame, durationSec)};[framed]` : '[0:v]'
   if (cursor) {
-    const cursorIn = opts.frame ? `${frameChain(opts, opts.frame)};[framed][1:v]` : '[0:v][1:v]'
+    const cursorIn = opts.frame
+      ? `${frameChain(opts, opts.frame, durationSec)};[framed][1:v]`
+      : '[0:v][1:v]'
     return { filter: `${cursorIn}${cursor}[comp];[comp]${zoom}[out]`, usesCursor: true }
   }
   return { filter: `${base}${zoom}[out]`, usesCursor: false }

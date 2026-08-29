@@ -39,7 +39,9 @@ export function demoCameraInfoFor(
 ): DemoCameraInfo | null {
   if (!media || media.kind !== 'video' || !demoCameraEnabled(params, media.demoEvents)) return null
   const framed = (params as { demoFrame?: unknown } | undefined)?.demoFrame === true
-  const events = framed ? insetEvents(media.demoEvents!, FRAME_DEFAULTS.scale) : media.demoEvents!
+  const events = framed
+    ? insetEvents(media.demoEvents!, FRAME_DEFAULTS.scale, FRAME_DEFAULTS.barFrac / 2)
+    : media.demoEvents!
   return {
     // The take's own length already bounds the journal — no cap needed here.
     segments: planZoomSegments(events, Number.POSITIVE_INFINITY),
@@ -50,9 +52,17 @@ export function demoCameraInfoFor(
   }
 }
 
-const inset = `${((1 - FRAME_DEFAULTS.scale) / 2) * 100}%`
-const insetSize = `${FRAME_DEFAULTS.scale * 100}%`
+// Window geometry — same fractions as the ffmpeg frameChain: a chrome bar of
+// barFrac sits ABOVE the scale-sized capture, the whole window centered.
+const winHFrac = FRAME_DEFAULTS.scale + FRAME_DEFAULTS.barFrac
+const winTop = `${((1 - winHFrac) / 2) * 100}%`
+const winLeft = `${((1 - FRAME_DEFAULTS.scale) / 2) * 100}%`
+const winWidth = `${FRAME_DEFAULTS.scale * 100}%`
+const winHeight = `${winHFrac * 100}%`
+const barHeight = `${(FRAME_DEFAULTS.barFrac / winHFrac) * 100}%`
 const gradient = `linear-gradient(135deg, ${FRAME_DEFAULTS.background[0].replace('0x', '#')}, ${FRAME_DEFAULTS.background[1].replace('0x', '#')})`
+const chrome = FRAME_DEFAULTS.chrome.replace('0x', '#')
+const trafficLights = FRAME_DEFAULTS.trafficLights.map((c) => c.replace('0x', '#'))
 
 /**
  * Wraps the player's media stack; `getMediaTime` reads the active video's
@@ -108,17 +118,31 @@ export function DemoCameraStage({
         <>
           <div className="absolute inset-0" style={{ background: gradient }} />
           <div
-            className="absolute overflow-hidden"
+            className="absolute flex flex-col overflow-hidden"
             style={{
-              left: inset,
-              top: inset,
-              width: insetSize,
-              height: insetSize,
+              left: winLeft,
+              top: winTop,
+              width: winWidth,
+              height: winHeight,
               borderRadius: 12,
-              boxShadow: '0 16px 44px rgba(0,0,0,0.45)'
+              boxShadow: '0 16px 44px rgba(0,0,0,0.45)',
+              background: chrome
             }}
           >
-            {children}
+            {/* Fake macOS chrome: title bar + traffic lights, like the render's. */}
+            <div
+              className="flex flex-shrink-0 items-center gap-[6px] pl-3"
+              style={{ height: barHeight, background: chrome }}
+            >
+              {trafficLights.map((color) => (
+                <span
+                  key={color}
+                  className="rounded-full"
+                  style={{ width: 9, height: 9, background: color }}
+                />
+              ))}
+            </div>
+            <div className="relative min-h-0 flex-1">{children}</div>
           </div>
         </>
       ) : (

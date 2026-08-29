@@ -201,14 +201,22 @@ describe('filter builders', () => {
     expect(screenTake.filter).not.toContain('overlay')
   })
 
-  it('frame composes the framed look and remaps the journal onto the inset', () => {
+  it('frame composes the mac-window look and remaps the journal onto the inset', () => {
     const framed = buildScreenMotionFilter([click(5, 1, 1)], 20, { ...opts, frame: {} })
-    // Gradient background + shadow + rounded inset, ended by the capture.
+    // Gradient background + shadow + a chromed window, ended by the capture.
     expect(framed.filter).toContain('gradients=s=1280x720:c0=0xb7b6ff:c1=0xff9bc6')
     expect(framed.filter).toContain('boxblur=0:0:0:0:18:2')
     expect(framed.filter).toContain('shortest=1[framed]')
     // 1280×0.85 = 1088 even, 720×0.85 = 612 even.
-    expect(framed.filter).toContain('[0:v]scale=1088:612')
+    expect(framed.filter).toContain('[0:v]scale=1088:612[cap]')
+    // The fake macOS chrome: title bar canvas + the three traffic lights.
+    expect(framed.filter).toContain(`color=c=0x2b2b36:s=1088x`)
+    expect(framed.filter).toContain('color=c=0xff5f57')
+    expect(framed.filter).toContain('color=c=0xfebc2e')
+    expect(framed.filter).toContain('color=c=0x28c840')
+    // Rounding via a static mask (perf doctrine), sources bounded by the take.
+    expect(framed.filter).toContain('alphamerge')
+    expect(framed.filter).toContain(':r=2:d=20.050,')
     // The cursor rides the framed composition, then the camera zooms it all.
     expect(framed.usesCursor).toBe(true)
     expect(framed.filter).toContain('[framed][1:v]overlay')
@@ -232,5 +240,10 @@ describe('insetEvents', () => {
     expect(corner!.x).toBeCloseTo(0.9)
     expect(corner!.y).toBeCloseTo(0.1)
     expect(key).toEqual({ t: 2, type: 'key' })
+  })
+
+  it('shifts vertically by the chrome-bar offset', () => {
+    const [center] = insetEvents([click(1, 0.5, 0.5)], 0.8, 0.02)
+    expect(center!.y).toBeCloseTo(0.52)
   })
 })
