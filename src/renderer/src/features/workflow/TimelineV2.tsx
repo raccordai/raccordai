@@ -1304,6 +1304,10 @@ export function TimelineV2({
     const el = engine.activeSlot === 'A' ? engine.videoARef.current : engine.videoBRef.current
     return el?.currentTime ?? 0
   }, [engine.activeSlot, engine.videoARef, engine.videoBRef])
+  const getActiveMediaSize = useCallback((): { width: number; height: number } | null => {
+    const el = engine.activeSlot === 'A' ? engine.videoARef.current : engine.videoBRef.current
+    return el && el.videoWidth > 0 ? { width: el.videoWidth, height: el.videoHeight } : null
+  }, [engine.activeSlot, engine.videoARef, engine.videoBRef])
 
   if (collapsed) {
     return (
@@ -1556,7 +1560,11 @@ export function TimelineV2({
             onClick={() => (engine.playing ? engine.pause() : engine.play())}
             title={t('timeline.playPause')}
           >
-            <DemoCameraStage info={activeDemoInfo} getMediaTime={getActiveMediaTime}>
+            <DemoCameraStage
+              info={activeDemoInfo}
+              getMediaTime={getActiveMediaTime}
+              getMediaSize={getActiveMediaSize}
+            >
               <video
                 ref={engine.videoARef}
                 onEnded={engine.advance}

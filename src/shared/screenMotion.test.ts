@@ -6,7 +6,8 @@ import {
   cursorKeyframes,
   cursorOverlayFilter,
   demoCameraEnabled,
-  insetEvents,
+  frameLayout,
+  mapEventsToFrame,
   normalizeOnDisplay,
   planZoomSegments,
   sampleCamera,
@@ -223,6 +224,23 @@ describe('filter builders', () => {
     expect(framed.usesCursor).toBe(true)
     expect(framed.filter).toContain('[framed][1:v]overlay')
     expect(framed.filter).toContain('[comp]zoompan=')
+    // The capture IS 16:9 → the canvas equals it.
+    expect(framed.filter).toContain('s=1280x720:fps=30[out]')
+  })
+
+  it('frames a non-16:9 capture on a 16:9 canvas at its true aspect', () => {
+    // A 1440×900 window capture (16:10): the old behavior kept that aspect
+    // for the whole output — players pillarboxed it on every 16:9 screen.
+    const framed = buildScreenMotionFilter([click(5, 1, 1)], 20, {
+      ...opts,
+      width: 1440,
+      height: 900,
+      frame: {}
+    })
+    // Canvas widened to 16:9; window fitted by height, capture undistorted.
+    expect(framed.filter).toContain('gradients=s=1600x900:c0=0xb7b6ff')
+    expect(framed.filter).toContain('[0:v]scale=1226:766[cap]')
+    expect(framed.filter).toContain('s=1600x900:fps=30[out]')
   })
 })
 
@@ -236,16 +254,33 @@ describe('cameraTransform', () => {
   })
 })
 
-describe('insetEvents', () => {
-  it('remaps positions toward the center by the inset scale, leaves keys alone', () => {
-    const [corner, key] = insetEvents([click(1, 1, 0), { t: 2, type: 'key' }], 0.8) as DemoEvent[]
-    expect(corner!.x).toBeCloseTo(0.9)
-    expect(corner!.y).toBeCloseTo(0.1)
-    expect(key).toEqual({ t: 2, type: 'key' })
+describe('frameLayout / mapEventsToFrame', () => {
+  it('keeps a 16:9 capture on an equal canvas with the historical fractions', () => {
+    const layout = frameLayout(1280, 720)
+    expect(layout).toMatchObject({ canvasW: 1280, canvasH: 720, fgW: 1088, fgH: 612, barH: 32 })
+    expect(layout.sx).toBeCloseTo(0.85)
+    expect(layout.sy).toBeCloseTo(0.85)
   })
 
-  it('shifts vertically by the chrome-bar offset', () => {
-    const [center] = insetEvents([click(1, 0.5, 0.5)], 0.8, 0.02)
-    expect(center!.y).toBeCloseTo(0.52)
+  it('widens the canvas to 16:9 around a narrower capture, preserving its aspect', () => {
+    const layout = frameLayout(1440, 900)
+    expect(layout.canvasW / layout.canvasH).toBeCloseTo(16 / 9, 2)
+    expect(layout.fgW / layout.fgH).toBeCloseTo(1440 / 900, 2)
+    // Fitted by height: the gradient absorbs the extra width.
+    expect(layout.sy).toBeCloseTo(0.85, 2)
+    expect(layout.sx).toBeLessThan(0.8)
+  })
+
+  it('remaps journal positions onto the window, keys untouched', () => {
+    const layout = frameLayout(1280, 720)
+    const [corner, center, key] = mapEventsToFrame(
+      [click(1, 1, 0), click(2, 0.5, 0.5), { t: 3, type: 'key' }],
+      layout
+    ) as DemoEvent[]
+    expect(corner!.x).toBeCloseTo(0.925)
+    expect(corner!.y).toBeCloseTo(0.5 - 0.425 + layout.offsetY)
+    // The window's center sits half a bar below the canvas center.
+    expect(center!.y).toBeCloseTo(0.5 + layout.barH / (2 * 720))
+    expect(key).toEqual({ t: 3, type: 'key' })
   })
 })

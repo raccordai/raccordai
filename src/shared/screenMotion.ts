@@ -385,14 +385,73 @@ export const FRAME_DEFAULTS = {
 }
 
 /**
- * Journal positions remapped onto the inset capture: p' = 0.5 + (p−0.5)·scale
- * (+ a vertical offset when the window chrome pushes the capture down — the
- * bar sits above it, so the capture's center is barFrac/2 below the frame's).
+ * Geometry of a framed take: the composition always renders on a 16:9 CANVAS
+ * (so the final video fits screens — the capture's own aspect ratio would
+ * pillarbox in every player), with the mac-style window holding the capture
+ * at its TRUE aspect, centered, the gradient absorbing the difference.
  */
-export function insetEvents(events: DemoEvent[], scale: number, offsetY = 0): DemoEvent[] {
+export interface FrameLayout {
+  canvasW: number
+  canvasH: number
+  /** Capture size inside the window (true capture aspect, no distortion). */
+  fgW: number
+  fgH: number
+  barH: number
+  /** Window box (bar + capture) as fractions of the canvas. */
+  winWFrac: number
+  winHFrac: number
+  /** The bar's share of the window's height (CSS preview). */
+  barInWinFrac: number
+  /** Journal remap factors: capture fraction of the canvas per axis. */
+  sx: number
+  sy: number
+  /** Vertical shift of the capture's center (the bar sits above it). */
+  offsetY: number
+}
+
+const even = (v: number): number => Math.max(2, Math.round(v / 2) * 2)
+
+export function frameLayout(
+  captureW: number,
+  captureH: number,
+  frame: DemoFrameOptions = {}
+): FrameLayout {
+  const scale = frame.scale ?? FRAME_DEFAULTS.scale
+  const capAspect = captureW / captureH
+  const wide = capAspect >= 16 / 9
+  const canvasW = wide ? even(captureW) : even((captureH * 16) / 9)
+  const canvasH = wide ? even((captureW * 9) / 16) : even(captureH)
+  const barH = even(canvasH * FRAME_DEFAULTS.barFrac)
+  let fgH = even(canvasH * scale)
+  let fgW = even(fgH * capAspect)
+  if (fgW > canvasW * 0.95) {
+    fgW = even(canvasW * scale)
+    fgH = even(fgW / capAspect)
+  }
+  return {
+    canvasW,
+    canvasH,
+    fgW,
+    fgH,
+    barH,
+    winWFrac: fgW / canvasW,
+    winHFrac: (fgH + barH) / canvasH,
+    barInWinFrac: barH / (fgH + barH),
+    sx: fgW / canvasW,
+    sy: fgH / canvasH,
+    offsetY: barH / (2 * canvasH)
+  }
+}
+
+/** Journal positions remapped onto the framed composition. */
+export function mapEventsToFrame(events: DemoEvent[], layout: FrameLayout): DemoEvent[] {
   return events.map((e) =>
     typeof e.x === 'number' && typeof e.y === 'number'
-      ? { ...e, x: 0.5 + (e.x - 0.5) * scale, y: 0.5 + (e.y - 0.5) * scale + offsetY }
+      ? {
+          ...e,
+          x: 0.5 + (e.x - 0.5) * layout.sx,
+          y: 0.5 + (e.y - 0.5) * layout.sy + layout.offsetY
+        }
       : e
   )
 }
@@ -422,32 +481,28 @@ function circleAlpha(d: number): string {
  * the output can never outrun the capture.
  */
 function frameChain(
-  opts: { width: number; height: number; fps: number },
+  fps: number,
   frame: DemoFrameOptions,
-  durationSec: number
+  durationSec: number,
+  layout: FrameLayout
 ): string {
-  const scale = frame.scale ?? FRAME_DEFAULTS.scale
   const radius = frame.radius ?? FRAME_DEFAULTS.radius
   const [c0, c1] = frame.background ?? FRAME_DEFAULTS.background
-  const even = (v: number): number => Math.max(2, Math.round(v / 2) * 2)
   // One frame of slack so rounding never cuts the last capture frame; the
   // final shortest=1 overlays clamp the output to the take itself.
   const dur = Number.isFinite(durationSec) ? (durationSec + 0.05).toFixed(3) : '3600'
-  const fgW = even(opts.width * scale)
-  const fgH = even(opts.height * scale)
-  const barH = even(opts.height * FRAME_DEFAULTS.barFrac)
+  const { canvasW, canvasH, fgW, fgH, barH } = layout
   const winW = fgW
   const winH = fgH + barH
-  const winX = (opts.width - winW) / 2
-  const winY = (opts.height - winH) / 2
+  const winX = (canvasW - winW) / 2
+  const winY = (canvasH - winH) / 2
   const pad = 80
   const shW = winW + pad
   const shH = winH + pad
   const dot = Math.max(6, even(Math.round(barH * 0.34)))
   const dotY = (barH - dot) / 2
   // Static generator: cheap 2 fps geq, duplicated to the real rate.
-  const stillSrc = (src: string, chain: string): string =>
-    `${src}:r=2:d=${dur},${chain},fps=${opts.fps}`
+  const stillSrc = (src: string, chain: string): string => `${src}:r=2:d=${dur},${chain},fps=${fps}`
   const rgba = "format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)'"
   const [red, yellow, green] = FRAME_DEFAULTS.trafficLights
   const lights = [red, yellow, green]
@@ -465,7 +520,7 @@ function frameChain(
   return [
     `[0:v]scale=${fgW}:${fgH}[cap]`,
     // The window: chrome-colored canvas, capture below the bar, dots on top.
-    `color=c=${FRAME_DEFAULTS.chrome}:s=${winW}x${winH}:r=${opts.fps}:d=${dur}[winbase]`,
+    `color=c=${FRAME_DEFAULTS.chrome}:s=${winW}x${winH}:r=${fps}:d=${dur}[winbase]`,
     `[winbase][cap]overlay=x=0:y=${barH}:shortest=1[w0]`,
     lights,
     lightOverlays,
@@ -473,9 +528,9 @@ function frameChain(
     `${stillSrc(`color=c=white:s=${winW}x${winH}`, `format=gray,geq=lum='${roundedAlpha(winW, winH, winW, winH, radius)}'`)}[mask]`,
     `[w3]format=rgba[w3f]`,
     `[w3f][mask]alphamerge[win]`,
-    `${stillSrc(`gradients=s=${opts.width}x${opts.height}:c0=${c0}:c1=${c1}:x0=0:y0=0:x1=${opts.width}:y1=${opts.height}`, 'null')}[bg]`,
+    `${stillSrc(`gradients=s=${canvasW}x${canvasH}:c0=${c0}:c1=${c1}:x0=0:y0=0:x1=${canvasW}:y1=${canvasH}`, 'null')}[bg]`,
     `${stillSrc(`color=c=black:s=${shW}x${shH}`, `format=rgba,geq=r=0:g=0:b=0:a='${roundedAlpha(shW, shH, winW, winH, radius + 4)}',boxblur=0:0:0:0:18:2,colorchannelmixer=aa=0.45`)}[sh]`,
-    `[bg][sh]overlay=x=${(opts.width - shW) / 2}:y=${(opts.height - shH) / 2 + 10}[b1]`,
+    `[bg][sh]overlay=x=${(canvasW - shW) / 2}:y=${(canvasH - shH) / 2 + 10}[b1]`,
     // trim bounds the composition DETERMINISTICALLY: lavfi frame durations
     // (2 fps stills) otherwise pad the tail past the take via repeatlast.
     `[b1][win]overlay=x=${winX}:y=${winY}:shortest=1[fr0]`,
@@ -501,18 +556,23 @@ export function buildScreenMotionFilter(
     frame?: DemoFrameOptions
   } & ScreenMotionOptions
 ): { filter: string; usesCursor: boolean } {
-  const mapped = opts.frame
-    ? insetEvents(events, opts.frame.scale ?? FRAME_DEFAULTS.scale, FRAME_DEFAULTS.barFrac / 2)
-    : events
+  const layout = opts.frame ? frameLayout(opts.width, opts.height, opts.frame) : null
+  const mapped = layout ? mapEventsToFrame(events, layout) : events
   const segments = planZoomSegments(mapped, durationSec, opts)
-  const zoom = zoompanFilter(segments, opts)
+  const zoom = zoompanFilter(segments, {
+    width: layout ? layout.canvasW : opts.width,
+    height: layout ? layout.canvasH : opts.height,
+    fps: opts.fps
+  })
   const cursor = opts.cursor === false ? null : cursorOverlayFilter(cursorKeyframes(mapped))
-  const base = opts.frame ? `${frameChain(opts, opts.frame, durationSec)};[framed]` : '[0:v]'
+  const framed =
+    layout && opts.frame ? `${frameChain(opts.fps, opts.frame, durationSec, layout)};` : ''
+  const head = framed ? '[framed]' : '[0:v]'
   if (cursor) {
-    const cursorIn = opts.frame
-      ? `${frameChain(opts, opts.frame, durationSec)};[framed][1:v]`
-      : '[0:v][1:v]'
-    return { filter: `${cursorIn}${cursor}[comp];[comp]${zoom}[out]`, usesCursor: true }
+    return {
+      filter: `${framed}${head}[1:v]${cursor}[comp];[comp]${zoom}[out]`,
+      usesCursor: true
+    }
   }
-  return { filter: `${base}${zoom}[out]`, usesCursor: false }
+  return { filter: `${framed}${head}${zoom}[out]`, usesCursor: false }
 }
