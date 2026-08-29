@@ -206,7 +206,9 @@ describe('filter builders', () => {
     // Gradient background + shadow + a chromed window, ended by the capture.
     expect(framed.filter).toContain('gradients=s=1280x720:c0=0xb7b6ff:c1=0xff9bc6')
     expect(framed.filter).toContain('boxblur=0:0:0:0:18:2')
-    expect(framed.filter).toContain('shortest=1[framed]')
+    // The composition ends WITH the take: shortest overlays + a hard trim.
+    expect(framed.filter).toContain('shortest=1[fr0]')
+    expect(framed.filter).toContain('trim=end=20.000,setpts=PTS-STARTPTS[framed]')
     // 1280×0.85 = 1088 even, 720×0.85 = 612 even.
     expect(framed.filter).toContain('[0:v]scale=1088:612[cap]')
     // The fake macOS chrome: title bar canvas + the three traffic lights.
