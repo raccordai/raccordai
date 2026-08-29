@@ -187,19 +187,20 @@ describe('filter builders', () => {
   it('assembles the full chain, cursor first so it rides the zoom', () => {
     const withCursor = buildScreenMotionFilter([click(5)], 20, opts)
     expect(withCursor.usesCursor).toBe(true)
-    expect(withCursor.filter).toMatch(/^\[0:v\]\[1:v\]overlay=/)
+    // The capture is resampled to CFR on the way IN (never after zoompan).
+    expect(withCursor.filter).toMatch(/^\[0:v\]fps=30\[src\];\[src\]\[1:v\]overlay=/)
     expect(withCursor.filter).toContain('[comp];[comp]zoompan=')
     expect(withCursor.filter.endsWith('[out]')).toBe(true)
 
     const bare = buildScreenMotionFilter([{ t: 1, type: 'key' }], 20, opts)
     expect(bare.usesCursor).toBe(false)
-    expect(bare.filter).toMatch(/^\[0:v\]zoompan=/)
+    expect(bare.filter).toMatch(/^\[0:v\]fps=30\[src\];\[src\]zoompan=/)
   })
 
   it('cursor: false skips the synthetic cursor even with positioned events', () => {
     const screenTake = buildScreenMotionFilter([click(5)], 20, { ...opts, cursor: false })
     expect(screenTake.usesCursor).toBe(false)
-    expect(screenTake.filter).toMatch(/^\[0:v\]zoompan=/)
+    expect(screenTake.filter).toMatch(/^\[0:v\]fps=30\[src\];\[src\]zoompan=/)
     expect(screenTake.filter).not.toContain('overlay')
   })
 

@@ -614,7 +614,14 @@ export function buildScreenMotionFilter(
   const cursor = opts.cursor === false ? null : cursorOverlayFilter(cursorKeyframes(mapped))
   const framed =
     layout && opts.frame ? `${frameChain(opts.fps, opts.frame, durationSec, layout)};` : ''
-  const head = framed ? '[framed]' : '[0:v]'
+  // The bake must come out at a clean constant frame rate whatever the
+  // capture's timing (a take that predates the transcode's CFR resample
+  // carries MediaRecorder's millisecond VFR timestamps — players report
+  // those as ~1000 fps). The framed path is CFR by construction (the looped
+  // backdrop is the overlay's MAIN input); the plain path resamples the
+  // capture on the way IN — never after zoompan, whose re-timed output
+  // makes a trailing fps filter pad thousands of duplicate frames.
+  const head = framed ? '[framed]' : `[0:v]fps=${opts.fps}[src];[src]`
   if (cursor) {
     return {
       filter: `${framed}${head}[1:v]${cursor}[comp];[comp]${zoom}[out]`,

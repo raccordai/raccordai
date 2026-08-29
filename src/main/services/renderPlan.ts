@@ -875,8 +875,12 @@ export function buildDemoTranscodeArgs(webmPath: string, mp4Path: string): strin
     '-nostdin',
     '-i',
     webmPath,
+    // MediaRecorder webm carries millisecond timestamps with NO declared
+    // frame rate (players read that as ~1000 fps): resample to a clean CFR
+    // matching the recorder's requested rate. 1:1 in time — the journal's
+    // wall-clock timestamps are untouched.
     '-vf',
-    'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+    'scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=30',
     '-c:v',
     'libx264',
     '-preset',
