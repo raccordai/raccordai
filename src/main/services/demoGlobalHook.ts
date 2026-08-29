@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { systemPreferences } from 'electron'
+import { screen, systemPreferences } from 'electron'
 import type { DemoEvent } from '@shared/screenMotion'
 import { createMoveThrottle, normalizeOnDisplay } from '@shared/screenMotion'
 import { logInfo, logWarn } from './logger'
@@ -77,8 +77,40 @@ export function startGlobalJournal(
   const events: DemoEvent[] = []
   const throttle = createMoveThrottle()
   const nowSec = (): number => Date.now() / 1000
+
+  // uiohook coordinate space varies (points on some macOS builds, PHYSICAL
+  // pixels on Retina with others — every event would then land "outside the
+  // bounds" and the journal would come back empty). Calibrate against
+  // Electron's own cursor position (always DIPs) on the first mouse moves:
+  // pick the divisor that best matches, lock it after two consistent samples.
+  let scale: number | null = null
+  let candidate: number | null = null
+  const calibrate = (e: { x: number; y: number }): void => {
+    const cursor = screen.getCursorScreenPoint()
+    const ratios = [1, 2, 3]
+    let best = 1
+    let bestErr = Infinity
+    for (const r of ratios) {
+      const err = Math.abs(e.x / r - cursor.x) + Math.abs(e.y / r - cursor.y)
+      if (err < bestErr) {
+        bestErr = err
+        best = r
+      }
+    }
+    if (candidate === best) {
+      scale = best
+      logInfo('demo', `global journal coordinate scale locked at 1/${best}`)
+    } else {
+      candidate = best
+    }
+  }
+
   const positioned = (type: DemoEvent['type'], e: { x: number; y: number }): void => {
-    const point = normalizeOnDisplay(e.x, e.y, getBounds())
+    if (scale === null) {
+      calibrate(e)
+      if (scale === null) return
+    }
+    const point = normalizeOnDisplay(e.x / scale, e.y / scale, getBounds())
     if (!point) return
     const event: DemoEvent = { t: nowSec(), type, x: point.x, y: point.y }
     if (type === 'move') {

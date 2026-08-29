@@ -943,18 +943,33 @@ export const ipcContracts = {
       /**
        * What to film. 'window' (the default) films Raccord's OWN window —
        * frame capture: pixel-exact content, other windows never in the take,
-       * no Screen Recording prompt. 'display' films a whole screen (any
-       * third-party app fullscreen). Both share the same journal: the global
-       * hook normalized against the live capture area (macOS: Accessibility
-       * required, missing ⇒ warning, no auto camera).
+       * no Screen Recording prompt. 'app' films ONE third-party window
+       * (macOS: bounds via System Events — Accessibility + a one-time
+       * "control System Events" consent). 'display' films a whole screen.
+       * All targets share the same journal: the global hook normalized
+       * against the live capture area (Accessibility required, missing ⇒
+       * warning, no auto camera).
        */
-      target: z.enum(['window', 'display']).optional(),
+      target: z.enum(['window', 'display', 'app']).optional(),
+      /** Application to film in 'app' mode (fuzzy process-name match; demo:listWindows lists them). Implies target 'app'. */
+      app: z.string().optional(),
       /** Display to record in 'display' mode (demo:listDisplays; default: Raccord's). Implies target 'display'. */
       displayId: z.number().int().optional(),
       /** Driver mode: no broadcast, no hook — the caller streams media and events itself. */
       external: z.boolean().optional()
     }),
     output: z.object({ sessionId: z.string() })
+  },
+  /** Every visible window of every app (macOS) — pick one for an 'app' demo take. */
+  'demo:listWindows': {
+    input: z.void(),
+    output: z.array(
+      z.object({
+        app: z.string(),
+        title: z.string(),
+        bounds: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+      })
+    )
   },
   /** The machine's displays — pick one for a 'screen' demo take. */
   'demo:listDisplays': {

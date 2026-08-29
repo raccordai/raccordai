@@ -74,8 +74,28 @@ function createWindow(): void {
   // macOS Screen Recording prompt on first use, by design.
   window.webContents.session.setDisplayMediaRequestHandler(
     (request, callback) => {
+      const appTitle = demoService.pendingAppWindowTitle()
+      if (appTitle !== null) {
+        // 'app' take: ONE third-party window (title matched fuzzily — window
+        // sources are titled by the window, not the app).
+        desktopCapturer
+          .getSources({ types: ['window'], fetchWindowIcons: false })
+          .then((sources) => {
+            const wanted = appTitle.toLowerCase()
+            const match =
+              sources.find((s) => s.name === appTitle) ??
+              sources.find((s) => s.name.toLowerCase().includes(wanted)) ??
+              sources.find((s) => wanted.includes(s.name.toLowerCase()) && s.name.length > 3) ??
+              null
+            callback(match ? { video: match } : {})
+          })
+          .catch(() => callback({}))
+        return
+      }
       const displayId = demoService.pendingScreenCaptureDisplayId()
       if (displayId === null) {
+        // 'window' take (or no session): Raccord's own frame — pixel-exact
+        // content, no picker, no Screen Recording prompt.
         callback(request.frame ? { video: request.frame } : {})
         return
       }

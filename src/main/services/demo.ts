@@ -11,6 +11,7 @@ import { broadcastDemoControl } from '../events'
 import { buildDemoTranscodeArgs } from './renderPlan'
 import { importAssetFromBytes, setAssetDemoEvents } from './assets'
 import { startGlobalJournal, stopGlobalJournal } from './demoGlobalHook'
+import { frontWindowBounds, listDemoWindows } from './demoWindows'
 import { logError, logInfo } from './logger'
 
 /**
@@ -60,10 +61,16 @@ interface DemoSession {
   projectId: string | null
   /**
    * 'window' films Raccord's own window (frame capture — pixel-exact content,
-   * no Screen Recording prompt, other windows never in the take); 'display'
-   * films a whole screen (any third-party app).
+   * no Screen Recording prompt, other windows never in the take); 'app'
+   * films ONE third-party window (desktopCapturer window source + System
+   * Events bounds polling); 'display' films a whole screen.
    */
-  target: 'window' | 'display'
+  target: 'window' | 'display' | 'app'
+  /** target 'app': the demoed application's process name + its polled window state. */
+  appName: string | null
+  appWindowTitle: string | null
+  appBounds: Electron.Rectangle | null
+  appPoll: NodeJS.Timeout | null
   displayId: number
   displayBounds: Electron.Rectangle
   hookRunning: boolean
@@ -129,9 +136,13 @@ function closeRecTray(): void {
   recTray = null
 }
 
-/** Drops the REC pill, the hook and the throttling opt-out — safe to call twice. */
+/** Drops the REC tray, the hook, the app poll and the throttling opt-out — safe to call twice. */
 function releaseCapture(session: DemoSession): void {
   closeRecTray()
+  if (session.appPoll) {
+    clearInterval(session.appPoll)
+    session.appPoll = null
+  }
   if (session.hookRunning) {
     stopGlobalJournal()
     session.hookRunning = false
@@ -174,11 +185,19 @@ export function listDemoDisplays(): Array<{
 /**
  * The display the ACTIVE session captures — consulted by the display-media
  * handler in main/index.ts to answer getDisplayMedia with the right screen
- * source. Null for window takes (the handler then answers `request.frame`,
- * i.e. Raccord's own content) and when no live capture is expected.
+ * source. Null for window/app takes and when no live capture is expected.
  */
 export function pendingScreenCaptureDisplayId(): number | null {
   return active && !active.external && active.target === 'display' ? active.displayId : null
+}
+
+/**
+ * The third-party WINDOW title the ACTIVE session captures — the display-media
+ * handler matches it against desktopCapturer window sources. Null outside an
+ * 'app' take (the handler then falls back per pendingScreenCaptureDisplayId).
+ */
+export function pendingAppWindowTitle(): string | null {
+  return active && !active.external && active.target === 'app' ? active.appWindowTitle : null
 }
 
 /** The capture area the journal normalizes against — live, so a window take follows its window. */
@@ -187,25 +206,50 @@ function captureBounds(session: DemoSession): Electron.Rectangle {
     const window = mainWindow()
     if (window && !window.isDestroyed()) return window.getContentBounds()
   }
+  if (session.target === 'app' && session.appBounds) return session.appBounds
   return session.displayBounds
 }
 
-export function startDemo(input: {
+export async function startDemo(input: {
   projectId?: string
-  target?: 'window' | 'display'
+  target?: 'window' | 'display' | 'app'
+  app?: string
   displayId?: number
   external?: boolean
-}): {
+}): Promise<{
   sessionId: string
-} {
+}> {
   if (!isDemoEnabled()) throw new Error('Demo mode is not enabled (launch with RACCORD_DEMO=1).')
   if (active) throw new Error('A demo recording is already in progress.')
 
-  // Default: film Raccord's own window; a displayId (or external driver mode)
-  // implies a display take.
+  // Default: film Raccord's own window; an app name implies an 'app' take, a
+  // displayId (or external driver mode) implies a display take.
   const target =
     input.target ??
-    (input.displayId !== undefined || input.external === true ? 'display' : 'window')
+    (input.app !== undefined
+      ? 'app'
+      : input.displayId !== undefined || input.external === true
+        ? 'display'
+        : 'window')
+
+  // target 'app': resolve the third-party window BEFORE opening the session —
+  // its title feeds the capture source, its bounds feed the journal.
+  let appWindow: { app: string; title: string; bounds: Electron.Rectangle } | null = null
+  if (target === 'app') {
+    const query = input.app?.trim().toLowerCase()
+    if (!query) throw new Error('target "app" needs the application name (see demo:listWindows).')
+    const windows = await listDemoWindows()
+    appWindow =
+      windows.find((w) => {
+        const name = w.app.toLowerCase()
+        return name.includes(query) || query.includes(name)
+      }) ?? null
+    if (!appWindow) {
+      throw new Error(
+        `No visible window found for "${input.app}" (demo:listWindows lists them; macOS Accessibility is required).`
+      )
+    }
+  }
 
   const window = mainWindow()
   const display =
@@ -224,6 +268,10 @@ export function startDemo(input: {
     external: input.external === true,
     projectId: input.projectId ?? null,
     target,
+    appName: appWindow?.app ?? null,
+    appWindowTitle: appWindow?.title ?? null,
+    appBounds: appWindow?.bounds ?? null,
+    appPoll: null,
     displayId: display.id,
     displayBounds: display.bounds,
     hookRunning: false,
@@ -245,6 +293,16 @@ export function startDemo(input: {
     if (hook.ok) session.hookRunning = true
     else session.warnings.push(hook.reason)
 
+    if (session.target === 'app' && session.appName) {
+      // The demoed window moves/resizes — follow it for the journal.
+      const appName = session.appName
+      session.appPoll = setInterval(() => {
+        void frontWindowBounds(appName).then((bounds) => {
+          if (bounds && active?.sessionId === session.sessionId) session.appBounds = bounds
+        })
+      }, 1000)
+    }
+
     if (window && !window.isDestroyed()) {
       // The renderer keeps recording while Raccord is unfocused/offscreen.
       session.prevBackgroundThrottling = window.webContents.getBackgroundThrottling()
@@ -253,9 +311,15 @@ export function startDemo(input: {
     openRecTray()
     broadcastDemoControl({ action: 'start', sessionId })
   }
+  const targetLabel =
+    target === 'window'
+      ? 'app window'
+      : target === 'app'
+        ? `window of ${appWindow?.app}`
+        : `display ${display.id}`
   logInfo(
     'demo',
-    `recording started (${sessionId}, ${target === 'window' ? 'app window' : `display ${display.id}`}${session.external ? ', external' : ''})`
+    `recording started (${sessionId}, ${targetLabel}${session.external ? ', external' : ''})`
   )
   return { sessionId }
 }
@@ -440,6 +504,11 @@ export async function finishDemo(input: {
         input.captureStartEpochMs ?? session.startedAt,
         input.durationSec
       )
+  if (!session.external && !input.error && events.length === 0) {
+    session.warnings.push(
+      'The take has NO input journal — the automatic camera and cursor will not apply. Check the macOS Accessibility permission of the launching process, or point with focus_node during agent-driven takes.'
+    )
+  }
 
   try {
     // Transcode to an editable mp4; a failed transcode keeps the webm take.

@@ -810,9 +810,11 @@ set_clip_speed / set_clip_look / set_still_motion bake per-clip effects. An impo
 asset (add_asset_from_file, e.g. a screen recording) placed via set_timeline_order plays as a
 real clip — trims, split, speed, looks and transitions all apply; only IMAGE assets are stills.
 A clip whose asset carries a demo journal (record_demo — target "window" films Raccord's own
-window only, target "display" films a whole screen for ANY other application; one shared
-journal path) gets the AUTOMATIC screen-motion camera at render — zoom on each journalled
-click + a synthetic cursor glide.
+window only, target "app" films ONE other application's window (pass app: "chrome" — other
+windows never appear), target "display" films a whole screen; one shared journal path) gets
+the AUTOMATIC screen-motion camera at render — zoom on each journalled click + a synthetic
+cursor glide. A stop result with warnings means the journal is missing/empty: fix it before
+rendering or the camera will not apply.
 DRIVING A DEMO YOURSELF (tools, not mouse): tool calls journal nothing — call focus_node on
 each thing you show; the app journals a click where the node lands, which becomes a zoom
 target. Per-clip params markers on the asset node (update_node): {"demoCamera": false} keeps

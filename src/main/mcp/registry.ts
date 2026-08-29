@@ -11,6 +11,7 @@ import { SCREEN_DIRECTIONS, planScenario, type ScenarioBeat } from '@shared/scen
 import { broadcastFocusNode, broadcastNavigate, broadcastWorkflowChanged } from '../events'
 import * as assets from '../services/assets'
 import * as demo from '../services/demo'
+import * as demoWindowsService from '../services/demoWindows'
 import * as generations from '../services/generations'
 import * as graph from '../services/graph'
 import * as graphHistory from '../services/graphHistory'
@@ -2326,16 +2327,18 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'record_demo',
     description:
-      'Demo mode (§9, RACCORD_DEMO=1 only): start/stop a recording with an input-event journal. target "window" (default) films Raccord’s own window — other windows never appear; "display" films a whole screen for any other app. The journal needs macOS Accessibility else stop warns. During a take, focus_node points at what you show. Stop imports the mp4 into projectId (overrides the start’s).',
+      'Demo mode (§9, RACCORD_DEMO=1 only): start/stop a recording with an input-event journal. Targets: "window" (default) = Raccord’s own window; "app" = ONE other application’s window (pass app, e.g. "chrome"); "display" = a whole screen. Other windows never appear on window/app takes. Journal needs macOS Accessibility else stop warns. focus_node points during a take. Stop imports the mp4 into projectId.',
     inputSchema: obj(
       {
         action: { type: 'string', enum: ['start', 'stop'] },
         projectId: str('Destination project (stop’s value wins over start’s)'),
         target: {
           type: 'string',
-          enum: ['window', 'display'],
-          description: 'window = Raccord’s own window (default); display = a whole screen'
+          enum: ['window', 'app', 'display'],
+          description:
+            'window = Raccord (default); app = one other app’s window; display = a screen'
         },
+        app: str('Application to film in app mode (fuzzy name, see list_demo_windows)'),
         displayId: {
           type: 'number',
           description: 'Display to film in display mode (list_demo_displays; default: Raccord’s)'
@@ -2345,11 +2348,12 @@ export const AGENT_TOOLS: AgentTool[] = [
     ),
     scope: 'project',
     risk: 'write',
-    execute: async ({ action, projectId, target, displayId }) => {
+    execute: async ({ action, projectId, target, app, displayId }) => {
       if (action === 'start') {
         return demo.startDemo({
           projectId: String(projectId),
-          ...(target === 'display' || target === 'window' ? { target } : {}),
+          ...(target === 'display' || target === 'window' || target === 'app' ? { target } : {}),
+          ...(typeof app === 'string' && app ? { app } : {}),
           ...(typeof displayId === 'number' ? { displayId } : {})
         })
       }
@@ -2361,11 +2365,20 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'list_demo_displays',
     description:
-      'Demo mode (§9): the machine’s displays — id, label, bounds, scale, primary — to pick the screen a record_demo source "screen" take films.',
+      'Demo mode (§9): the machine’s displays — id, label, bounds, scale, primary — to pick the screen a record_demo target "display" take films.',
     inputSchema: obj({}, []),
     scope: 'global',
     risk: 'read',
     execute: () => demo.listDemoDisplays()
+  },
+  {
+    name: 'list_demo_windows',
+    description:
+      'Demo mode (§9): every visible window of every application (macOS) — app name, title, bounds — to pick what a record_demo target "app" take films.',
+    inputSchema: obj({}, []),
+    scope: 'global',
+    risk: 'read',
+    execute: () => demoWindowsService.listDemoWindows()
   },
   {
     name: 'render_video',
