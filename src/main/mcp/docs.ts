@@ -818,6 +818,9 @@ rendering or the camera will not apply. FULLY AUTOMATED third-party demos (a dri
 through a browser extension or script — synthetic events the global hook cannot see): call
 demo_point after each meaningful click, with SCREEN coords derived from list_demo_windows
 bounds + the in-window position — that is what feeds the zoom targets and the cursor glide.
+WEB RECIPE: open the demo page in its OWN browser window FIRST, read its title, then
+record_demo with app + windowTitle — the capture pins THAT window (it survives navigation and
+ignores the user's other tabs/windows); keep the demo tab active in it while you drive.
 DRIVING A DEMO YOURSELF (tools, not mouse): tool calls journal nothing — call focus_node on
 each thing you show; the app journals a click where the node lands, which becomes a zoom
 target. Per-clip params markers on the asset node (update_node): {"demoCamera": false} keeps

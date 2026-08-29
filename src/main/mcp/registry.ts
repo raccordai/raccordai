@@ -2339,6 +2339,9 @@ export const AGENT_TOOLS: AgentTool[] = [
             'window = Raccord (default); app = one other app’s window; display = a screen'
         },
         app: str('Application to film in app mode (fuzzy name, see list_demo_windows)'),
+        windowTitle: str(
+          'Pin ONE window of that app by title (a browser demo tab); capture survives navigation'
+        ),
         displayId: {
           type: 'number',
           description: 'Display to film in display mode (list_demo_displays; default: Raccord’s)'
@@ -2348,12 +2351,13 @@ export const AGENT_TOOLS: AgentTool[] = [
     ),
     scope: 'project',
     risk: 'write',
-    execute: async ({ action, projectId, target, app, displayId }) => {
+    execute: async ({ action, projectId, target, app, windowTitle, displayId }) => {
       if (action === 'start') {
         return demo.startDemo({
           projectId: String(projectId),
           ...(target === 'display' || target === 'window' || target === 'app' ? { target } : {}),
           ...(typeof app === 'string' && app ? { app } : {}),
+          ...(typeof windowTitle === 'string' && windowTitle ? { windowTitle } : {}),
           ...(typeof displayId === 'number' ? { displayId } : {})
         })
       }

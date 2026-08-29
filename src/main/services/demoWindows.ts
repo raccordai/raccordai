@@ -67,27 +67,58 @@ export async function listDemoWindows(): Promise<DemoWindowInfo[]> {
   }
 }
 
-/**
- * Live bounds of an app's frontmost window (System Events points — the same
- * DIP space as Electron displays). Null when the app/window is gone.
- */
-export async function frontWindowBounds(
+/** Live bounds of every window of ONE app (System Events points = DIPs). */
+export async function appWindowsBounds(
   appName: string
-): Promise<{ x: number; y: number; width: number; height: number } | null> {
-  if (process.platform !== 'darwin') return null
+): Promise<Array<{ x: number; y: number; width: number; height: number }>> {
+  if (process.platform !== 'darwin') return []
   const script = `
 tell application "System Events" to tell (first process whose name is ${JSON.stringify(appName)})
-  set w to front window
-  set {wx, wy} to position of w
-  set {ww, wh} to size of w
-  return (wx as text) & "${SEP}" & wy & "${SEP}" & ww & "${SEP}" & wh
+  set out to ""
+  repeat with w in windows
+    try
+      set {wx, wy} to position of w
+      set {ww, wh} to size of w
+      set out to out & (wx as text) & "${SEP}" & wy & "${SEP}" & ww & "${SEP}" & wh & linefeed
+    end try
+  end repeat
+  return out
 end tell`
   try {
     const { stdout } = await exec('osascript', ['-e', script], { timeout: 5_000 })
-    const parts = stdout.trim().split(SEP).map(Number)
-    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null
-    return { x: parts[0]!, y: parts[1]!, width: parts[2]!, height: parts[3]! }
+    return stdout
+      .split('\n')
+      .map((line) => line.trim().split(SEP).map(Number))
+      .filter((p) => p.length === 4 && p.every((n) => Number.isFinite(n)) && p[2]! > 0)
+      .map((p) => ({ x: p[0]!, y: p[1]!, width: p[2]!, height: p[3]! }))
   } catch {
-    return null
+    return []
   }
+}
+
+/**
+ * Identity tracking BY GEOMETRY: window titles change on every navigation
+ * (a browser take), so the demoed window is followed as "the app window whose
+ * bounds moved the least since last time". Null when the app has no windows.
+ */
+export async function trackWindowBounds(
+  appName: string,
+  last: { x: number; y: number; width: number; height: number }
+): Promise<{ x: number; y: number; width: number; height: number } | null> {
+  const windows = await appWindowsBounds(appName)
+  if (windows.length === 0) return null
+  let best = windows[0]!
+  let bestDist = Infinity
+  for (const w of windows) {
+    const dist =
+      Math.abs(w.x - last.x) +
+      Math.abs(w.y - last.y) +
+      Math.abs(w.width - last.width) +
+      Math.abs(w.height - last.height)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = w
+    }
+  }
+  return best
 }

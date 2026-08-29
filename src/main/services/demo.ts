@@ -11,7 +11,7 @@ import { broadcastDemoControl } from '../events'
 import { buildDemoTranscodeArgs } from './renderPlan'
 import { importAssetFromBytes, setAssetDemoEvents } from './assets'
 import { startGlobalJournal, stopGlobalJournal } from './demoGlobalHook'
-import { frontWindowBounds, listDemoWindows } from './demoWindows'
+import { listDemoWindows, trackWindowBounds } from './demoWindows'
 import { logError, logInfo } from './logger'
 
 /**
@@ -214,6 +214,7 @@ export async function startDemo(input: {
   projectId?: string
   target?: 'window' | 'display' | 'app'
   app?: string
+  windowTitle?: string
   displayId?: number
   external?: boolean
 }): Promise<{
@@ -233,20 +234,26 @@ export async function startDemo(input: {
         : 'window')
 
   // target 'app': resolve the third-party window BEFORE opening the session —
-  // its title feeds the capture source, its bounds feed the journal.
+  // its title pins the capture source, its bounds feed the journal. An
+  // explicit windowTitle picks ONE window (a browser demo tab) instead of
+  // whatever window happens to be frontmost.
   let appWindow: { app: string; title: string; bounds: Electron.Rectangle } | null = null
   if (target === 'app') {
     const query = input.app?.trim().toLowerCase()
     if (!query) throw new Error('target "app" needs the application name (see demo:listWindows).')
-    const windows = await listDemoWindows()
-    appWindow =
-      windows.find((w) => {
-        const name = w.app.toLowerCase()
-        return name.includes(query) || query.includes(name)
-      }) ?? null
+    const wantedTitle = input.windowTitle?.trim().toLowerCase()
+    const candidates = (await listDemoWindows()).filter((w) => {
+      const name = w.app.toLowerCase()
+      return name.includes(query) || query.includes(name)
+    })
+    appWindow = wantedTitle
+      ? (candidates.find((w) => w.title.toLowerCase().includes(wantedTitle)) ?? null)
+      : (candidates[0] ?? null)
     if (!appWindow) {
       throw new Error(
-        `No visible window found for "${input.app}" (demo:listWindows lists them; macOS Accessibility is required).`
+        wantedTitle
+          ? `No "${input.app}" window matches title "${input.windowTitle}" (demo:listWindows lists them).`
+          : `No visible window found for "${input.app}" (demo:listWindows lists them; macOS Accessibility is required).`
       )
     }
   }
@@ -294,10 +301,13 @@ export async function startDemo(input: {
     else session.warnings.push(hook.reason)
 
     if (session.target === 'app' && session.appName) {
-      // The demoed window moves/resizes — follow it for the journal.
+      // The demoed window moves/resizes — follow it BY GEOMETRY (its title
+      // changes on every navigation in a browser take, geometry does not).
       const appName = session.appName
       session.appPoll = setInterval(() => {
-        void frontWindowBounds(appName).then((bounds) => {
+        const last = session.appBounds
+        if (!last) return
+        void trackWindowBounds(appName, last).then((bounds) => {
           if (bounds && active?.sessionId === session.sessionId) session.appBounds = bounds
         })
       }, 1000)

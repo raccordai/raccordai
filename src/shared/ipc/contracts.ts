@@ -953,6 +953,13 @@ export const ipcContracts = {
       target: z.enum(['window', 'display', 'app']).optional(),
       /** Application to film in 'app' mode (fuzzy process-name match; demo:listWindows lists them). Implies target 'app'. */
       app: z.string().optional(),
+      /**
+       * Pins ONE window of that app (title contains, case-insensitive) — a
+       * browser demo tab instead of whatever window is frontmost. The capture
+       * stays pinned even when the title changes (navigation); the journal
+       * follows the window by geometry.
+       */
+      windowTitle: z.string().optional(),
       /** Display to record in 'display' mode (demo:listDisplays; default: Raccord's). Implies target 'display'. */
       displayId: z.number().int().optional(),
       /** Driver mode: no broadcast, no hook — the caller streams media and events itself. */
