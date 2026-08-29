@@ -16,7 +16,6 @@ import {
   Play,
   Scissors,
   Sticker as StickerIcon,
-  Trash2,
   Type,
   Volume2,
   VolumeX,
@@ -33,7 +32,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { GraphNode, ImageLayer, TextLayer, TimelineSegment } from '@shared/ipc/contracts'
+import type { GraphNode, ImageLayer } from '@shared/ipc/contracts'
 import { getModel } from '@shared/models'
 import {
   useAssetNodeMedia,
@@ -60,650 +59,56 @@ import {
   segmentTransitionAfter,
   segmentTransitionSeconds,
   segmentTrim,
-  stillClipSeconds,
-  stillMotionOf
+  stillClipSeconds
 } from '@shared/timeline'
-import { formatTimecode } from '@shared/annotations'
-import { CLIP_LOOK_IDS, lookCssFilter } from '@shared/looks'
-import { STILL_MOTION_IDS } from '@shared/stillMotion'
-import { TEXT_ANIMATION_IDS } from '@shared/textAnimations'
-import { CLIP_TRANSITION_IDS } from '@shared/transitions'
+import { lookCssFilter } from '@shared/looks'
 import { useInputStills, useMuted, useResizableHeight } from './timelineHooks'
 import { Waveform } from './Waveform'
 import { formatSeconds } from '../../lib/formatSeconds'
-import { nextShuttleRate } from '../../lib/shuttle'
+import { isActivationTarget } from '../../lib/shortcuts'
 import { snapSpan, snapTolerance } from '../../lib/timelineSnap'
+import {
+  anchorTransform,
+  overlayPlacement,
+  reorderTimelineIds,
+  rulerTicks,
+  stillHoldAt,
+  trimInAt,
+  trimOutAt
+} from '../../lib/timelineLayout'
 import { invoke } from '../../lib/ipc'
-import { useDismissable } from '../../components/ui/useDismissable'
 import { useShortcut } from '../../components/ui/useShortcut'
 import { VideoThumb } from '../../components/VideoThumb'
 import { DemoCameraStage, demoCameraInfoFor, type DemoCameraInfo } from './DemoCameraPreview'
+import { usePlaybackEngine } from './timeline/usePlaybackEngine'
+import { Timecode, TIMECODE_FPS } from './timeline/Timecode'
+import { EdgeHandle } from './timeline/EdgeHandle'
+import { ClipSettingsPopover } from './timeline/ClipSettingsPopover'
+import { LayerSettingsPopover } from './timeline/LayerSettingsPopover'
+import { StickerSettingsPopover } from './timeline/StickerSettingsPopover'
+import { AudioSettingsPopover } from './timeline/AudioSettingsPopover'
+import { FeedbackNotePopover } from './timeline/FeedbackNotePopover'
+import { ImagePickerPopover } from './timeline/ImagePickerPopover'
+import {
+  MAX_STILL_SECONDS,
+  MIN_RESIZE_SECONDS,
+  MIN_STILL_SECONDS,
+  type EngineClip
+} from './timeline/types'
 
 /** Timeline clock formatting: tenth-of-a-second precision, never raw floats. */
 const fmt = formatSeconds
 
-/** Display rate of the transport timecode only — media fps varies per model. */
-const TIMECODE_FPS = 25
-
-/**
- * FCP-style timecode: fixed-width `HH:MM:SS:FF` with the leading zeros dimmed.
- * The constant width (monospace + always 11 chars) is what keeps the transport
- * from shifting as digits roll over.
- */
-function Timecode({ seconds, dimAll = false }: { seconds: number; dimAll?: boolean }) {
-  const totalFrames = Math.max(0, Math.floor(seconds * TIMECODE_FPS))
-  const ff = totalFrames % TIMECODE_FPS
-  const totalSeconds = Math.floor(totalFrames / TIMECODE_FPS)
-  const hh = Math.floor(totalSeconds / 3600)
-  const mm = Math.floor((totalSeconds % 3600) / 60)
-  const ss = totalSeconds % 60
-  const text = [hh, mm, ss, ff].map((n) => String(n).padStart(2, '0')).join(':')
-  // Dim everything up to the first significant digit, like FCP.
-  const firstDigit = text.search(/[1-9]/)
-  const split = dimAll || firstDigit === -1 ? text.length : firstDigit
-  return (
-    <span className="font-mono tabular-nums whitespace-pre">
-      <span className="text-neutral-600">{text.slice(0, split)}</span>
-      <span className={dimAll ? undefined : 'text-neutral-100'}>{text.slice(split)}</span>
-    </span>
-  )
-}
-
-/**
- * Timeline v2 — continuous NLE-style playback.
- *
- * Engine: two stacked <video> elements. The active one plays the current clip;
- * the standby one preloads the next clip's media, and becomes active the
- * instant the current clip ends — gapless playback across the whole edit.
- * A global time ruler maps every clip onto one scrubbable playhead.
- */
-
-interface EngineClip {
-  node: GraphNode
-  /** The entry's SEGMENT (§6.12e): its own trim + transition. */
-  segment: TimelineSegment
-  segmentIndex: number
-  /** Stable identity ("nodeId#segmentIndex") for lists and live-resize state. */
-  entryId: string
-  url: string | null
-  /** Declared duration (params), replaced by real media duration once probed. */
-  declared: number
-  /** Still image slot (image/asset node): no media clock, held for `declared`. */
-  still?: boolean
-  /** Animatic slot: an ungenerated VIDEO clip playing its INPUT image as a
-   *  still. Playback-only — editing gestures keep treating the node as video. */
-  placeholder?: boolean
-}
-
-/** Shortest length a resize handle can leave (clip trim window, text layer). */
-const MIN_RESIZE_SECONDS = 0.2
-/** Bounds of a still's hold time when resized by its handles. */
-const MIN_STILL_SECONDS = 0.5
-const MAX_STILL_SECONDS = 120
-
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 /**
- * Edge-resize grip on a timeline block. `data-resize-handle` lets the block's
- * HTML5 drag (reorder) recognise and refuse a drag that started on a grip.
+ * Timeline v2 — continuous NLE-style playback over the graph's clips.
+ *
+ * This file is the COMPOSITION: track layout, gestures and popover anchoring.
+ * The playback engine (two stacked <video> elements, gapless advance) lives
+ * in ./timeline/usePlaybackEngine, the inspectors in ./timeline/*Popover,
+ * and the coordinate/drag math in lib/timelineLayout (pure, unit-tested).
  */
-function EdgeHandle({
-  side,
-  onPointerDown,
-  title
-}: {
-  side: 'left' | 'right'
-  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
-  title: string
-}) {
-  return (
-    <div
-      data-resize-handle
-      onPointerDown={onPointerDown}
-      title={title}
-      className={`absolute inset-y-0 z-10 w-2 cursor-ew-resize bg-accent/60 opacity-0 group-hover:opacity-100 hover:bg-accent ${
-        side === 'left' ? 'left-0 rounded-l-md' : 'right-0 rounded-r-md'
-      }`}
-    />
-  )
-}
-
-// ── Playback engine ───────────────────────────────────────────────────────────
-
-function usePlaybackEngine(
-  clips: EngineClip[],
-  audioClips: EngineClip[],
-  speechClips: EngineClip[] = [],
-  muted = false
-) {
-  const videoARef = useRef<HTMLVideoElement | null>(null)
-  const videoBRef = useRef<HTMLVideoElement | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const speechRef = useRef<HTMLAudioElement | null>(null)
-  const [activeSlot, setActiveSlot] = useState<'A' | 'B'>('A')
-  const [activeIdx, setActiveIdx] = useState(0)
-  const [playing, setPlaying] = useState(false)
-  /**
-   * FCP-style shuttle (the L key): preview-only rate MULTIPLIER applied on top
-   * of each clip's baked `speed` — every element plays at
-   * `clipSpeed × shuttleRate`, so the render-parity speed logic stays intact.
-   */
-  const [shuttleRate, setShuttleRate] = useState(1)
-  /** Mirror for the tick/advance/seek callbacks (state would be a stale closure). */
-  const shuttleRateRef = useRef(1)
-  const [globalTime, setGlobalTime] = useState(0)
-  /** Real media durations, keyed by node id (probed from metadata). */
-  const [mediaDurations, setMediaDurations] = useState<Record<string, number>>({})
-
-  /** The entry's trim window against its real (probed) or declared duration. */
-  const trimOf = useCallback(
-    (clip: EngineClip) => segmentTrim(clip.segment, mediaDurations[clip.node.id] ?? clip.declared),
-    [mediaDurations]
-  )
-
-  /** Raw (untrimmed) length: probed media duration, else the declared one. */
-  const rawDurationOf = useCallback(
-    (clip: EngineClip) => mediaDurations[clip.node.id] ?? clip.declared,
-    [mediaDurations]
-  )
-
-  const durationOf = useCallback(
-    (clip: EngineClip) => {
-      // A still has no media: its declared length IS its trim window already.
-      if (clip.still) return clip.declared
-      const raw = mediaDurations[clip.node.id] ?? clip.declared
-      const { start, end } = segmentTrim(clip.segment, raw)
-      // Timeline seconds: the media window divided by the playback speed —
-      // the same division the render's clipEffectiveDuration applies.
-      return Math.max(0, (end ?? raw) - start) / clipSpeed(clip.node)
-    },
-    [mediaDurations]
-  )
-
-  /** Transition overlap taken out of entry i's slot (0 on the last entry / a cut). */
-  const overlapAfter = useCallback(
-    (i: number) => {
-      if (i < 0 || i >= clips.length - 1) return 0
-      const segment = clips[i]?.segment
-      if (!segment || segmentTransitionAfter(segment) === null) return 0
-      return segmentTransitionSeconds(segment)
-    },
-    [clips]
-  )
-
-  /**
-   * The clip's exclusive slot on the FINAL timeline: its trimmed duration minus
-   * the overlap its transition takes out of the film — the same subtraction the
-   * render applies (renderedDurationSeconds), so the preview clock, the ruler
-   * and the exported file all agree on where things land.
-   */
-  const slotDurationOf = useCallback(
-    (clip: EngineClip, i: number) => Math.max(0, durationOf(clip) - overlapAfter(i)),
-    [durationOf, overlapAfter]
-  )
-
-  const starts = useMemo(() => {
-    const out: number[] = []
-    let acc = 0
-    clips.forEach((clip, i) => {
-      out.push(acc)
-      acc += slotDurationOf(clip, i)
-    })
-    return out
-  }, [clips, slotDurationOf])
-
-  const total = useMemo(
-    () => clips.reduce((acc, clip, i) => acc + slotDurationOf(clip, i), 0),
-    [clips, slotDurationOf]
-  )
-
-  // Audio lanes (music bed + speech): the SAME shared layout the MP4 render
-  // uses (audioLaneStarts) — explicit offsets place a track absolutely,
-  // offset-less tracks chain after the previous one.
-  const audioStarts = useMemo(
-    () =>
-      audioLaneStarts(
-        audioClips.map((c) => ({
-          offsetSec: clipTimelineOffset(c.node),
-          durationSeconds: durationOf(c)
-        }))
-      ),
-    [audioClips, durationOf]
-  )
-
-  const speechStarts = useMemo(
-    () =>
-      audioLaneStarts(
-        speechClips.map((c) => ({
-          offsetSec: clipTimelineOffset(c.node),
-          durationSeconds: durationOf(c)
-        }))
-      ),
-    [speechClips, durationOf]
-  )
-
-  const lastAudioSeekRef = useRef(0)
-  const lastSpeechSeekRef = useRef(0)
-  const syncLane = useCallback(
-    (
-      element: HTMLAudioElement | null,
-      laneClips: EngineClip[],
-      laneStarts: number[],
-      lastSeekRef: { current: number },
-      t: number,
-      shouldPlay: boolean
-    ) => {
-      if (!element || laneClips.length === 0) return
-      // Global preview mute: applied on the element (volume stays the render
-      // parity value, so unmuting never has to recompute it).
-      if (element.muted !== muted) element.muted = muted
-      let idx = -1
-      for (let i = 0; i < laneClips.length; i++) {
-        const start = laneStarts[i] ?? 0
-        // Keep the LAST matching track: offset-positioned tracks may overlap,
-        // and the later one wins in the single-element preview (the render
-        // mixes both).
-        if (t >= start && t < start + durationOf(laneClips[i] as EngineClip)) idx = i
-      }
-      const clip = idx >= 0 ? laneClips[idx] : undefined
-      if (!clip?.url) {
-        if (!element.paused) element.pause()
-        return
-      }
-      // Per-track volume parity with the render's `volume=` (an HTMLMediaElement
-      // cannot amplify, so gains above 1 only apply to the exported MP4).
-      const volume = Math.min(1, clipVolume(clip.node))
-      if (element.volume !== volume) element.volume = volume
-      // Shuttle: the lanes are slaved to the playhead clock — without the same
-      // multiplier the drift corrector would fight a fast playhead every 600 ms.
-      if (element.playbackRate !== shuttleRateRef.current) {
-        element.playbackRate = shuttleRateRef.current
-      }
-      const offset = t - (laneStarts[idx] ?? 0) + trimOf(clip).start
-      if (!element.src.endsWith(clip.url)) {
-        element.src = clip.url
-        element.currentTime = offset
-      } else {
-        // Drift correction is rate-limited: currentTime assignments are async
-        // and each one aborts a pending play() — correcting every frame keeps
-        // the element paused forever (and non-seekable streams never converge).
-        const now = performance.now()
-        if (
-          !element.seeking &&
-          Math.abs(element.currentTime - offset) > 0.5 &&
-          now - lastSeekRef.current > 600
-        ) {
-          lastSeekRef.current = now
-          element.currentTime = offset
-        }
-      }
-      if (shouldPlay && element.paused) void element.play().catch(() => undefined)
-      if (!shouldPlay && !element.paused) element.pause()
-    },
-    [durationOf, trimOf, muted]
-  )
-  const syncAudio = useCallback(
-    (t: number, shouldPlay: boolean) => {
-      syncLane(audioRef.current, audioClips, audioStarts, lastAudioSeekRef, t, shouldPlay)
-      syncLane(speechRef.current, speechClips, speechStarts, lastSpeechSeekRef, t, shouldPlay)
-    },
-    [audioClips, audioStarts, speechClips, speechStarts, syncLane]
-  )
-
-  // Keep the audio lane glued to the playhead in every state.
-  useEffect(() => {
-    syncAudio(globalTime, playing)
-  }, [globalTime, playing, syncAudio])
-
-  // Probe real durations (declared params often differ from delivered media).
-  useEffect(() => {
-    const probes: HTMLVideoElement[] = []
-    for (const clip of [...clips, ...audioClips, ...speechClips]) {
-      if (clip.still || !clip.url || mediaDurations[clip.node.id] !== undefined) continue
-      const probe = document.createElement('video')
-      probe.preload = 'metadata'
-      probe.src = clip.url
-      probe.onloadedmetadata = () => {
-        if (Number.isFinite(probe.duration) && probe.duration > 0) {
-          setMediaDurations((prev) => ({ ...prev, [clip.node.id]: probe.duration }))
-        }
-      }
-      probes.push(probe)
-    }
-    return () =>
-      probes.forEach((p) => {
-        p.src = ''
-        p.onloadedmetadata = null
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [[...clips, ...audioClips, ...speechClips].map((c) => `${c.node.id}:${c.url}`).join('|')])
-
-  const activeVideo = () => (activeSlot === 'A' ? videoARef.current : videoBRef.current)
-  const standbyVideo = () => (activeSlot === 'A' ? videoBRef.current : videoARef.current)
-
-  const nextPlayableFrom = useCallback(
-    (from: number) => {
-      for (let i = from; i < clips.length; i++) if (clips[i]?.url) return i
-      return -1
-    },
-    [clips]
-  )
-
-  /** Next clip the VIDEO elements can host (stills play on the clock, not a <video>). */
-  const nextVideoFrom = useCallback(
-    (from: number) => {
-      for (let i = from; i < clips.length; i++) {
-        const clip = clips[i]
-        if (clip?.url && !clip.still) return i
-      }
-      return -1
-    },
-    [clips]
-  )
-
-  // Keep the active video on the current clip, and the standby preloading the
-  // next VIDEO clip (a still in between still wants the following video warm).
-  useEffect(() => {
-    const clip = clips[activeIdx]
-    const active = activeVideo()
-    if (active && clip?.url && !clip.still && !active.src.endsWith(clip.url)) {
-      active.src = clip.url
-      active.load()
-    }
-    // Preview parity with the render's setpts/atempo retime — times the
-    // preview-only shuttle multiplier (L key).
-    if (active && clip && !clip.still) {
-      active.playbackRate = clipSpeed(clip.node) * shuttleRateRef.current
-    }
-    const nextIdx = nextVideoFrom(activeIdx + 1)
-    const standby = standbyVideo()
-    const nextUrl = nextIdx >= 0 ? clips[nextIdx]?.url : null
-    if (standby && nextUrl && !standby.src.endsWith(nextUrl)) {
-      standby.src = nextUrl
-      standby.preload = 'auto'
-      standby.load()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIdx, activeSlot, clips, nextVideoFrom])
-
-  /**
-   * Where the still clock resumes from: set on entry into a still, cleared on
-   * any seek/play so the tick loop re-anchors at the current playhead.
-   */
-  const stillAnchorRef = useRef<{ idx: number; wall: number; offset: number } | null>(null)
-  /** Mirror of globalTime for the tick loop (state would be a stale closure). */
-  const globalTimeRef = useRef(0)
-  useEffect(() => {
-    globalTimeRef.current = globalTime
-  }, [globalTime])
-
-  // Apply a shuttle change live: re-anchor the still clock (wall time elapsed
-  // BEFORE the change must not be retroactively rescaled) and bump the playing
-  // video's rate — the audio lanes pick the new rate up on the next syncLane
-  // pass, and freshly loaded clips read the ref at load time.
-  useEffect(() => {
-    shuttleRateRef.current = shuttleRate
-    stillAnchorRef.current = null
-    const clip = clips[activeIdx]
-    const video = activeVideo()
-    if (video && clip && !clip.still) video.playbackRate = clipSpeed(clip.node) * shuttleRate
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shuttleRate])
-
-  // EVERY pause path (Space, transport button, end of the edit, a failed
-  // play()) lands on `playing: false` — resuming always restarts at 1×.
-  useEffect(() => {
-    if (!playing) setShuttleRate(1)
-  }, [playing])
-
-  /** L key while playing: one step up the shuttle ladder (1×→2×→4×→8×). */
-  const cycleShuttle = useCallback(() => setShuttleRate((rate) => nextShuttleRate(rate)), [])
-
-  /**
-   * Transition preview: opacity crossfade between the two stacked videos at
-   * the swap (duration = the cut's overlap). The outgoing clip freezes on its
-   * cut frame and fades out — an approximation of the render's xfade, without
-   * the double-`ended` hazard of letting it play on.
-   */
-  const [fadeMs, setFadeMs] = useState<number | null>(null)
-  const fadeTimer = useRef<number | null>(null)
-
-  /** Gapless hop to the next playable clip; stops at the end of the edit. */
-  const advance = useCallback(() => {
-    // A trimmed clip advances BEFORE its media ends (clock-tick path): the
-    // outgoing video must stop, or its later `ended` event double-advances.
-    activeVideo()?.pause()
-    const nextIdx = nextPlayableFrom(activeIdx + 1)
-    if (nextIdx === -1) {
-      setPlaying(false)
-      setGlobalTime(total)
-      return
-    }
-    const next = clips[nextIdx]
-    if (next?.still) {
-      // A still has no media to start: the tick loop drives its clock.
-      stillAnchorRef.current = null
-      setActiveIdx(nextIdx)
-      return
-    }
-    // Split halves (§6.12e): same media, contiguous trim — the media clock is
-    // already at the next entry's in-point, so just keep playing. Gapless by
-    // construction, no swap needed.
-    const current = clips[activeIdx]
-    if (next && current && !current.still && next.node.id === current.node.id) {
-      const curEnd = trimOf(current).end
-      const nextStart = trimOf(next).start
-      if (curEnd !== undefined && Math.abs(nextStart - curEnd) < 0.05) {
-        setActiveIdx(nextIdx)
-        const video = activeVideo()
-        if (video) void video.play().catch(() => undefined)
-        return
-      }
-    }
-    const standby = standbyVideo()
-    const expected = next?.url
-    const nextStart = next ? trimOf(next).start : 0
-    if (standby && expected && standby.src.endsWith(expected)) {
-      // The standby already holds the next clip: swap slots and play instantly.
-      const transition = current && !current.still ? segmentTransitionAfter(current.segment) : null
-      if (transition !== null && current) {
-        // The crossfade preview runs on the wall clock: at a shuttled rate the
-        // overlap passes shuttleRate× faster, so the fade must shorten too.
-        const ms = Math.round(
-          (segmentTransitionSeconds(current.segment) * 1000) / shuttleRateRef.current
-        )
-        setFadeMs(ms)
-        if (fadeTimer.current !== null) window.clearTimeout(fadeTimer.current)
-        fadeTimer.current = window.setTimeout(() => setFadeMs(null), ms + 80)
-      }
-      standby.currentTime = nextStart
-      if (next) standby.playbackRate = clipSpeed(next.node) * shuttleRateRef.current
-      setActiveSlot((s) => (s === 'A' ? 'B' : 'A'))
-      setActiveIdx(nextIdx)
-      void standby.play()
-    } else {
-      // Fallback (e.g. skipped over an ungenerated clip): load in place.
-      setActiveIdx(nextIdx)
-      const active = activeVideo()
-      if (active && expected) {
-        active.src = expected
-        active.currentTime = nextStart
-        if (next) active.playbackRate = clipSpeed(next.node) * shuttleRateRef.current
-        void active.play()
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIdx, clips, nextPlayableFrom, total])
-
-  // Global clock while playing. Also the trim out-point enforcement: `ended`
-  // only fires at the MEDIA's end, so a trimmed clip must advance itself.
-  // Stills have no media at all: their clock is the wall clock, anchored on
-  // entry (stillAnchorRef) and advanced here.
-  useEffect(() => {
-    if (!playing) return
-    let raf = 0
-    const tick = () => {
-      const base = starts[activeIdx] ?? 0
-      const clip = clips[activeIdx]
-      if (clip?.still) {
-        const now = performance.now()
-        let anchor = stillAnchorRef.current
-        if (!anchor || anchor.idx !== activeIdx) {
-          anchor = { idx: activeIdx, wall: now, offset: Math.max(0, globalTimeRef.current - base) }
-          stillAnchorRef.current = anchor
-        }
-        // Stills run on the wall clock — the shuttle multiplies it (the rate
-        // effect re-anchors on every change, so past seconds keep their rate).
-        const elapsed = anchor.offset + ((now - anchor.wall) / 1000) * shuttleRateRef.current
-        const hold = slotDurationOf(clip, activeIdx)
-        setGlobalTime(base + Math.min(elapsed, hold))
-        if (elapsed >= hold) {
-          advance()
-          return
-        }
-        raf = requestAnimationFrame(tick)
-        return
-      }
-      const video = activeVideo()
-      if (video && clip) {
-        const trim = trimOf(clip)
-        const slot = slotDurationOf(clip, activeIdx)
-        const speed = clipSpeed(clip.node)
-        setGlobalTime(base + Math.min(slot, Math.max(0, (video.currentTime - trim.start) / speed)))
-        // A transition-joined clip cuts early: its overlap belongs to the next
-        // clip on the final timeline (the render fades the two together there).
-        // The cut point is MEDIA time — the overlap scales by the speed.
-        if (
-          trim.end !== undefined &&
-          video.currentTime >= trim.end - overlapAfter(activeIdx) * speed - 0.03
-        ) {
-          advance()
-          return
-        }
-      } else if (video) {
-        setGlobalTime(base + video.currentTime)
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, activeIdx, activeSlot, starts])
-
-  const play = useCallback(() => {
-    if (clips.length === 0) return
-    let idx = activeIdx
-    // Restart from the top when the playhead sits at the end.
-    if (globalTime >= total - 0.05) {
-      idx = nextPlayableFrom(0)
-      if (idx === -1) return
-      setActiveIdx(idx)
-      setGlobalTime(starts[idx] ?? 0)
-    } else if (!clips[idx]?.url) {
-      idx = nextPlayableFrom(idx + 1)
-      if (idx === -1) return
-      setActiveIdx(idx)
-    }
-    setPlaying(true)
-    // Re-anchor the still clock at the current playhead position.
-    stillAnchorRef.current = null
-    // Give the effect a beat to (re)load the right src before playing.
-    const resumeAt = starts[idx] ?? 0
-    requestAnimationFrame(() => {
-      const clip = clips[idx]
-      const video = activeVideo()
-      if (video && clip && !clip.still) {
-        // A fresh load sits at 0 — snap into the clip's trim window.
-        const trim = trimOf(clip)
-        if (
-          video.currentTime < trim.start - 0.01 ||
-          (trim.end !== undefined && video.currentTime >= trim.end - 0.01)
-        ) {
-          video.currentTime = trim.start
-        }
-        void video.play().catch(() => setPlaying(false))
-      }
-      syncAudio(Math.max(resumeAt, globalTime), true)
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIdx, clips, globalTime, nextPlayableFrom, starts, total])
-
-  const pause = useCallback(() => {
-    activeVideo()?.pause()
-    audioRef.current?.pause()
-    speechRef.current?.pause()
-    setPlaying(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSlot])
-
-  const seek = useCallback(
-    (t: number) => {
-      const clamped = Math.max(0, Math.min(t, Math.max(total - 0.01, 0)))
-      let idx = clips.length - 1
-      for (let i = 0; i < clips.length; i++) {
-        const start = starts[i] ?? 0
-        if (clamped >= start && clamped < start + slotDurationOf(clips[i] as EngineClip, i)) {
-          idx = i
-          break
-        }
-      }
-      const offset = clamped - (starts[idx] ?? 0)
-      setGlobalTime(clamped)
-      // Any jump invalidates the still clock's anchor — the tick re-anchors —
-      // and cancels an in-flight transition crossfade (seeks are instant).
-      stillAnchorRef.current = null
-      setFadeMs(null)
-      const clip = clips[idx]
-      if (!clip) return
-      if (idx !== activeIdx) setActiveIdx(idx)
-      requestAnimationFrame(() => {
-        const video = activeVideo()
-        if (video && clip.url && !clip.still) {
-          if (!video.src.endsWith(clip.url)) {
-            video.src = clip.url
-            video.load()
-          }
-          // The timeline offset is inside the TRIMMED clip — shift into media
-          // time (timeline seconds × speed).
-          video.currentTime = offset * clipSpeed(clip.node) + trimOf(clip).start
-          video.playbackRate = clipSpeed(clip.node) * shuttleRateRef.current
-          if (playing) void video.play().catch(() => setPlaying(false))
-        }
-        syncAudio(clamped, playing)
-      })
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeVideo/syncAudio are deliberately unstable helpers read at call time
-    [activeIdx, activeSlot, clips, slotDurationOf, playing, starts, total]
-  )
-
-  return {
-    videoARef,
-    videoBRef,
-    audioRef,
-    speechRef,
-    audioStarts,
-    speechStarts,
-    activeSlot,
-    activeIdx,
-    setActiveIdx,
-    playing,
-    play,
-    pause,
-    seek,
-    advance,
-    shuttleRate,
-    cycleShuttle,
-    globalTime,
-    starts,
-    total,
-    durationOf,
-    rawDurationOf,
-    fadeMs
-  }
-}
-
-// ── Component ─────────────────────────────────────────────────────────────────
-
 export function TimelineV2({
   graph,
   videoId,
@@ -1063,13 +468,13 @@ export function TimelineV2({
       // any clip (the still path would overwrite the trim as a hold time).
       if (clip.still && !clip.placeholder) {
         const orig = stillClipSeconds(node)
-        const durAt = (d: number) =>
-          clamp(side === 'right' ? orig + d : orig - d, MIN_STILL_SECONDS, MAX_STILL_SECONDS)
+        const bounds = { min: MIN_STILL_SECONDS, max: MAX_STILL_SECONDS }
         startResize(e, {
-          onDelta: (d) => setClipResize({ id: clip.entryId, duration: durAt(d) }),
+          onDelta: (d) =>
+            setClipResize({ id: clip.entryId, duration: stillHoldAt(d, side, orig, bounds) }),
           onCommit: (d) => {
             setClipResize(null)
-            const dur = Math.round(durAt(d) * 10) / 10
+            const dur = Math.round(stillHoldAt(d, side, orig, bounds) * 10) / 10
             if (Math.abs(dur - orig) < 0.05) return
             void invoke('nodes:setTrim', { nodeId: node.id, trimStartSec: null, trimEndSec: dur })
           }
@@ -1080,20 +485,23 @@ export function TimelineV2({
       const { start: origStart, end } = segmentTrim(clip.segment, raw)
       const origEnd = end ?? raw
       const speed = clipSpeed(node)
-      // Drag deltas arrive in TIMELINE seconds; the trim window is MEDIA time.
-      const startAt = (d: number) => clamp(origStart + d * speed, 0, origEnd - MIN_RESIZE_SECONDS)
-      const endAt = (d: number) => clamp(origEnd + d * speed, origStart + MIN_RESIZE_SECONDS, raw)
+      // Drag deltas arrive in TIMELINE seconds; the trim window is MEDIA time
+      // (trimInAt/trimOutAt scale by the speed and clamp — lib/timelineLayout).
+      const trimArgs = { origStart, origEnd, raw, speed, minSeconds: MIN_RESIZE_SECONDS }
       startResize(e, {
         onDelta: (d) =>
           setClipResize({
             id: clip.entryId,
             // The live width preview is timeline seconds — media window ÷ speed.
-            duration: (side === 'left' ? origEnd - startAt(d) : endAt(d) - origStart) / speed
+            duration:
+              (side === 'left'
+                ? origEnd - trimInAt(d, trimArgs)
+                : trimOutAt(d, trimArgs) - origStart) / speed
           }),
         onCommit: (d) => {
           setClipResize(null)
           if (side === 'left') {
-            const s = Math.round(startAt(d) * 100) / 100
+            const s = Math.round(trimInAt(d, trimArgs) * 100) / 100
             if (Math.abs(s - origStart) < 0.02) return
             void invoke('nodes:setTrim', {
               nodeId: node.id,
@@ -1102,7 +510,7 @@ export function TimelineV2({
               segmentIndex: clip.segmentIndex
             })
           } else {
-            const out = Math.round(endAt(d) * 100) / 100
+            const out = Math.round(trimOutAt(d, trimArgs) * 100) / 100
             if (Math.abs(out - origEnd) < 0.02) return
             void invoke('nodes:setTrim', {
               nodeId: node.id,
@@ -1120,32 +528,33 @@ export function TimelineV2({
 
   /** Edge resize of a text layer block: its in/out on the final timeline. */
   const beginLayerResize = useCallback(
-    (layer: TextLayer, side: 'left' | 'right') => (e: ReactPointerEvent) => {
-      const origStart = layer.startSec
-      const origEnd = layer.endSec
-      const startAt = (d: number) => clamp(origStart + d, 0, origEnd - MIN_RESIZE_SECONDS)
-      const endAt = (d: number) => Math.max(origStart + MIN_RESIZE_SECONDS, origEnd + d)
-      startResize(e, {
-        onDelta: (d) =>
-          setLayerResize(
-            side === 'left'
-              ? { id: layer.id, startSec: startAt(d), endSec: origEnd }
-              : { id: layer.id, startSec: origStart, endSec: endAt(d) }
-          ),
-        onCommit: (d) => {
-          setLayerResize(null)
-          if (side === 'left') {
-            const s = Math.round(startAt(d) * 10) / 10
-            if (Math.abs(s - origStart) < 0.05) return
-            void invoke('textLayers:update', { id: layer.id, patch: { startSec: s } })
-          } else {
-            const out = Math.round(endAt(d) * 10) / 10
-            if (Math.abs(out - origEnd) < 0.05) return
-            void invoke('textLayers:update', { id: layer.id, patch: { endSec: out } })
+    (layer: { id: string; startSec: number; endSec: number }, side: 'left' | 'right') =>
+      (e: ReactPointerEvent) => {
+        const origStart = layer.startSec
+        const origEnd = layer.endSec
+        const startAt = (d: number) => clamp(origStart + d, 0, origEnd - MIN_RESIZE_SECONDS)
+        const endAt = (d: number) => Math.max(origStart + MIN_RESIZE_SECONDS, origEnd + d)
+        startResize(e, {
+          onDelta: (d) =>
+            setLayerResize(
+              side === 'left'
+                ? { id: layer.id, startSec: startAt(d), endSec: origEnd }
+                : { id: layer.id, startSec: origStart, endSec: endAt(d) }
+            ),
+          onCommit: (d) => {
+            setLayerResize(null)
+            if (side === 'left') {
+              const s = Math.round(startAt(d) * 10) / 10
+              if (Math.abs(s - origStart) < 0.05) return
+              void invoke('textLayers:update', { id: layer.id, patch: { startSec: s } })
+            } else {
+              const out = Math.round(endAt(d) * 10) / 10
+              if (Math.abs(out - origEnd) < 0.05) return
+              void invoke('textLayers:update', { id: layer.id, patch: { endSec: out } })
+            }
           }
-        }
-      })
-    },
+        })
+      },
     [startResize]
   )
 
@@ -1173,6 +582,10 @@ export function TimelineV2({
     // A focused <video> (generation card, lightbox) owns Space for its own
     // play/pause — the shared typing guard doesn't cover that case.
     if ((event.target as HTMLElement | null)?.tagName === 'VIDEO') return
+    // Space must still ACTIVATE a focused button/link: decline the shortcut
+    // (preventDefault skipped) so the native activation runs instead of a
+    // surprise play/pause.
+    if (isActivationTarget(event.target)) return false
     if (playing) pause()
     else play()
   })
@@ -1858,13 +1271,12 @@ export function TimelineV2({
                           const uniq = clips
                             .map((c) => c.node.id)
                             .filter((id, idx, arr) => arr.indexOf(id) === idx)
-                          const fromId = clips[from]!.node.id
-                          const toId = clips[i]!.node.id
-                          if (fromId === toId) return
-                          const ids = uniq.filter((id) => id !== fromId)
-                          const insertAt =
-                            ids.indexOf(toId) + (uniq.indexOf(fromId) < uniq.indexOf(toId) ? 1 : 0)
-                          ids.splice(insertAt, 0, fromId)
+                          const ids = reorderTimelineIds(
+                            uniq,
+                            clips[from]!.node.id,
+                            clips[i]!.node.id
+                          )
+                          if (!ids) return
                           void invoke('nodes:setTimelineOrder', { videoId, nodeIds: ids })
                         }}
                         onDoubleClick={(e) =>
@@ -2383,846 +1795,4 @@ export function TimelineV2({
       )}
     </div>
   )
-}
-
-/**
- * Quick feedback note (§6.13) on the frame under the playhead: the timecode
- * and the node identity were frozen when the popover opened — the user only
- * types the comment. Lands in the feedback bucket (FeedbackPanel + the MCP
- * feedback tools).
- */
-function FeedbackNotePopover({
-  videoId,
-  note,
-  onClose
-}: {
-  videoId: string
-  note: {
-    x: number
-    y: number
-    timecodeSec: number
-    nodeId: string | null
-    nodeLabel: string | null
-  }
-  onClose: () => void
-}) {
-  const { t } = useTranslation()
-  const ref = useRef<HTMLDivElement | null>(null)
-  useDismissable(true, onClose, ref)
-  const [comment, setComment] = useState('')
-
-  const save = (): void => {
-    const trimmed = comment.trim()
-    if (!trimmed) return
-    void invoke('feedback:create', {
-      videoId,
-      comment: trimmed,
-      timecodeSec: note.timecodeSec,
-      ...(note.nodeId ? { nodeId: note.nodeId } : {}),
-      ...(note.nodeLabel ? { nodeLabel: note.nodeLabel } : {})
-    })
-    onClose()
-  }
-
-  return (
-    <div
-      ref={ref}
-      className="island fixed z-50 w-72 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: popoverLeft(note.x, 288), top: note.y }}
-    >
-      <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
-        <MessageSquarePlus className="h-3 w-3 text-accent" /> {t('timeline.addNoteTitle')}
-        <span className="ml-auto font-mono font-normal text-neutral-400">
-          {formatTimecode(note.timecodeSec)}
-          {note.nodeLabel ? ` · ${note.nodeLabel}` : ''}
-        </span>
-      </div>
-      <textarea
-        autoFocus
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault()
-            save()
-          }
-          if (e.key === 'Escape') onClose()
-        }}
-        placeholder={t('timeline.notePlaceholder')}
-        rows={2}
-        className="w-full resize-none rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-accent"
-      />
-      <div className="mt-1.5 flex items-center justify-between">
-        <span className="text-[10px] text-neutral-500">{t('timeline.noteHint')}</span>
-        <button
-          onClick={save}
-          disabled={!comment.trim()}
-          className="rounded bg-accent px-2 py-1 text-[11px] font-semibold text-neutral-900 hover:bg-accent-hover disabled:opacity-40"
-        >
-          {t('timeline.noteSave')}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/**
- * Clamp a centred popover's `left` so the island stays fully on screen: the
- * anchors are clip centres, so on the timeline's last clips half the popover
- * would overflow the window edge. Works on centres because every popover
- * carries `-translate-x-1/2`.
- */
-function popoverLeft(anchorX: number, widthPx: number): number {
-  const half = widthPx / 2 + 8
-  return Math.min(Math.max(anchorX, half), Math.max(half, window.innerWidth - half))
-}
-
-/**
- * Inspector for one sticker: timing, size (as % of the output width) and
- * deletion. Position is set by dragging the sticker ON THE PLAYER (x/y are
- * normalized centers — the preview is the render).
- */
-function StickerSettingsPopover({
-  layer,
-  anchor,
-  onClose
-}: {
-  layer: ImageLayer
-  anchor: { x: number; y: number }
-  onClose: () => void
-}) {
-  const { t } = useTranslation()
-  const ref = useRef<HTMLDivElement | null>(null)
-  useDismissable(true, onClose, ref)
-  const [start, setStart] = useState(String(layer.startSec))
-  const [end, setEnd] = useState(String(layer.endSec))
-  const [width, setWidth] = useState(Math.round(layer.widthPct))
-
-  const apply = () => {
-    const num = (raw: string, fallback: number) => {
-      const n = Number(raw.replace(',', '.'))
-      return Number.isFinite(n) ? n : fallback
-    }
-    void invoke('imageLayers:update', {
-      id: layer.id,
-      patch: {
-        startSec: Math.max(0, num(start, layer.startSec)),
-        endSec: num(end, layer.endSec),
-        widthPct: Math.min(100, Math.max(1, width))
-      }
-    }).then(onClose)
-  }
-
-  const field =
-    'rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none'
-  return (
-    <div
-      ref={ref}
-      className="island fixed z-50 w-64 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: popoverLeft(anchor.x, 256), top: anchor.y }}
-    >
-      <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
-        <StickerIcon className="h-3 w-3 text-accent" /> {t('timeline.sticker')}
-      </div>
-      <div className="flex items-end gap-2">
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.layerStart')}
-          <input
-            className={`${field} w-14`}
-            inputMode="decimal"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.layerEnd')}
-          <input
-            className={`${field} w-14`}
-            inputMode="decimal"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </label>
-        <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
-          {t('timeline.stickerSize', { pct: width })}
-          <input
-            type="range"
-            min={5}
-            max={100}
-            step={1}
-            value={width}
-            onChange={(e) => setWidth(Number(e.target.value))}
-          />
-        </label>
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <button
-          onClick={() => {
-            void invoke('imageLayers:delete', { id: layer.id }).then(onClose)
-          }}
-          className="rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-danger"
-          title={t('timeline.stickerDelete')}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={apply}
-          className="ml-auto rounded-md bg-accent px-2 py-1 font-semibold text-neutral-900 hover:bg-accent-hover"
-        >
-          {t('timeline.apply')}
-        </button>
-      </div>
-      <p className="mt-1.5 text-[10px] text-neutral-500">{t('timeline.stickerDragHint')}</p>
-    </div>
-  )
-}
-
-/**
- * Volume inspector for one audio track (music/speech lane block, double-click).
- * The gain applies to the preview player (capped at 100% — an HTMLMediaElement
- * cannot amplify) and to the MP4 render's per-track `volume=` filter.
- */
-function AudioSettingsPopover({
-  node,
-  anchor,
-  onClose
-}: {
-  node: GraphNode
-  anchor: { x: number; y: number }
-  onClose: () => void
-}) {
-  const { t } = useTranslation()
-  const ref = useRef<HTMLDivElement | null>(null)
-  useDismissable(true, onClose, ref)
-  const [volume, setVolume] = useState(Math.round(clipVolume(node) * 100))
-
-  const commit = (pct: number) => {
-    void invoke('nodes:setVolume', {
-      nodeId: node.id,
-      volume: pct === 100 ? null : Math.min(2, Math.max(0, pct / 100))
-    })
-  }
-
-  return (
-    <div
-      ref={ref}
-      className="island fixed z-50 w-60 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: popoverLeft(anchor.x, 240), top: anchor.y }}
-    >
-      <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
-        <Volume2 className="h-3 w-3 text-accent" /> {t('timeline.volume')}
-        <span className="ml-auto font-mono text-neutral-400">{volume}%</span>
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={200}
-        step={5}
-        value={volume}
-        onChange={(e) => setVolume(Number(e.target.value))}
-        onPointerUp={() => commit(volume)}
-        onKeyUp={() => commit(volume)}
-        className="w-full"
-      />
-      <p className="mt-1.5 text-[10px] text-neutral-500">{t('timeline.volumeHint')}</p>
-    </div>
-  )
-}
-
-/** CSS transform that puts a layer's ANCHOR point on its (x, y) position. */
-function anchorTransform(anchor: number): string {
-  const col = (anchor - 1) % 3
-  const tx = col === 0 ? '0%' : col === 1 ? '-50%' : '-100%'
-  const ty = anchor >= 7 ? '0%' : anchor >= 4 ? '-50%' : '-100%'
-  return `translate(${tx}, ${ty})`
-}
-
-/** ASS numpad alignment laid out as the 3×3 position grid the picker shows. */
-const ALIGN_GRID = [
-  [7, 8, 9],
-  [4, 5, 6],
-  [1, 2, 3]
-] as const
-
-/** Flexbox placement of the player's overlay preview for an ASS alignment. */
-export function overlayPlacement(align: number): {
-  alignItems: 'flex-start' | 'center' | 'flex-end'
-  justifyContent: 'flex-start' | 'center' | 'flex-end'
-  textAlign: 'left' | 'center' | 'right'
-} {
-  const col = ((align - 1) % 3) as 0 | 1 | 2
-  const row = align >= 7 ? 'flex-start' : align >= 4 ? 'center' : 'flex-end'
-  const x = (['flex-start', 'center', 'flex-end'] as const)[col]
-  return {
-    alignItems: row,
-    justifyContent: x,
-    textAlign: (['left', 'center', 'right'] as const)[col]
-  }
-}
-
-/**
- * The clip inspector, anchored above the scissors button (fixed positioning —
- * the timeline island clips its own overflow). Trim and the text layer are
- * applied together on Apply; the transition choice and its length write
- * immediately (discrete choices). Everything is a journaled graph edit — ⌘Z
- * undoes any of it.
- */
-function ClipSettingsPopover({
-  clip,
-  isLast,
-  anchor,
-  splitAtMediaSec,
-  onClose,
-  onRemoveStill
-}: {
-  clip: EngineClip
-  isLast: boolean
-  anchor: { x: number; y: number }
-  /** Razor point under the playhead (media seconds), null = playhead outside. */
-  splitAtMediaSec: number | null
-  onClose: () => void
-  /** Set on still slots only: removes the image from the timeline (not the graph). */
-  onRemoveStill?: () => void
-}) {
-  const node = clip.node
-  const segment = clip.segment
-  const segmentCount = clipSegments(node).length
-  const { t } = useTranslation()
-  const ref = useRef<HTMLDivElement | null>(null)
-  useDismissable(true, onClose, ref)
-  const [inPoint, setInPoint] = useState(
-    segment.trimStartSec != null ? String(segment.trimStartSec) : ''
-  )
-  const [outPoint, setOutPoint] = useState(
-    segment.trimEndSec != null ? String(segment.trimEndSec) : ''
-  )
-  const [ovText, setOvText] = useState(node.overlay?.text ?? '')
-  const [ovAlign, setOvAlign] = useState(node.overlay?.align ?? 2)
-  const [ovSize, setOvSize] = useState<'sm' | 'md' | 'lg'>(node.overlay?.size ?? 'md')
-  const [transDur, setTransDur] = useState(String(segmentTransitionSeconds(segment)))
-
-  const transition = segmentTransitionAfter(segment)
-
-  const apply = () => {
-    const parse = (raw: string): number | null => {
-      const n = Number(raw.replace(',', '.'))
-      return raw.trim() !== '' && Number.isFinite(n) ? n : null
-    }
-    const text = ovText.trim()
-    void Promise.all([
-      invoke('nodes:setTrim', {
-        nodeId: node.id,
-        trimStartSec: parse(inPoint),
-        trimEndSec: parse(outPoint),
-        segmentIndex: clip.segmentIndex
-      }),
-      invoke('nodes:setOverlay', {
-        nodeId: node.id,
-        overlay: text ? { text, align: ovAlign, size: ovSize } : null
-      })
-    ]).then(onClose)
-  }
-
-  const changeTransition = (id: string | null, durRaw: string) => {
-    const dur = Number(durRaw.replace(',', '.'))
-    void invoke('nodes:setTransition', {
-      nodeId: node.id,
-      transition: id,
-      durationSec: id && Number.isFinite(dur) ? Math.min(2, Math.max(0.1, dur)) : null,
-      segmentIndex: clip.segmentIndex
-    })
-  }
-
-  const field =
-    'w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none'
-  return (
-    <div
-      ref={ref}
-      className="island fixed z-50 w-72 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: popoverLeft(anchor.x, 288), top: anchor.y }}
-    >
-      <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
-        <Scissors className="h-3 w-3 text-accent" /> {t('timeline.clipSettings')}
-        {onRemoveStill && (
-          <button
-            onClick={onRemoveStill}
-            className="ml-auto rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-danger"
-            title={t('timeline.removeFromTimeline')}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
-
-      {/* Trim */}
-      <div className="flex items-end gap-2">
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.trimIn')}
-          <input
-            className={field}
-            inputMode="decimal"
-            placeholder="0"
-            value={inPoint}
-            onChange={(e) => setInPoint(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.trimOut')}
-          <input
-            className={field}
-            inputMode="decimal"
-            placeholder="—"
-            value={outPoint}
-            onChange={(e) => setOutPoint(e.target.value)}
-          />
-        </label>
-      </div>
-
-      {/* Razor (§6.12e): split at the playhead; a split part can be removed. */}
-      {!isStillClip(node) && (
-        <div className="mt-2.5 flex items-center gap-2 border-t border-neutral-800 pt-2">
-          <button
-            disabled={splitAtMediaSec === null}
-            onClick={() => {
-              if (splitAtMediaSec === null) return
-              void invoke('nodes:splitClip', {
-                nodeId: node.id,
-                atMediaSec: splitAtMediaSec
-              }).then(onClose)
-            }}
-            className="flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 font-semibold text-neutral-200 hover:bg-neutral-700 disabled:opacity-40"
-            title={t('timeline.splitHint')}
-          >
-            <Scissors className="h-3 w-3" /> {t('timeline.split')}
-          </button>
-          {segmentCount > 1 && (
-            <button
-              onClick={() =>
-                void invoke('nodes:removeSegment', {
-                  nodeId: node.id,
-                  segmentIndex: clip.segmentIndex
-                }).then(onClose)
-              }
-              className="rounded-md bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700 hover:text-danger"
-            >
-              {t('timeline.removeSegment')}
-            </button>
-          )}
-          {segmentCount > 1 && (
-            <span className="ml-auto text-neutral-500">
-              {t('timeline.segmentBadge', { n: clip.segmentIndex + 1, count: segmentCount })}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Speed & look (video clips) / Ken Burns motion (stills) — discrete
-          choices, written immediately like the transition. */}
-      <div className="mt-2.5 flex items-end gap-2 border-t border-neutral-800 pt-2">
-        {!isStillClip(node) && (
-          <label className="flex flex-col gap-0.5 text-neutral-400">
-            {t('timeline.speed')}
-            <select
-              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
-              value={String(clipSpeed(node))}
-              onChange={(e) => {
-                const v = Number(e.target.value)
-                void invoke('nodes:setSpeed', { nodeId: node.id, speed: v === 1 ? null : v })
-              }}
-            >
-              {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].map((v) => (
-                <option key={v} value={String(v)}>
-                  ×{v}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {isStillClip(node) && (
-          <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
-            {t('timeline.motion')}
-            <select
-              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
-              value={stillMotionOf(node) ?? ''}
-              onChange={(e) =>
-                void invoke('nodes:setStillMotion', {
-                  nodeId: node.id,
-                  motion: e.target.value || null
-                })
-              }
-            >
-              <option value="">{t('timeline.motionNone')}</option>
-              {STILL_MOTION_IDS.map((id) => (
-                <option key={id} value={id}>
-                  {t(`timeline.motions.${id}` as never)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
-          {t('timeline.look')}
-          <select
-            className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
-            value={clipLook(node) ?? ''}
-            onChange={(e) =>
-              void invoke('nodes:setLook', { nodeId: node.id, look: e.target.value || null })
-            }
-          >
-            <option value="">{t('timeline.lookNone')}</option>
-            {CLIP_LOOK_IDS.map((id) => (
-              <option key={id} value={id}>
-                {t(`timeline.looks.${id}` as never)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {/* Transition into the next clip */}
-      {!isLast && (
-        <div className="mt-2.5 flex items-end gap-2 border-t border-neutral-800 pt-2">
-          <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
-            {t('timeline.transition')}
-            <select
-              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
-              value={transition ?? ''}
-              onChange={(e) => changeTransition(e.target.value || null, transDur)}
-            >
-              <option value="">{t('timeline.transitionNone')}</option>
-              {CLIP_TRANSITION_IDS.map((id) => (
-                <option key={id} value={id}>
-                  {t(`timeline.transitions.${id}` as never)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-0.5 text-neutral-400">
-            {t('timeline.transitionDuration')}
-            <input
-              className={field}
-              inputMode="decimal"
-              disabled={transition === null}
-              value={transDur}
-              onChange={(e) => setTransDur(e.target.value)}
-              onBlur={() => transition && changeTransition(transition, transDur)}
-            />
-          </label>
-        </div>
-      )}
-
-      {/* Text layer */}
-      <div className="mt-2.5 border-t border-neutral-800 pt-2">
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.overlayText')}
-          <input
-            className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
-            placeholder={t('timeline.overlayPlaceholder')}
-            maxLength={200}
-            value={ovText}
-            onChange={(e) => setOvText(e.target.value)}
-          />
-        </label>
-        <div className="mt-1.5 flex items-center gap-2.5">
-          <div
-            className="grid grid-cols-3 gap-0.5"
-            role="group"
-            aria-label={t('timeline.overlayPosition')}
-          >
-            {ALIGN_GRID.flat().map((a) => (
-              <button
-                key={a}
-                onClick={() => setOvAlign(a)}
-                title={t('timeline.overlayPosition')}
-                className={`h-4 w-5 rounded-sm border ${
-                  ovAlign === a
-                    ? 'border-accent bg-accent/40'
-                    : 'border-neutral-700 bg-neutral-900 hover:border-neutral-500'
-                }`}
-              />
-            ))}
-          </div>
-          <div className="flex gap-1" role="group" aria-label={t('timeline.overlaySize')}>
-            {(['sm', 'md', 'lg'] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setOvSize(s)}
-                className={`rounded px-1.5 py-0.5 uppercase ${
-                  ovSize === s
-                    ? 'bg-accent font-semibold text-neutral-900'
-                    : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={apply}
-            className="ml-auto rounded-md bg-accent px-2 py-1 font-semibold text-neutral-900 hover:bg-accent-hover"
-          >
-            {t('timeline.apply')}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** Font suggestions for the layer inspector (free text — any system font works). */
-const FONT_SUGGESTIONS = [
-  'Arial',
-  'Helvetica Neue',
-  'Georgia',
-  'Times New Roman',
-  'Courier New',
-  'Menlo',
-  'Futura',
-  'Impact',
-  'Trebuchet MS',
-  'Verdana'
-]
-
-/**
- * Typography inspector for one text layer. Position is set by dragging the
- * text ON THE PLAYER (x/y are normalized, the preview is the render); this
- * popover owns everything else: content, timing, font, size, weight, colour.
- */
-function LayerSettingsPopover({
-  layer,
-  anchor,
-  onClose
-}: {
-  layer: TextLayer
-  anchor: { x: number; y: number }
-  onClose: () => void
-}) {
-  const { t } = useTranslation()
-  const ref = useRef<HTMLDivElement | null>(null)
-  useDismissable(true, onClose, ref)
-  const [content, setContent] = useState(layer.content)
-  const [start, setStart] = useState(String(layer.startSec))
-  const [end, setEnd] = useState(String(layer.endSec))
-  const [font, setFont] = useState(layer.fontFamily ?? '')
-  const [size, setSize] = useState(String(layer.sizePct))
-  const [bold, setBold] = useState(layer.bold)
-  const [italic, setItalic] = useState(layer.italic)
-  const [color, setColor] = useState(layer.colorHex)
-  const [animation, setAnimation] = useState(layer.animation ?? '')
-
-  const apply = () => {
-    const num = (raw: string, fallback: number) => {
-      const n = Number(raw.replace(',', '.'))
-      return Number.isFinite(n) ? n : fallback
-    }
-    void invoke('textLayers:update', {
-      id: layer.id,
-      patch: {
-        content: content.trim() || layer.content,
-        startSec: Math.max(0, num(start, layer.startSec)),
-        endSec: num(end, layer.endSec),
-        fontFamily: font.trim() === '' ? null : font.trim(),
-        sizePct: Math.min(30, Math.max(1, num(size, layer.sizePct))),
-        bold,
-        italic,
-        colorHex: color,
-        animation: animation === '' ? null : animation
-      }
-    }).then(onClose)
-  }
-
-  const field =
-    'rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none'
-  return (
-    <div
-      ref={ref}
-      className="island fixed z-50 w-72 -translate-x-1/2 -translate-y-full px-3 py-2.5 text-[11px]"
-      style={{ left: popoverLeft(anchor.x, 288), top: anchor.y }}
-    >
-      <div className="mb-2 flex items-center gap-1.5 font-semibold text-neutral-200">
-        <Type className="h-3 w-3 text-accent" /> {t('timeline.layerSettings')}
-      </div>
-      <input
-        className={`${field} w-full`}
-        value={content}
-        maxLength={500}
-        onChange={(e) => setContent(e.target.value)}
-      />
-      <div className="mt-1.5 flex items-end gap-2">
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.layerStart')}
-          <input
-            className={`${field} w-14`}
-            inputMode="decimal"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.layerEnd')}
-          <input
-            className={`${field} w-14`}
-            inputMode="decimal"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </label>
-        <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
-          {t('timeline.layerFont')}
-          <input
-            className={`${field} w-full`}
-            list="timeline-layer-fonts"
-            placeholder="Arial"
-            value={font}
-            onChange={(e) => setFont(e.target.value)}
-          />
-          <datalist id="timeline-layer-fonts">
-            {FONT_SUGGESTIONS.map((f) => (
-              <option key={f} value={f} />
-            ))}
-          </datalist>
-        </label>
-      </div>
-      <div className="mt-1.5 flex items-end gap-2">
-        <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
-          {t('timeline.layerAnimation')}
-          <select
-            className={`${field} w-full`}
-            value={animation}
-            onChange={(e) => setAnimation(e.target.value)}
-          >
-            <option value="">{t('timeline.layerAnimationNone')}</option>
-            {TEXT_ANIMATION_IDS.map((id) => (
-              <option key={id} value={id}>
-                {t(`timeline.layerAnimations.${id}` as never)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="mt-1.5 flex items-end gap-2">
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.layerSize')}
-          <input
-            className={`${field} w-14`}
-            inputMode="decimal"
-            value={size}
-            onChange={(e) => setSize(e.target.value)}
-          />
-        </label>
-        <div className="flex gap-1">
-          <button
-            onClick={() => setBold((b) => !b)}
-            className={`rounded px-2 py-1 font-bold ${
-              bold ? 'bg-accent text-neutral-900' : 'bg-neutral-800 text-neutral-400'
-            }`}
-          >
-            B
-          </button>
-          <button
-            onClick={() => setItalic((i) => !i)}
-            className={`rounded px-2 py-1 italic ${
-              italic ? 'bg-accent text-neutral-900' : 'bg-neutral-800 text-neutral-400'
-            }`}
-          >
-            I
-          </button>
-        </div>
-        <label className="flex flex-col gap-0.5 text-neutral-400">
-          {t('timeline.layerColor')}
-          <input
-            type="color"
-            className="h-6 w-9 cursor-pointer rounded border border-neutral-700 bg-neutral-900"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-          />
-        </label>
-        <button
-          onClick={() => {
-            void invoke('textLayers:delete', { id: layer.id }).then(onClose)
-          }}
-          className="ml-auto rounded p-1 text-neutral-500 hover:bg-neutral-800 hover:text-danger"
-          title={t('timeline.layerDelete')}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={apply}
-          className="rounded-md bg-accent px-2 py-1 font-semibold text-neutral-900 hover:bg-accent-hover"
-        >
-          {t('timeline.apply')}
-        </button>
-      </div>
-      <p className="mt-1.5 text-[10px] text-neutral-500">{t('timeline.layerDragHint')}</p>
-    </div>
-  )
-}
-
-/**
- * The add-image picker: every image of the graph not already on the timeline
- * (image-model nodes with a successful output, image assets). Picking one
- * appends it as a STILL slot — 5 s by default, resizable by its edge grips.
- */
-function ImagePickerPopover({
-  candidates,
-  anchor,
-  onPick,
-  onClose
-}: {
-  candidates: Array<{ node: GraphNode; url: string; video?: boolean }>
-  anchor: { x: number; y: number }
-  onPick: (nodeId: string) => void
-  onClose: () => void
-}) {
-  const { t } = useTranslation()
-  const ref = useRef<HTMLDivElement | null>(null)
-  useDismissable(true, onClose, ref)
-  return (
-    <div
-      ref={ref}
-      className="island fixed z-50 w-64 -translate-x-1/2 -translate-y-full px-2 py-2 text-[11px]"
-      style={{ left: popoverLeft(anchor.x, 256), top: anchor.y }}
-    >
-      <div className="mb-1.5 flex items-center gap-1.5 px-1 font-semibold text-neutral-200">
-        <ImagePlus className="h-3 w-3 text-accent" /> {t('timeline.addImage')}
-      </div>
-      {candidates.length === 0 ? (
-        <p className="px-1 pb-1 text-neutral-500">{t('timeline.addImageEmpty')}</p>
-      ) : (
-        <div className="max-h-56 overflow-y-auto">
-          {candidates.map(({ node, url, video }) => (
-            <button
-              key={node.id}
-              onClick={() => onPick(node.id)}
-              className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-neutral-800"
-            >
-              {video ? (
-                <span className="h-8 w-12 flex-shrink-0 overflow-hidden rounded border border-neutral-800">
-                  <VideoThumb src={url} overlay={false} className="h-full w-full object-cover" />
-                </span>
-              ) : (
-                <img
-                  src={url}
-                  alt=""
-                  className="h-8 w-12 flex-shrink-0 rounded border border-neutral-800 object-cover"
-                />
-              )}
-              <span className="truncate text-neutral-200">
-                {node.label ?? getModel(node.modelId)?.label ?? node.key}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Sensible ruler tick spacing: ~8 ticks over the whole edit. */
-function rulerTicks(total: number): number[] {
-  const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300]
-  const step = steps.find((s) => total / s <= 8) ?? 600
-  const ticks: number[] = []
-  for (let t = 0; t < total; t += step) ticks.push(t)
-  return ticks
 }

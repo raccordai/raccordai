@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   SHORTCUTS,
   formatShortcut,
+  isActivationTarget,
   isMacPlatform,
   isTypingTarget,
   matchesShortcut,
@@ -99,6 +100,29 @@ describe('isTypingTarget', () => {
     expect(isTypingTarget(null)).toBe(false)
     // window/document have no tagName and must not throw.
     expect(isTypingTarget({} as EventTarget)).toBe(false)
+  })
+})
+
+describe('isActivationTarget', () => {
+  it('covers the elements the browser activates on Space/Enter', () => {
+    for (const tag of ['BUTTON', 'A', 'SUMMARY']) {
+      expect(isActivationTarget({ tagName: tag } as unknown as EventTarget)).toBe(true)
+    }
+    expect(
+      isActivationTarget({
+        tagName: 'DIV',
+        getAttribute: (name: string) => (name === 'role' ? 'button' : null)
+      } as unknown as EventTarget)
+    ).toBe(true)
+  })
+
+  it('lets bare-key shortcuts through everywhere else', () => {
+    expect(
+      isActivationTarget({ tagName: 'DIV', getAttribute: () => null } as unknown as EventTarget)
+    ).toBe(false)
+    expect(isActivationTarget(null)).toBe(false)
+    // window/document have no tagName and must not throw.
+    expect(isActivationTarget({} as EventTarget)).toBe(false)
   })
 })
 

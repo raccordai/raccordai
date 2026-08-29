@@ -138,6 +138,20 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   )
 }
 
+/**
+ * Would the browser ACTIVATE this element on the keystroke (Space/Enter on a
+ * focused button, link, summary…)? A bare-key shortcut like Space=play/pause
+ * must decline (return false from its handler) on these targets, or every
+ * focused button in the editor stops responding to the keyboard.
+ */
+export function isActivationTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null
+  if (!element || typeof element.tagName !== 'string') return false
+  const tag = element.tagName.toUpperCase()
+  if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return true
+  return typeof element.getAttribute === 'function' && element.getAttribute('role') === 'button'
+}
+
 /** True on macOS — decides ⌘ vs Ctrl and the label format. */
 export function isMacPlatform(userAgent: string): boolean {
   return /mac/i.test(userAgent)

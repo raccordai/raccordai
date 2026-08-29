@@ -12,7 +12,7 @@ export default defineConfig({
     }
   },
   test: {
-    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
@@ -65,6 +65,7 @@ export default defineConfig({
         'src/renderer/src/lib/relativeTime.ts',
         'src/renderer/src/lib/shortcuts.ts',
         'src/renderer/src/lib/timelineSnap.ts',
+        'src/renderer/src/lib/timelineLayout.ts',
         'src/renderer/src/lib/waveform.ts',
         'src/renderer/src/lib/formatSeconds.ts',
         'src/renderer/src/lib/mentionToken.ts',
