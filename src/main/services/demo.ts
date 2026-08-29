@@ -7,7 +7,8 @@ import { app, BrowserWindow, Menu, nativeImage, screen, Tray } from 'electron'
 import type { DemoEvent } from '@shared/screenMotion'
 import { normalizeOnDisplay } from '@shared/screenMotion'
 import { ffmpegPath } from '../media/ffbin'
-import { broadcastDemoControl } from '../events'
+import { broadcastDemoControl, broadcastDemoGesture } from '../events'
+import type { DemoGesturePayload } from '@shared/ipc/contracts'
 import { buildDemoTranscodeArgs } from './renderPlan'
 import { importAssetFromBytes, setAssetDemoEvents } from './assets'
 import { startGlobalJournal, stopGlobalJournal } from './demoGlobalHook'
@@ -71,6 +72,8 @@ interface DemoSession {
   appWindowTitle: string | null
   appBounds: Electron.Rectangle | null
   appPoll: NodeJS.Timeout | null
+  /** True once the gesture engine drove the UI: its visible cursor is in the pixels. */
+  staged: boolean
   displayId: number
   displayBounds: Electron.Rectangle
   hookRunning: boolean
@@ -279,6 +282,7 @@ export async function startDemo(input: {
     appWindowTitle: appWindow?.title ?? null,
     appBounds: appWindow?.bounds ?? null,
     appPoll: null,
+    staged: false,
     displayId: display.id,
     displayBounds: display.bounds,
     hookRunning: false,
@@ -347,6 +351,54 @@ export function appendDemoChunk(input: { sessionId: string; seq: number; base64:
   session.stream.write(Buffer.from(input.base64, 'base64'))
 }
 
+// ── Gesture engine (§9) — request/response with the renderer ────────────────
+
+const GESTURE_TIMEOUT_MS = 8_000
+
+const pendingGestures = new Map<
+  string,
+  { resolve: () => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+>()
+
+/**
+ * Performs one REAL UI gesture in the renderer (visible cursor + genuine DOM
+ * events) and resolves when the renderer reports back. Works outside a take
+ * too (rehearsal, tests); during a take it marks the session `staged` so the
+ * render skips the synthetic cursor (the visible one is in the pixels).
+ */
+export function performGesture(gesture: DemoGesturePayload['gesture']): Promise<{ ok: true }> {
+  const window = mainWindow()
+  if (!window || window.isDestroyed()) {
+    return Promise.reject(new Error('No app window to perform the gesture in.'))
+  }
+  const requestId = `g_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  return new Promise((resolve, reject) => {
+    pendingGestures.set(requestId, {
+      resolve: () => resolve({ ok: true }),
+      reject,
+      timer: setTimeout(() => {
+        pendingGestures.delete(requestId)
+        reject(new Error('The gesture timed out (renderer unresponsive).'))
+      }, GESTURE_TIMEOUT_MS)
+    })
+    broadcastDemoGesture({ requestId, gesture })
+  })
+}
+
+/** The renderer's report for a pending gesture. */
+export function gestureResult(input: { requestId: string; ok: boolean; error?: string }): void {
+  const pending = pendingGestures.get(input.requestId)
+  if (!pending) return
+  pendingGestures.delete(input.requestId)
+  clearTimeout(pending.timer)
+  if (input.ok) {
+    if (active && !active.external) active.staged = true
+    pending.resolve()
+  } else {
+    pending.reject(new Error(input.error ?? 'The gesture failed.'))
+  }
+}
+
 /**
  * Agent pointing: tool-driven demos never move the real mouse, so the
  * renderer forwards where focus_node landed (SCREEN coordinates) and the
@@ -378,7 +430,11 @@ function deliverTake(
       name: label,
       description: 'Demo-mode screen recording (input-event journal attached).'
     })
-    setAssetDemoEvents(asset.id, take.events, session.target === 'window' ? 'self' : 'screen')
+    setAssetDemoEvents(
+      asset.id,
+      take.events,
+      session.staged ? 'staged' : session.target === 'window' ? 'self' : 'screen'
+    )
     return {
       assetId: asset.id,
       path: asset.filePath ?? take.mediaPath,

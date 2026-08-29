@@ -16,9 +16,10 @@ import {
   reconcileDemoStatus,
   useDemoRecorder
 } from '@renderer/features/demo/demoRecorderStore'
+import { handleDemoGesture } from '@renderer/features/demo/demoGestureEngine'
 import { invoke } from '@renderer/lib/ipc'
 import { reportRendererError } from '@renderer/lib/errorReporter'
-import type { DemoControlPayload, NavigatePayload } from '@shared/ipc/contracts'
+import type { DemoControlPayload, DemoGesturePayload, NavigatePayload } from '@shared/ipc/contracts'
 
 export const Route = createRootRoute({
   component: RootLayout
@@ -193,9 +194,16 @@ function DemoModeController(): null {
   useEffect(() => {
     if (!demo) return
     void reconcileDemoStatus()
-    return window.api.on('event:demoControl', (payload) =>
+    const offControl = window.api.on('event:demoControl', (payload) =>
       handleDemoControl(payload as DemoControlPayload)
     )
+    const offGesture = window.api.on('event:demoGesture', (payload) =>
+      handleDemoGesture(payload as DemoGesturePayload)
+    )
+    return () => {
+      offControl()
+      offGesture()
+    }
   }, [demo])
 
   const toggle = useCallback(() => {

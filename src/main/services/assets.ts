@@ -376,7 +376,7 @@ export function updateAsset(
 export function setAssetDemoEvents(
   assetId: string,
   events: DemoEvent[],
-  source: 'self' | 'screen' = 'self'
+  source: 'self' | 'screen' | 'staged' = 'self'
 ): void {
   getDb()
     .update(assets)

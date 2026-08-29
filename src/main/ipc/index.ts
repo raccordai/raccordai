@@ -75,6 +75,7 @@ export function registerIpcHandlers(): void {
   handle('demo:finish', (input) => demoService.finishDemo(input))
   handle('demo:stop', (input) => demoService.stopDemo(input))
   handle('demo:point', (input) => demoService.demoPoint(input))
+  handle('demo:gestureResult', (input) => demoService.gestureResult(input))
   handle('demo:status', () => demoService.demoStatus())
 
   handle('settings:getLocale', () => settingsService.getLocale())

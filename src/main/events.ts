@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron'
 import type {
   DemoControlPayload,
+  DemoGesturePayload,
   FocusNodePayload,
   NavigatePayload,
   RenderProgressPayload,
@@ -97,6 +98,13 @@ export function broadcastUpdateState(payload: UpdateState): void {
 export function broadcastDemoControl(payload: DemoControlPayload): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('event:demoControl', payload)
+  }
+}
+
+/** Gesture engine (§9): one UI gesture for the renderer to perform. */
+export function broadcastDemoGesture(payload: DemoGesturePayload): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('event:demoGesture', payload)
   }
 }
 
