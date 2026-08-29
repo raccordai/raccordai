@@ -12,6 +12,7 @@ import {
   clearGraphHistory,
   historyDetails,
   historyState,
+  purgeHistory,
   redoGraph,
   undoGraph,
   withGraphHistoryGroupAsync
@@ -45,6 +46,13 @@ afterEach(() => resetTestDatabase())
 
 describe('graph history', () => {
   it('starts empty', () => {
+    expect(historyState(videoId)).toEqual({ canUndo: false, canRedo: false })
+  })
+
+  it('purgeHistory drops a video’s stacks (video deletion)', () => {
+    createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    expect(historyState(videoId).canUndo).toBe(true)
+    purgeHistory(videoId)
     expect(historyState(videoId)).toEqual({ canUndo: false, canRedo: false })
   })
 

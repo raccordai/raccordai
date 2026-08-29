@@ -18,6 +18,7 @@ import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes } from '../db/schema'
 import { deleteMediaFile } from '../media/files'
+import { cancelGeneration } from './generationLifecycle'
 import { withGraphHistory } from './graphHistory'
 import { getVideo, touchVideo } from './videos'
 
@@ -554,6 +555,10 @@ export function removeNode(nodeId: string): void {
   const db = getDb()
   const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
   if (!node) return
+  // In-flight runs settle first: deleting their rows under the poller would
+  // leak the queue slots until restart (the poller exits silently on a
+  // missing row and release only fires on settle).
+  cancelGeneration(nodeId)
   // Undoing this restores the node and its edges, not its generations
   // (their media files are deleted for good here).
   withGraphHistory(node.videoId, () => {
@@ -595,6 +600,9 @@ export function replaceNodeModel(nodeId: string, modelId: string): void {
   const newInputKeys = new Set(newModel.inputs.map((i) => i.key))
   const newOutputKeys = new Set(newModel.outputs.map((o) => o.key))
 
+  // Same doctrine as removeNode: the generations are about to be deleted —
+  // in-flight ones must settle first or their queue slots leak.
+  cancelGeneration(nodeId)
   withGraphHistory(node.videoId, () => {
     for (const e of videoEdges) {
       if (e.targetNodeId === nodeId) {
