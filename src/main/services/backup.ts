@@ -14,6 +14,7 @@ import {
   type WriteStream
 } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
+import Database from 'better-sqlite3'
 import { sql } from 'drizzle-orm'
 import { app } from 'electron'
 import { Unzip, UnzipInflate, Zip, ZipDeflate, ZipPassThrough, strToU8 } from 'fflate'
@@ -177,6 +178,30 @@ export async function extractBackupArchive(archivePath: string, stagingDir: stri
   await Promise.all(writes)
 }
 
+/**
+ * The local-API bearer token is machine-local material: it must never travel
+ * inside an archive (whoever holds the file could drive the app's local API),
+ * and a restored database must not carry another machine's token. Deleting
+ * the row is enough — getLocalApiToken() regenerates one on next use. A file
+ * that isn't a readable SQLite database (unit fixtures, foreign archives) has
+ * nothing to strip and is left alone.
+ */
+export function stripLocalApiToken(dbPath: string): void {
+  try {
+    const db = new Database(dbPath)
+    try {
+      const hasSettings = db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'`)
+        .get()
+      if (hasSettings) db.prepare(`DELETE FROM settings WHERE key = 'localApiToken'`).run()
+    } finally {
+      db.close()
+    }
+  } catch {
+    // Not a SQLite file — nothing to strip.
+  }
+}
+
 export function readBackupManifest(stagingDir: string): BackupManifest {
   const manifestPath = join(stagingDir, MANIFEST_NAME)
   if (!existsSync(manifestPath)) {
@@ -224,6 +249,8 @@ export function restoreFromStaging(opts: {
   rmSync(`${opts.dbPath}-shm`, { force: true })
   mkdirSync(dirname(opts.dbPath), { recursive: true })
   copyFileSync(stagedDb, opts.dbPath)
+  // Old archives (and any hand-built one) may still carry a token.
+  stripLocalApiToken(opts.dbPath)
 
   const stagedMedia = join(opts.stagingDir, 'media')
   const mediaFiles = listFilesRecursive(stagedMedia)
@@ -244,6 +271,8 @@ export async function exportBackup(targetPath: string): Promise<{ files: number;
   const snapshotPath = join(app.getPath('temp'), `raccord-snapshot-${Date.now()}.db`)
   // VACUUM INTO writes a compact, WAL-independent copy without locking writers.
   getDb().run(sql`VACUUM INTO ${snapshotPath}`)
+  // The snapshot is about to leave the machine — the local-API token doesn't.
+  stripLocalApiToken(snapshotPath)
   try {
     return await writeBackupArchive({
       dbSnapshotPath: snapshotPath,
