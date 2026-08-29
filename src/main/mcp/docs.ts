@@ -814,7 +814,10 @@ window only, target "app" films ONE other application's window (pass app: "chrom
 windows never appear), target "display" films a whole screen; one shared journal path) gets
 the AUTOMATIC screen-motion camera at render — zoom on each journalled click + a synthetic
 cursor glide. A stop result with warnings means the journal is missing/empty: fix it before
-rendering or the camera will not apply.
+rendering or the camera will not apply. FULLY AUTOMATED third-party demos (a driver clicking
+through a browser extension or script — synthetic events the global hook cannot see): call
+demo_point after each meaningful click, with SCREEN coords derived from list_demo_windows
+bounds + the in-window position — that is what feeds the zoom targets and the cursor glide.
 DRIVING A DEMO YOURSELF (tools, not mouse): tool calls journal nothing — call focus_node on
 each thing you show; the app journals a click where the node lands, which becomes a zoom
 target. Per-clip params markers on the asset node (update_node): {"demoCamera": false} keeps

@@ -2327,7 +2327,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'record_demo',
     description:
-      'Demo mode (§9, RACCORD_DEMO=1 only): start/stop a recording with an input-event journal. Targets: "window" (default) = Raccord’s own window; "app" = ONE other application’s window (pass app, e.g. "chrome"); "display" = a whole screen. Other windows never appear on window/app takes. Journal needs macOS Accessibility else stop warns. focus_node points during a take. Stop imports the mp4 into projectId.',
+      'Demo mode (§9, RACCORD_DEMO=1 only): start/stop a recording with an input-event journal. Targets: "window" (default) = Raccord’s own window; "app" = ONE other app’s window (pass app, e.g. "chrome"); "display" = a whole screen. Other windows never appear on window/app takes. Journal needs macOS Accessibility else stop warns. focus_node/demo_point point during a take. Stop imports into projectId.',
     inputSchema: obj(
       {
         action: { type: 'string', enum: ['start', 'stop'] },
@@ -2379,6 +2379,24 @@ export const AGENT_TOOLS: AgentTool[] = [
     scope: 'global',
     risk: 'read',
     execute: () => demoWindowsService.listDemoWindows()
+  },
+  {
+    name: 'demo_point',
+    description:
+      'Demo mode (§9): journal a synthetic click at a SCREEN coordinate during a take — how a driver that clicks synthetically (browser extension, script) gives the automatic camera its zoom targets. Compute x/y from list_demo_windows bounds + the in-window position of what you just clicked. No-op outside a live take.',
+    inputSchema: obj(
+      {
+        x: { type: 'number', description: 'Screen x (points/DIPs)' },
+        y: { type: 'number', description: 'Screen y (points/DIPs)' }
+      },
+      ['x', 'y']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ x, y }) => {
+      demo.demoPoint({ x: Number(x), y: Number(y) })
+      return { ok: true }
+    }
   },
   {
     name: 'render_video',
