@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { launchApp } from '../harness/app.mjs'
 import { FFMPEG, FIXTURES, fixturePath, probe } from '../harness/fixtures.mjs'
 import { startKieMock } from '../harness/kie-mock.mjs'
-import { check, checkClose, checkEqual, defer, ok, spec, step } from '../harness/spec.mjs'
+import { check, checkClose, checkEqual, defer, ok, spec, step, waitFor } from '../harness/spec.mjs'
 
 /**
  * PSNR between one frame of two files at the same timecode — how we prove the
@@ -202,6 +202,32 @@ await spec('demo', async () => {
   )
   check(reroutedAsset !== undefined, 'the take landed in the STOP-time project, not the start’s')
   checkEqual(reroutedAsset.demoSource, 'screen', 'demo_source records the provenance')
+
+  step('gesture engine: real UI interactions through demo_gesture')
+  await app.goto(`#/projects/${project.id}/videos/${video.id}`)
+  await app.win.waitForSelector('.react-flow__node', { timeout: 15_000 })
+  const nodesBefore = await app.win.locator('.react-flow__node').count()
+
+  await app.mcp('demo_gesture', { kind: 'click', target: 'Add node' })
+  check(
+    (await app.win.locator('input[placeholder*="Filter models"]').count()) > 0,
+    'the add-node picker really opened (real DOM click)'
+  )
+  await app.mcp('demo_gesture', { kind: 'type', text: 'gpt image' })
+  await app.mcp('demo_gesture', { kind: 'click', target: 'gpt-image-2-text-to-image' })
+  await waitFor(
+    async () => (await app.win.locator('.react-flow__node').count()) === nodesBefore + 1,
+    { label: 'the picked model to land as a new node', timeout: 10_000 }
+  )
+  ok('a full add-node flow ran through the visible UI')
+
+  const badGesture = await app
+    .mcp('demo_gesture', { kind: 'click', target: 'button that does not exist' })
+    .then(
+      () => null,
+      (error) => error
+    )
+  check(/no visible element/i.test(badGesture?.message ?? ''), 'an unknown target fails clearly')
 
   step('params demoCamera:false keeps the raw capture')
   await invoke('nodes:updateParams', {

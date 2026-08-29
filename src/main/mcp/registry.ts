@@ -2385,6 +2385,31 @@ export const AGENT_TOOLS: AgentTool[] = [
     execute: () => demoWindowsService.listDemoWindows()
   },
   {
+    name: 'demo_gesture',
+    description:
+      'Demo mode (§9): perform a REAL UI interaction in Raccord — a visible cursor travels to the element and genuine DOM events fire (menus actually open, typing appears). THE way to drive a demo people watch; graph tools mutate invisibly. kinds: click/hover (target = title, visible text or placeholder — picker entries match their model id), type (commit blurs to save), press (key).',
+    inputSchema: obj(
+      {
+        kind: { type: 'string', enum: ['click', 'type', 'press', 'hover'] },
+        target: str('Element query: title, visible text or placeholder (accent-insensitive)'),
+        text: str('Text to type (kind "type")'),
+        key: str('Key to press (kind "press"): Enter, Escape, ArrowDown…'),
+        commit: { type: 'boolean', description: 'After typing, blur to commit the field' }
+      },
+      ['kind']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ kind, target, text, key, commit }) =>
+      demo.performGesture({
+        kind: kind as 'click' | 'type' | 'press' | 'hover',
+        ...(typeof target === 'string' && target ? { target } : {}),
+        ...(typeof text === 'string' ? { text } : {}),
+        ...(typeof key === 'string' && key ? { key } : {}),
+        ...(commit === true ? { commit: true } : {})
+      })
+  },
+  {
     name: 'demo_point',
     description:
       'Demo mode (§9): journal a synthetic click at a SCREEN coordinate during a take — how a driver that clicks synthetically (browser extension, script) gives the automatic camera its zoom targets. Compute x/y from list_demo_windows bounds + the in-window position of what you just clicked. No-op outside a live take.',

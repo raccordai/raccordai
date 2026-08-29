@@ -821,6 +821,12 @@ bounds + the in-window position — that is what feeds the zoom targets and the 
 WEB RECIPE: open the demo page in its OWN browser window FIRST, read its title, then
 record_demo with app + windowTitle — the capture pins THAT window (it survives navigation and
 ignores the user's other tabs/windows); keep the demo tab active in it while you drive.
+RACCORD RECIPE (a demo people WATCH): drive the real UI with demo_gesture, never the graph
+tools (they mutate invisibly — no menu opens, nothing looks used). Example: click "Add node"
+(or its FR label) → type "gpt image" (the picker's filter auto-focuses) → click
+"gpt-image-2-text-to-image" (picker entries match their MODEL ID, locale-proof) → click the
+new node → type the prompt with commit: true. Each gesture shows a visible cursor and
+journals the click for the camera; open_video/focus_node stay useful to navigate and pan.
 DRIVING A DEMO YOURSELF (tools, not mouse): tool calls journal nothing — call focus_node on
 each thing you show; the app journals a click where the node lands, which becomes a zoom
 target. Per-clip params markers on the asset node (update_node): {"demoCamera": false} keeps

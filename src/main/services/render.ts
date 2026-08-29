@@ -449,9 +449,11 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
             width: rawProbe.width,
             height: rawProbe.height,
             fps: rawProbe.fps ?? 30,
-            // Synthetic cursor on every take: macOS screen capture
-            // (ScreenCaptureKit) excludes the real cursor from the pixels,
-            // so the journal-driven glide is the only cursor there is.
+            // Synthetic cursor unless the take was gesture-driven ('staged'):
+            // the gesture engine's visible cursor is already in the pixels.
+            // (Screen captures exclude the real OS cursor, so everywhere else
+            // the journal-driven glide is the only cursor there is.)
+            cursor: asset.demoSource !== 'staged',
             ...(framed ? { frame: {} } : {})
           }
         )
