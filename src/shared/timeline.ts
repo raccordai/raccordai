@@ -65,12 +65,15 @@ export const DEFAULT_CLIP_SECONDS = 5
 
 /**
  * True when the node's timeline slot holds a STILL: an image-kind node, or a
- * `studio/asset` node (uploaded media held as a picture). Stills only enter
- * the timeline through an explicit `timelineOrder` (see collectTimelineClips)
- * and their duration is their trim window (see stillClipSeconds).
+ * `studio/asset` node whose asset is not a video. Stills only enter the
+ * timeline through an explicit `timelineOrder` (see collectTimelineClips)
+ * and their duration is their trim window (see stillClipSeconds). A VIDEO
+ * asset (imported mp4, screen recording…) is a real clip: `assetKind` is
+ * derived at read time by listGraph — absent/unknown defaults to still so
+ * un-enriched nodes keep the historical behavior.
  */
 export function isStillClip(node: GraphNode): boolean {
-  if (node.modelId === 'studio/asset') return true
+  if (node.modelId === 'studio/asset') return node.assetKind !== 'video'
   return getModel(node.modelId)?.kind === 'image'
 }
 
@@ -88,9 +91,10 @@ export function stillClipSeconds(node: GraphNode): number {
 
 /**
  * The ordered list of clips that make up the timeline: every video-kind node
- * (asset nodes excluded), ordered by shot number — plus the stills the user
+ * (asset nodes excluded), ordered by shot number — plus the slots the user
  * explicitly placed (image/asset nodes carrying a `timelineOrder`; opt-in, so
- * the graph's working images never leak into the edit).
+ * the graph's working images never leak into the edit). A placed VIDEO asset
+ * plays as a real clip; every other placed image/asset is a still.
  *
  * Replacement workflow: when a shot fails, the user renames another node to
  * take over its number — leaving two nodes with the same shot number. Only one
@@ -100,7 +104,11 @@ export function stillClipSeconds(node: GraphNode): number {
  */
 export function collectTimelineClips(nodes: GraphNode[]): GraphNode[] {
   const videos = nodes.filter((n) => {
-    if (isStillClip(n)) return typeof n.timelineOrder === 'number'
+    // Asset nodes are opt-in whatever their kind: a video asset must not
+    // auto-enter the edit like generated clips (and has no shot number).
+    if (n.modelId === 'studio/asset' || isStillClip(n)) {
+      return typeof n.timelineOrder === 'number'
+    }
     return getModel(n.modelId)?.kind === 'video'
   })
 

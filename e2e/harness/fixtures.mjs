@@ -93,6 +93,32 @@ export const FIXTURES = {
     height: 360,
     contentType: 'image/png',
     args: ['-f', 'lavfi', '-i', 'testsrc2=size=640x360', '-frames:v', '1']
+  },
+  demoWebm: {
+    // What a MediaRecorder capture looks like (demo mode §9): VP9 in webm.
+    // The demo spec streams these bytes through demo:appendChunk and asserts
+    // the transcode-to-mp4 + asset import pipeline.
+    file: 'demo-capture.webm',
+    width: 640,
+    height: 360,
+    seconds: 6,
+    contentType: 'video/webm',
+    args: [
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=640x360:rate=24:duration=6',
+      '-c:v',
+      'libvpx-vp9',
+      '-deadline',
+      'realtime',
+      '-cpu-used',
+      '8',
+      '-b:v',
+      '1M',
+      '-f',
+      'webm'
+    ]
   }
 }
 

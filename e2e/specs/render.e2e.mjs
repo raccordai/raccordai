@@ -14,7 +14,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { launchApp } from '../harness/app.mjs'
-import { FFMPEG, FIXTURES, probe } from '../harness/fixtures.mjs'
+import { FFMPEG, FIXTURES, fixturePath, probe } from '../harness/fixtures.mjs'
 import { startKieMock } from '../harness/kie-mock.mjs'
 import { check, checkClose, checkEqual, defer, ok, spec, step, waitFor } from '../harness/spec.mjs'
 
@@ -214,6 +214,63 @@ await spec('render', async () => {
     'the sequence spec follows the explicit timeline order (B first)'
   )
 
+  step('a video asset plays as a real clip; an image asset stays a still')
+  const recAsset = await app.mcp('add_asset_from_file', {
+    projectId: project.id,
+    path: fixturePath('clipA'),
+    name: 'Screen recording'
+  })
+  checkEqual(recAsset.kind, 'video', 'the mp4 imported as a video asset')
+  const stillAsset = await app.mcp('add_asset_from_file', {
+    projectId: project.id,
+    path: fixturePath('still'),
+    name: 'Poster'
+  })
+  checkEqual(stillAsset.kind, 'image', 'the png imported as an image asset')
+
+  const makeAssetNode = async (label, assetId) => {
+    const node = await invoke('nodes:create', {
+      videoId: video.id,
+      modelId: 'studio/asset',
+      position: { x: 0, y: 0 },
+      label
+    })
+    await invoke('nodes:updateParams', { nodeId: node.id, params: { assetId } })
+    return node
+  }
+  const recNode = await makeAssetNode('Recording', recAsset.id)
+  const stillNode = await makeAssetNode('Poster', stillAsset.id)
+  await invoke('nodes:setTimelineOrder', {
+    videoId: video.id,
+    nodeIds: [shotB.id, shotA.id, recNode.id, stillNode.id]
+  })
+
+  const timeline = await app.mcp('get_timeline', { videoId: video.id })
+  const recEntry = timeline.entries.find((e) => e.nodeId === recNode.id)
+  check(recEntry?.still === false, 'the video asset entry is a real clip, not a still')
+  checkEqual(recEntry.durationSource, 'measured', 'its duration was ffprobed from the asset file')
+  checkClose(recEntry.durationSec, FIXTURES.clipA.seconds, 0.5, 'the measured length is the mp4’s')
+  const stillEntry = timeline.entries.find((e) => e.nodeId === stillNode.id)
+  check(stillEntry?.still === true, 'the image asset entry stays a still')
+  checkEqual(stillEntry.durationSec, 5, 'the image asset holds the 5 s default')
+
+  const assetsPath = join(outDir, 'with-assets.mp4')
+  const withAssets = await app.mcp('render_video', { videoId: video.id, outputPath: assetsPath })
+  checkEqual(withAssets.skipped.length, 0, 'no slot was skipped with the asset clips in place')
+  const withAssetsSeconds = editedSeconds + FIXTURES.clipA.seconds + 5
+  checkClose(
+    withAssets.durationSeconds,
+    withAssetsSeconds,
+    1,
+    'the render includes the asset clip’s real length and the still’s hold'
+  )
+  checkClose(
+    Number(probe(assetsPath).format.duration),
+    withAssetsSeconds,
+    1,
+    'ffprobe agrees on the with-assets duration'
+  )
+
   step('cancellation')
   const cancelledPath = join(outDir, 'cancelled.mp4')
   const pending = app.mcp('render_video', { videoId: video.id, outputPath: cancelledPath }).then(
@@ -236,5 +293,5 @@ await spec('render', async () => {
   step('the timeline is rendered in the UI too')
   await app.goto(`#/projects/${project.id}/videos/${video.id}`)
   await win.waitForSelector('.react-flow__node', { timeout: 15_000 })
-  checkEqual(await win.locator('.react-flow__node').count(), 3, 'the canvas renders the 3 nodes')
+  checkEqual(await win.locator('.react-flow__node').count(), 5, 'the canvas renders the 5 nodes')
 })

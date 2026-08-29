@@ -806,7 +806,33 @@ track's computed start. Always read get_timeline before placing anything by time
 CLIPS. set_timeline_order fixes the sequence; set_clip_trim cuts a window inside the media
 (MEDIA seconds — on a 2x clip the timeline shows half); split_clip razors an entry in two;
 set_clip_transition joins two entries (each transition SHORTENS the film by its length);
-set_clip_speed / set_clip_look / set_still_motion bake per-clip effects.
+set_clip_speed / set_clip_look / set_still_motion bake per-clip effects. An imported VIDEO
+asset (add_asset_from_file, e.g. a screen recording) placed via set_timeline_order plays as a
+real clip — trims, split, speed, looks and transitions all apply; only IMAGE assets are stills.
+A clip whose asset carries a demo journal (record_demo — target "window" films Raccord's own
+window only, target "app" films ONE other application's window (pass app: "chrome" — other
+windows never appear), target "display" films a whole screen; one shared journal path) gets
+the AUTOMATIC screen-motion camera at render — zoom on each journalled click + a synthetic
+cursor glide. A stop result with warnings means the journal is missing/empty: fix it before
+rendering or the camera will not apply. FULLY AUTOMATED third-party demos (a driver clicking
+through a browser extension or script — synthetic events the global hook cannot see): call
+demo_point after each meaningful click, with SCREEN coords derived from list_demo_windows
+bounds + the in-window position — that is what feeds the zoom targets and the cursor glide.
+WEB RECIPE: open the demo page in its OWN browser window FIRST, read its title, then
+record_demo with app + windowTitle — the capture pins THAT window (it survives navigation and
+ignores the user's other tabs/windows); keep the demo tab active in it while you drive.
+RACCORD RECIPE (a demo people WATCH): drive the real UI with demo_gesture, never the graph
+tools (they mutate invisibly — no menu opens, nothing looks used). Example: click "Add node"
+(or its FR label) → type "gpt image" (the picker's filter auto-focuses) → click
+"gpt-image-2-text-to-image" (picker entries match their MODEL ID, locale-proof) → click the
+new node → type the prompt with commit: true. Each gesture shows a visible cursor and
+journals the click for the camera; open_video/focus_node stay useful to navigate and pan.
+DRIVING A DEMO YOURSELF (tools, not mouse): tool calls journal nothing — call focus_node on
+each thing you show; the app journals a click where the node lands, which becomes a zoom
+target. Per-clip params markers on the asset node (update_node): {"demoCamera": false} keeps
+the raw capture; {"demoFrame": true} adds the framed look — gradient background,
+rounded inset window with a shadow, camera zooming the whole composition. plan_render reports
+the slot with demoCamera: true.
 
 AUDIO SYNC (the ElevenLabs workflow). Audio nodes land on their lane by model (music = Suno bed,
 speech = voice-over/dialogue). Tracks without an offset chain one after another; set_audio_offset

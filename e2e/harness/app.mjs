@@ -37,7 +37,7 @@ function freePort() {
  * @param {string} [options.locale]  seeded UI language — 'en' keeps locators stable
  * @param {string} [options.apiKey]  seeded kie.ai key (encrypted through safeStorage)
  */
-export async function launchApp({ kieBase, locale = 'en', apiKey = 'e2e-key' }) {
+export async function launchApp({ kieBase, locale = 'en', apiKey = 'e2e-key', extraEnv = {} }) {
   if (!existsSync(join(PROJECT_ROOT, 'out', 'main', 'index.js'))) {
     throw new Error('out/main/index.js is missing — run `pnpm build` before the E2E suite')
   }
@@ -62,7 +62,9 @@ export async function launchApp({ kieBase, locale = 'en', apiKey = 'e2e-key' }) 
       RACCORD_LOCAL_API_PORT: String(localApiPort),
       // Lets main opt into safeStorage's in-memory password where no OS
       // keyring exists (headless Linux) — dev builds only, see src/main/index.ts.
-      RACCORD_E2E: '1'
+      RACCORD_E2E: '1',
+      // Spec-specific flags (e.g. RACCORD_DEMO for the demo-mode spec).
+      ...extraEnv
     }
   })
 

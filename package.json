@@ -43,7 +43,8 @@
       "@ffprobe-installer/darwin-arm64",
       "@ffprobe-installer/darwin-x64",
       "@ffprobe-installer/linux-x64",
-      "@ffprobe-installer/linux-arm64"
+      "@ffprobe-installer/linux-arm64",
+      "uiohook-napi"
     ]
   },
   "dependencies": {
@@ -68,6 +69,7 @@
     "react-i18next": "^17.0.11",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "uiohook-napi": "^1.5.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -1,0 +1,1 @@
+ALTER TABLE `assets` ADD `demo_source` text;

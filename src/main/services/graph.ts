@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { defaultParamsFor, getModel, getModelOrThrow, videoDefaultParams } from '@shared/models'
 import {
   autoLayoutPositions,
@@ -34,16 +34,44 @@ function toGraphNode(row: NodeRow): GraphNode {
   return { ...rest, position: { x: positionX, y: positionY }, params: row.params ?? {} }
 }
 
+/**
+ * Stamps the derived `assetKind` onto `studio/asset` nodes (one batched
+ * lookup, never stored): the single point where the asset's kind reaches the
+ * pure timeline layer, so isStillClip can tell a video asset from a still.
+ */
+function withAssetKinds(graphNodes: GraphNode[]): GraphNode[] {
+  const assetIds = new Set<string>()
+  for (const n of graphNodes) {
+    if (n.modelId !== 'studio/asset') continue
+    const aid = (n.params as { assetId?: unknown } | undefined)?.assetId
+    if (typeof aid === 'string' && aid) assetIds.add(aid)
+  }
+  if (assetIds.size === 0) return graphNodes
+  const rows = getDb()
+    .select({ id: assets.id, kind: assets.kind })
+    .from(assets)
+    .where(inArray(assets.id, [...assetIds]))
+    .all()
+  const kindById = new Map(rows.map((r) => [r.id, r.kind]))
+  return graphNodes.map((n) => {
+    if (n.modelId !== 'studio/asset') return n
+    const aid = (n.params as { assetId?: unknown } | undefined)?.assetId
+    return { ...n, assetKind: typeof aid === 'string' ? (kindById.get(aid) ?? null) : null }
+  })
+}
+
 export function listGraph(videoId: string): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const db = getDb()
   return {
-    nodes: db
-      .select()
-      .from(nodes)
-      .where(eq(nodes.videoId, videoId))
-      .orderBy(asc(nodes.createdAt))
-      .all()
-      .map(toGraphNode),
+    nodes: withAssetKinds(
+      db
+        .select()
+        .from(nodes)
+        .where(eq(nodes.videoId, videoId))
+        .orderBy(asc(nodes.createdAt))
+        .all()
+        .map(toGraphNode)
+    ),
     edges: db
       .select()
       .from(edges)
@@ -238,10 +266,11 @@ export function setSelectedGeneration(nodeId: string, generationId: string | nul
  * fallback can never fight the user's order afterwards. Ids must all belong
  * to the video; ids of other videos are refused rather than silently skipped.
  *
- * Stills (image/asset nodes) are timeline members ONLY through their explicit
- * slot, so a still absent from the stamped list is removed from the timeline
- * (its timelineOrder cleared) — video clips always belong and just fall back
- * to the label-number order if ever left out.
+ * Stills AND asset clips (image/asset nodes, video assets included) are
+ * timeline members ONLY through their explicit slot, so one absent from the
+ * stamped list is removed from the timeline (its timelineOrder cleared) —
+ * generated video clips always belong and just fall back to the label-number
+ * order if ever left out.
  */
 export function setTimelineOrder(videoId: string, nodeIds: string[]): void {
   const db = getDb()
@@ -273,6 +302,14 @@ export function setTimelineOrder(videoId: string, nodeIds: string[]): void {
     })
   })
   touchVideo(videoId)
+}
+
+/** Kind of the asset a `studio/asset` node row points at (null when unresolvable). */
+function assetKindOf(row: Pick<NodeRow, 'params'>): 'image' | 'video' | 'audio' | null {
+  const aid = (row.params as { assetId?: unknown } | undefined)?.assetId
+  if (typeof aid !== 'string' || !aid) return null
+  const asset = getDb().select({ kind: assets.kind }).from(assets).where(eq(assets.id, aid)).get()
+  return asset?.kind ?? null
 }
 
 type TimelineSegmentRow = NonNullable<NodeRow['segments']>[number]
@@ -389,7 +426,11 @@ export function setClipTransition(
 export function splitClip(nodeId: string, atMediaSec: number): void {
   const row = getDb().select().from(nodes).where(eq(nodes.id, nodeId)).get()
   if (!row) throw new Error(`Unknown node "${nodeId}".`)
-  if (row.modelId === 'studio/asset' || getModel(row.modelId)?.kind !== 'video') {
+  const splittable =
+    row.modelId === 'studio/asset'
+      ? assetKindOf(row) === 'video'
+      : getModel(row.modelId)?.kind === 'video'
+  if (!splittable) {
     throw new Error('Only video clips can be split (a still just gets two identical holds).')
   }
   const segments = clipSegments(toGraphNode(row))
@@ -470,6 +511,12 @@ export function setClipLook(nodeId: string, look: string | null): void {
 export function setStillMotion(nodeId: string, motion: string | null): void {
   if (motion !== null && !isStillMotionId(motion)) {
     throw new Error(`Unknown still motion "${motion}".`)
+  }
+  if (motion !== null) {
+    const row = getDb().select().from(nodes).where(eq(nodes.id, nodeId)).get()
+    if (row?.modelId === 'studio/asset' && assetKindOf(row) === 'video') {
+      throw new Error('Ken Burns applies to STILL slots only — this asset is a video clip.')
+    }
   }
   patchNodeWithHistory(nodeId, { stillMotion: motion })
 }

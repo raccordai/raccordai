@@ -213,6 +213,26 @@ export function useWorkflowIO(videoId: string, nodes: GraphNode[]): WorkflowIO {
               return { clip: { node } }
             }
 
+            // 0b) VIDEO asset placed on the timeline: bundle its media as a real
+            //     clip (probed like a generation, in lockstep with the main export).
+            if (node.modelId === 'studio/asset') {
+              const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+              const asset = assetId ? await invoke('assets:get', { assetId }) : null
+              if (asset?.url) {
+                try {
+                  const blob = await fetchMediaBlob(asset.url)
+                  const mime = blob.type || asset.mimeType
+                  const path = `${prefix}.${extForMime(mime ?? undefined)}`
+                  const bytes = new Uint8Array(await blob.arrayBuffer())
+                  const media = (await probeVideoDimensions(blob)) ?? undefined
+                  return { clip: { node, mediaPath: path, media }, file: { path, bytes } }
+                } catch {
+                  // Unfetchable asset → placeholder gap below.
+                }
+              }
+              return { clip: { node } }
+            }
+
             // 1) Best successful video output → use it (selected if successful,
             //    else the most recent success — same rule as the timeline display).
             const gens = await invoke('generations:listForNode', { nodeId: node.id })

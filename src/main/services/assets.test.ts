@@ -21,6 +21,7 @@ import {
   listAssets,
   promoteGeneration,
   searchAssets,
+  setAssetDemoEvents,
   setAssetTags,
   updateAsset
 } from './assets'
@@ -132,6 +133,32 @@ describe('update / delete', () => {
     expect(existsSync(asset.filePath!)).toBe(false)
     // Deleting a missing asset is a no-op.
     expect(() => deleteAsset(asset.id)).not.toThrow()
+  })
+})
+
+describe('setAssetDemoEvents', () => {
+  it('stores the demo journal on the asset row and round-trips it (proves migration 0027)', () => {
+    const asset = importAssetFromBytes({
+      projectId,
+      bytes: new TextEncoder().encode('webm-bytes'),
+      mimeType: 'video/mp4',
+      name: 'Demo take'
+    })
+    expect(getAsset(asset.id)?.demoEvents).toBeNull()
+    expect(getAsset(asset.id)?.demoSource).toBeNull()
+
+    const events = [
+      { t: 1.2, type: 'click' as const, x: 0.25, y: 0.1 },
+      { t: 2, type: 'move' as const, x: 0.6, y: 0.4 },
+      { t: 3.5, type: 'key' as const }
+    ]
+    setAssetDemoEvents(asset.id, events)
+    expect(getAsset(asset.id)?.demoEvents).toEqual(events)
+    expect(getAsset(asset.id)?.demoSource).toBe('self')
+
+    // Screen takes record their provenance (the render keeps the real cursor).
+    setAssetDemoEvents(asset.id, events, 'screen')
+    expect(getAsset(asset.id)?.demoSource).toBe('screen')
   })
 })
 

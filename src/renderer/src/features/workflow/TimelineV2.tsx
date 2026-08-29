@@ -77,6 +77,7 @@ import { invoke } from '../../lib/ipc'
 import { useDismissable } from '../../components/ui/useDismissable'
 import { useShortcut } from '../../components/ui/useShortcut'
 import { VideoThumb } from '../../components/VideoThumb'
+import { DemoCameraStage, demoCameraInfoFor, type DemoCameraInfo } from './DemoCameraPreview'
 
 /** Timeline clock formatting: tenth-of-a-second precision, never raw floats. */
 const fmt = formatSeconds
@@ -946,17 +947,18 @@ export function TimelineV2({
     [clips, displaySlot]
   )
 
-  // Images the add-image picker offers: image-kind nodes with a successful
-  // output, plus image assets — excluding what already sits on the timeline.
+  // What the add-to-timeline picker offers: image-kind nodes with a successful
+  // output, plus image AND video assets (a video asset becomes a real clip) —
+  // excluding what already sits on the timeline.
   const imageCandidates = useMemo(() => {
     const placed = new Set(clipNodes.map((n) => n.id))
-    const out: Array<{ node: GraphNode; url: string }> = []
+    const out: Array<{ node: GraphNode; url: string; video?: boolean }> = []
     for (const node of graph.nodes) {
       if (placed.has(node.id)) continue
       if (node.modelId === 'studio/asset') {
         const media = assetMedia?.[node.id]
-        if (media?.url && media.mimeType?.startsWith('image/')) {
-          out.push({ node, url: media.url })
+        if (media?.url && media.kind !== 'audio') {
+          out.push({ node, url: media.url, video: media.kind === 'video' })
         }
       } else if (getModel(node.modelId)?.kind === 'image') {
         const best = bestGeneration(
@@ -1288,6 +1290,25 @@ export function TimelineV2({
     return out
   }, [clips, engine.starts, displaySlot])
 
+  // Demo camera preview (§9): replay the automatic camera (zooms, cursor,
+  // framing) on demo-take clips with the same pure math the render bakes.
+  const demoCameraByNode = useMemo(() => {
+    const out: Record<string, DemoCameraInfo> = {}
+    for (const node of graph.nodes) {
+      const info = demoCameraInfoFor(node.params, assetMedia?.[node.id])
+      if (info) out[node.id] = info
+    }
+    return out
+  }, [graph.nodes, assetMedia])
+  const getActiveMediaTime = useCallback((): number => {
+    const el = engine.activeSlot === 'A' ? engine.videoARef.current : engine.videoBRef.current
+    return el?.currentTime ?? 0
+  }, [engine.activeSlot, engine.videoARef, engine.videoBRef])
+  const getActiveMediaSize = useCallback((): { width: number; height: number } | null => {
+    const el = engine.activeSlot === 'A' ? engine.videoARef.current : engine.videoBRef.current
+    return el && el.videoWidth > 0 ? { width: el.videoWidth, height: el.videoHeight } : null
+  }, [engine.activeSlot, engine.videoARef, engine.videoBRef])
+
   if (collapsed) {
     return (
       <div className="island flex items-center gap-3 overflow-hidden px-3 py-1.5 text-[11px]">
@@ -1344,6 +1365,8 @@ export function TimelineV2({
   }
 
   const activeClip = clips[engine.activeIdx]
+  const activeDemoInfo =
+    activeClip && !activeClip.still ? (demoCameraByNode[activeClip.node.id] ?? null) : null
   // Live approximation of the clip's baked colour look (render parity: the
   // registry declares both the ffmpeg fragment and this CSS equivalent).
   const lookFilter = activeClip ? lookCssFilter(clipLook(activeClip.node)) : 'none'
@@ -1537,22 +1560,28 @@ export function TimelineV2({
             onClick={() => (engine.playing ? engine.pause() : engine.play())}
             title={t('timeline.playPause')}
           >
-            <video
-              ref={engine.videoARef}
-              onEnded={engine.advance}
-              playsInline
-              muted={muted}
-              style={{ filter: lookFilter, ...videoFadeStyle }}
-              className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'A' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-            />
-            <video
-              ref={engine.videoBRef}
-              onEnded={engine.advance}
-              playsInline
-              muted={muted || engine.activeSlot === 'A'}
-              style={{ filter: lookFilter, ...videoFadeStyle }}
-              className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-            />
+            <DemoCameraStage
+              info={activeDemoInfo}
+              getMediaTime={getActiveMediaTime}
+              getMediaSize={getActiveMediaSize}
+            >
+              <video
+                ref={engine.videoARef}
+                onEnded={engine.advance}
+                playsInline
+                muted={muted}
+                style={{ filter: lookFilter, ...videoFadeStyle }}
+                className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'A' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+              />
+              <video
+                ref={engine.videoBRef}
+                onEnded={engine.advance}
+                playsInline
+                muted={muted || engine.activeSlot === 'A'}
+                style={{ filter: lookFilter, ...videoFadeStyle }}
+                className={`absolute inset-0 h-full w-full ${engine.activeSlot === 'B' ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+              />
+            </DemoCameraStage>
             <audio ref={engine.audioRef} className="hidden" />
             <audio ref={engine.speechRef} className="hidden" />
             {/* Still slot: the image itself covers the (paused) video stack. */}
@@ -2278,7 +2307,9 @@ export function TimelineV2({
               splitAtMediaSec={splitPointOf(editClip.idx)}
               onClose={() => setEditClip(null)}
               onRemoveStill={
-                clip.still && !clip.placeholder
+                // Asset nodes (video assets included) are opt-in timeline
+                // members — the trash is their only un-place affordance.
+                clip.node.modelId === 'studio/asset' || (clip.still && !clip.placeholder)
                   ? () => {
                       setEditClip(null)
                       void invoke('nodes:setTimelineOrder', {
@@ -3138,7 +3169,7 @@ function ImagePickerPopover({
   onPick,
   onClose
 }: {
-  candidates: Array<{ node: GraphNode; url: string }>
+  candidates: Array<{ node: GraphNode; url: string; video?: boolean }>
   anchor: { x: number; y: number }
   onPick: (nodeId: string) => void
   onClose: () => void
@@ -3159,17 +3190,23 @@ function ImagePickerPopover({
         <p className="px-1 pb-1 text-neutral-500">{t('timeline.addImageEmpty')}</p>
       ) : (
         <div className="max-h-56 overflow-y-auto">
-          {candidates.map(({ node, url }) => (
+          {candidates.map(({ node, url, video }) => (
             <button
               key={node.id}
               onClick={() => onPick(node.id)}
               className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-neutral-800"
             >
-              <img
-                src={url}
-                alt=""
-                className="h-8 w-12 flex-shrink-0 rounded border border-neutral-800 object-cover"
-              />
+              {video ? (
+                <span className="h-8 w-12 flex-shrink-0 overflow-hidden rounded border border-neutral-800">
+                  <VideoThumb src={url} overlay={false} className="h-full w-full object-cover" />
+                </span>
+              ) : (
+                <img
+                  src={url}
+                  alt=""
+                  className="h-8 w-12 flex-shrink-0 rounded border border-neutral-800 object-cover"
+                />
+              )}
               <span className="truncate text-neutral-200">
                 {node.label ?? getModel(node.modelId)?.label ?? node.key}
               </span>

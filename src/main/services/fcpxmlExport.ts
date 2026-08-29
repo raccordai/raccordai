@@ -62,6 +62,13 @@ async function probe(path: string): Promise<ClipProbe | null> {
 
 /** Local path of the node's best successful output (video/audio/image). */
 function localOutputPath(node: GraphNode): string | null {
+  if (node.modelId === 'studio/asset') {
+    // Asset nodes have no generation rows: the managed file is the output
+    // (this is how a VIDEO asset exports as a real <asset-clip>).
+    const url = resolveSelectedOutputUrl(node, 'output')
+    const local = url ? resolveMediaUrlToFile(url) : null
+    return local?.path && existsSync(local.path) ? local.path : null
+  }
   const rows = listGenerationsForNode(node.id)
   const best = bestGeneration(
     node,

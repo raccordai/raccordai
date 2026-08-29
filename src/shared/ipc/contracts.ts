@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { MAX_VARIANTS } from '../config'
 import { SCENARIO_VERSION, SCREEN_DIRECTIONS, type Scenario } from '../scenario'
 import { type SpeechTranscript } from '../speech'
+import { type DemoEvent } from '../screenMotion'
 import { CLIP_TRANSITION_IDS, TRANSITION_MAX_SECONDS, TRANSITION_MIN_SECONDS } from '../transitions'
 import { CAPTION_PRESET_IDS } from '../captions'
 import {
@@ -92,7 +93,9 @@ export const appInfoSchema = z.object({
   localApi: z.object({
     running: z.boolean(),
     port: z.number().nullable()
-  })
+  }),
+  /** Demo mode (§9) is armed (RACCORD_DEMO=1): the recorder UI and demo:* channels are live. */
+  demo: z.boolean()
 })
 export type AppInfo = z.infer<typeof appInfoSchema>
 
@@ -177,6 +180,21 @@ export type Video = z.infer<typeof videoSchema>
 
 export const mediaKindSchema = z.enum(['image', 'video', 'audio'])
 
+/**
+ * Demo mode (§9): one input event of a self-recorded demo session — the feed
+ * of the screen-motion compiler. Zod mirror of `DemoEvent` from
+ * src/shared/screenMotion.ts, kept identical by the Exactly<> witness below.
+ */
+export const demoEventSchema = z.object({
+  t: z.number(),
+  type: z.enum(['click', 'move', 'key', 'scroll']),
+  x: z.number().optional(),
+  y: z.number().optional()
+})
+export type DemoEventContractMatchesShared = Exactly<z.infer<typeof demoEventSchema>, DemoEvent>
+const demoEventContractMatchesShared: DemoEventContractMatchesShared = true
+void demoEventContractMatchesShared
+
 export const assetSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -194,6 +212,14 @@ export const assetSchema = z.object({
   designId: z.string().nullable(),
   /** The subject the design sheet was built from ("Mira, 12, red scarf"). */
   designSubject: z.string().nullable(),
+  /** Demo mode (§9): the recording's input-event journal (screen-motion feed). */
+  demoEvents: z.array(demoEventSchema).nullable().optional(),
+  /**
+   * What the take captured: 'self' = Raccord window, 'screen' = a display,
+   * 'staged' = a window take driven by the gesture engine (its visible cursor
+   * is already in the pixels — the render bakes no synthetic one).
+   */
+  demoSource: z.enum(['self', 'screen', 'staged']).nullish(),
   createdAt: z.number(),
   updatedAt: z.number().nullable()
 })
@@ -650,6 +676,11 @@ export const graphNodeSchema = z.object({
   timelineOffsetSec: z.number().nullable().optional(),
   /** Split clip (§6.12e): materialized segments, null = one implicit segment. */
   segments: z.array(timelineSegmentSchema).nullable().optional(),
+  /**
+   * Kind of the referenced asset — derived at read time by listGraph, never
+   * stored. Only present on `studio/asset` nodes; absent/null ⇒ still slot.
+   */
+  assetKind: mediaKindSchema.nullish(),
   createdAt: z.number(),
   updatedAt: z.number()
 })
@@ -901,6 +932,148 @@ export type PlannedRow = z.infer<typeof plannedRowSchema>
 
 export const ipcContracts = {
   'app:getInfo': { input: z.void(), output: appInfoSchema },
+
+  /**
+   * Demo mode (§9) — the app records itself. `demo:start` opens a session in
+   * main (staging dir + growing webm) and, unless `external`, resizes the
+   * window and broadcasts event:demoControl for the renderer recorder to obey;
+   * `external: true` is the driver/harness mode where the caller feeds
+   * appendChunk/finish itself. All channels throw when RACCORD_DEMO ≠ 1.
+   */
+  'demo:start': {
+    input: z.object({
+      /** Default destination project (demo:stop can override); omitted = Downloads. */
+      projectId: z.string().optional(),
+      /**
+       * What to film. 'window' (the default) films Raccord's OWN window —
+       * frame capture: pixel-exact content, other windows never in the take,
+       * no Screen Recording prompt. 'app' films ONE third-party window
+       * (macOS: bounds via System Events — Accessibility + a one-time
+       * "control System Events" consent). 'display' films a whole screen.
+       * All targets share the same journal: the global hook normalized
+       * against the live capture area (Accessibility required, missing ⇒
+       * warning, no auto camera).
+       */
+      target: z.enum(['window', 'display', 'app']).optional(),
+      /** Application to film in 'app' mode (fuzzy process-name match; demo:listWindows lists them). Implies target 'app'. */
+      app: z.string().optional(),
+      /**
+       * Pins ONE window of that app (title contains, case-insensitive) — a
+       * browser demo tab instead of whatever window is frontmost. The capture
+       * stays pinned even when the title changes (navigation); the journal
+       * follows the window by geometry.
+       */
+      windowTitle: z.string().optional(),
+      /** Display to record in 'display' mode (demo:listDisplays; default: Raccord's). Implies target 'display'. */
+      displayId: z.number().int().optional(),
+      /** Driver mode: no broadcast, no hook — the caller streams media and events itself. */
+      external: z.boolean().optional()
+    }),
+    output: z.object({ sessionId: z.string() })
+  },
+  /** Every visible window of every app (macOS) — pick one for an 'app' demo take. */
+  'demo:listWindows': {
+    input: z.void(),
+    output: z.array(
+      z.object({
+        app: z.string(),
+        title: z.string(),
+        bounds: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+      })
+    )
+  },
+  /** The machine's displays — pick one for a 'screen' demo take. */
+  'demo:listDisplays': {
+    input: z.void(),
+    output: z.array(
+      z.object({
+        id: z.number(),
+        label: z.string(),
+        bounds: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+        scaleFactor: z.number(),
+        primary: z.boolean()
+      })
+    )
+  },
+  /** One base64 slice of the webm (≤ ~4 MB); seq must be the next expected index. */
+  'demo:appendChunk': {
+    input: z.object({
+      sessionId: z.string(),
+      seq: z.number().int().min(0),
+      base64: z.string().min(1)
+    }),
+    output: z.void()
+  },
+  /**
+   * The recorder's terminal report: media fully appended + the event journal
+   * (or `error` when the capture failed). Resolves the pending demo:stop.
+   */
+  'demo:finish': {
+    input: z.object({
+      sessionId: z.string(),
+      durationSec: z.number().min(0),
+      events: z.array(demoEventSchema),
+      /** Date.now() at recorder.onstart — the base main rebases GLOBAL-hook events onto. */
+      captureStartEpochMs: z.number().optional(),
+      error: z.string().optional()
+    }),
+    output: z.void()
+  },
+  /**
+   * Stop the take and wait for the result: transcoded mp4 imported as a
+   * project video asset (journal stored on the row), or files in Downloads
+   * when the session has no project. `format: 'webm'` = transcode failed but
+   * the take was kept.
+   */
+  'demo:stop': {
+    input: z
+      .object({
+        /** Overrides the start's destination — where the take is imported. */
+        projectId: z.string().optional()
+      })
+      .optional(),
+    output: z.object({
+      assetId: z.string().nullable(),
+      path: z.string(),
+      eventsPath: z.string().nullable(),
+      durationSec: z.number(),
+      format: z.enum(['mp4', 'webm']),
+      /** Degradations worth telling the user (e.g. global hook unavailable → no journal). */
+      warnings: z.array(z.string()),
+      events: z.array(demoEventSchema)
+    })
+  },
+  /**
+   * Agent pointing: journal a synthetic click at a SCREEN coordinate during a
+   * take (the renderer forwards focus_node landings here — tool-driven demos
+   * never move the real mouse, this is how the auto camera gets its targets).
+   */
+  'demo:point': {
+    input: z.object({ x: z.number(), y: z.number() }),
+    output: z.void()
+  },
+  /**
+   * Gesture engine (§9): the renderer's reply to an event:demoGesture request
+   * — main resolves the pending demo_gesture tool call with it.
+   */
+  'demo:gestureResult': {
+    input: z.object({
+      requestId: z.string(),
+      ok: z.boolean(),
+      error: z.string().optional()
+    }),
+    output: z.void()
+  },
+  /** Recorder state — banner rehydration after a renderer reload, E2E assertions. */
+  'demo:status': {
+    input: z.void(),
+    output: z.object({
+      recording: z.boolean(),
+      sessionId: z.string().nullable(),
+      startedAt: z.number().nullable()
+    })
+  },
+
   'settings:getLocale': { input: z.void(), output: localeSchema },
   'settings:setLocale': { input: localeSchema, output: z.void() },
   'projects:list': { input: z.void(), output: z.array(projectSchema) },
@@ -1954,7 +2127,9 @@ export const ipcEvents = [
   'event:navigate',
   'event:nichesChanged',
   'event:voicePersonasChanged',
-  'event:updateStateChanged'
+  'event:updateStateChanged',
+  'event:demoControl',
+  'event:demoGesture'
 ] as const
 export type IpcEvent = (typeof ipcEvents)[number]
 
@@ -1974,12 +2149,39 @@ export interface NavigatePayload {
   path: string
 }
 
+/** Demo mode (§9): main tells the renderer recorder to start/stop capturing. */
+export interface DemoControlPayload {
+  action: 'start' | 'stop'
+  sessionId: string
+}
+
+/**
+ * Gesture engine (§9): one UI gesture the renderer must PERFORM — a visible
+ * cursor travels to the resolved element and real DOM events fire, so a
+ * driven demo shows actual interactions (menus opening, typing) instead of
+ * invisible tool mutations.
+ */
+export interface DemoGesturePayload {
+  requestId: string
+  gesture: {
+    kind: 'click' | 'type' | 'press' | 'hover'
+    /** Element query: title/visible text/placeholder, case- and accent-insensitive. */
+    target?: string
+    /** Text to type progressively (kind 'type'). */
+    text?: string
+    /** Key to press on the active element (kind 'press'): Enter, Escape, ArrowDown… */
+    key?: string
+    /** After typing, blur to commit controlled inputs (NodeParamsPanel prompt). */
+    commit?: boolean
+  }
+}
+
 /** Progress of an MP4 render. One terminal event is always sent: done or error. */
 export interface RenderProgressPayload {
   videoId: string
-  /** 0–100 across the whole pipeline (probe → normalize → transition → concat → subtitles → overlay → mux). */
+  /** 0–100 across the whole pipeline (probe → demo → normalize → transition → concat → subtitles → overlay → mux). */
   percent: number
-  step: 'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
+  step: 'probe' | 'demo' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
   done?: boolean
   /** Set on the terminal event when the render failed (or was cancelled). */
   error?: string

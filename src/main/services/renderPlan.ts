@@ -862,6 +862,104 @@ export function buildOverlayArgs(
  * thing a headless MCP run doesn't have). `-sseof -0.1` seeks from the end;
  * `-update 1` writes a single image.
  */
+/**
+ * Demo mode (§9): transcode a MediaRecorder webm capture into an editable mp4.
+ * H.264 + yuv420p for the timeline/render pipeline, even dimensions (webm
+ * captures can be odd-sized), faststart for instant scrubbing, no audio —
+ * the capture has none.
+ */
+export function buildDemoTranscodeArgs(webmPath: string, mp4Path: string): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    webmPath,
+    // MediaRecorder webm carries millisecond timestamps with NO declared
+    // frame rate (players read that as ~1000 fps): resample to a clean CFR
+    // matching the recorder's requested rate. 1:1 in time — the journal's
+    // wall-clock timestamps are untouched.
+    '-vf',
+    'scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=30',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    '20',
+    '-pix_fmt',
+    'yuv420p',
+    '-an',
+    '-movflags',
+    '+faststart',
+    mp4Path
+  ]
+}
+
+/**
+ * Demo camera (§9): the synthetic cursor image — a soft white dot with a
+ * translucent halo, drawn once per render (the screen-motion pass composites
+ * it BEFORE the zoom so it scales with the picture).
+ */
+export function buildCursorImageArgs(outputPath: string): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=white:s=56x56,format=rgba',
+    '-vf',
+    "geq=r=255:g=255:b=255:a='255*clip((14-hypot(X-28,Y-28))/3,0,1)+90*clip((24-hypot(X-28,Y-28))/6,0,1)*lt(14,hypot(X-28,Y-28))'",
+    '-frames:v',
+    '1',
+    outputPath
+  ]
+}
+
+/**
+ * Demo camera (§9): bake the automatic screen-motion camera into a clip —
+ * capture on input 0, cursor on input 1 (when the journal has positions),
+ * `filter` from the shared buildScreenMotionFilter. 1:1 in time, so the
+ * baked file slots into the pipeline exactly where the raw capture was
+ * (trims/speed/transitions untouched). h264/yuv420p keeps lossless concat
+ * possible on homogeneous demo timelines; no audio — captures have none.
+ */
+export function buildDemoCameraArgs(
+  capturePath: string,
+  cursorPath: string | null,
+  outputPath: string,
+  filter: string
+): string[] {
+  return [
+    '-y',
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    capturePath,
+    ...(cursorPath ? ['-i', cursorPath] : []),
+    '-filter_complex',
+    filter,
+    '-map',
+    '[out]',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    '18',
+    '-pix_fmt',
+    'yuv420p',
+    '-an',
+    '-progress',
+    'pipe:1',
+    '-movflags',
+    '+faststart',
+    outputPath
+  ]
+}
+
 export function buildLastFrameArgs(inputPath: string, outputPath: string): string[] {
   return [
     '-y',
@@ -1065,7 +1163,7 @@ export function parseProgressLine(line: string): number | null {
 }
 
 export type RenderStep =
-  'probe' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
+  'probe' | 'demo' | 'normalize' | 'transition' | 'concat' | 'subtitles' | 'overlay' | 'mux'
 
 export interface StageSpan {
   step: RenderStep
@@ -1080,11 +1178,18 @@ export interface StageSpan {
 export function computeStageSpans(
   needsNormalize: boolean,
   hasMusic: boolean,
-  extras: { hasTransitions?: boolean; hasSubtitles?: boolean; hasOverlays?: boolean } = {}
+  extras: {
+    hasTransitions?: boolean
+    hasSubtitles?: boolean
+    hasOverlays?: boolean
+    hasDemoBakes?: boolean
+  } = {}
 ): StageSpan[] {
   const weights: Array<[RenderStep, number]> = needsNormalize
     ? [
         ['probe', 4],
+        // A demo bake re-encodes each take in full — normalize-scale work.
+        ['demo', extras.hasDemoBakes ? 40 : 0],
         ['normalize', 66],
         ['transition', extras.hasTransitions ? 12 : 0],
         ['concat', 15],
@@ -1094,6 +1199,7 @@ export function computeStageSpans(
       ]
     : [
         ['probe', 10],
+        ['demo', extras.hasDemoBakes ? 40 : 0],
         ['concat', 60],
         ['subtitles', extras.hasSubtitles ? 15 : 0],
         ['overlay', extras.hasOverlays ? 15 : 0],

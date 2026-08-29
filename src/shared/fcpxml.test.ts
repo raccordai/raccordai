@@ -90,6 +90,42 @@ describe('buildFcpxml audio lanes', () => {
   })
 })
 
+describe('buildFcpxml asset clips', () => {
+  it('a video asset with probed media emits a real asset-clip with its own format', () => {
+    const recording = {
+      node: node({
+        modelId: 'studio/asset',
+        assetKind: 'video' as const,
+        label: 'Screen recording',
+        timelineOrder: 0,
+        trimStartSec: 2
+      }),
+      mediaPath: 'media/01-screen_recording.mp4',
+      media: { width: 1280, height: 720, duration: 30 }
+    }
+    const xml = buildFcpxml('Film', [recording])
+    const spine = xml.slice(xml.indexOf('<spine>'), xml.indexOf('</spine>'))
+    expect(spine).toContain('<asset-clip ')
+    expect(spine).not.toContain('STILL')
+    // Its own probed format, not the sequence canvas.
+    expect(xml).toContain('width="1280" height="720"')
+    // The trim in-point survives as the clip start (25 fps: 2 s = frame 50).
+    expect(spine).toContain('start="5000/2500s"')
+  })
+
+  it('an image asset still keeps the historical still emission', () => {
+    const still = {
+      node: node({ modelId: 'studio/asset', assetKind: 'image' as const, timelineOrder: 0 }),
+      mediaPath: 'media/01-still.png',
+      isStill: true
+    }
+    const xml = buildFcpxml('Film', [still])
+    const spine = xml.slice(xml.indexOf('<spine>'), xml.indexOf('</spine>'))
+    expect(spine).toContain('<video ')
+    expect(spine).not.toContain('<asset-clip ')
+  })
+})
+
 describe('extForMime audio', () => {
   it('maps the common audio containers', () => {
     expect(extForMime('audio/mpeg')).toBe('mp3')

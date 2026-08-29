@@ -11,8 +11,15 @@ import { useShortcut } from '@renderer/components/ui/useShortcut'
 import { AssistantSidebar } from '@renderer/features/assistant/AssistantSidebar'
 import { toggleAssistant, useAssistant } from '@renderer/features/assistant/assistantStore'
 import { FirstRunOverlay } from '@renderer/features/onboarding/FirstRunOverlay'
+import {
+  handleDemoControl,
+  reconcileDemoStatus,
+  useDemoRecorder
+} from '@renderer/features/demo/demoRecorderStore'
+import { handleDemoGesture } from '@renderer/features/demo/demoGestureEngine'
 import { invoke } from '@renderer/lib/ipc'
-import type { NavigatePayload } from '@shared/ipc/contracts'
+import { reportRendererError } from '@renderer/lib/errorReporter'
+import type { DemoControlPayload, DemoGesturePayload, NavigatePayload } from '@shared/ipc/contracts'
 
 export const Route = createRootRoute({
   component: RootLayout
@@ -46,6 +53,7 @@ function RootLayout(): React.JSX.Element {
           </header>
           <MissingKeyBanner />
           <UpdateBanner />
+          <DemoModeController />
           <div className="flex min-h-0 flex-1">
             <AssistantSidebar />
             <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -166,6 +174,52 @@ function UpdateBanner(): React.JSX.Element | null {
       </button>
     </div>
   )
+}
+
+/**
+ * Demo mode (§9): headless renderer-side wiring — the demoControl
+ * subscription, the reload reconciliation and the ⇧⌘R toggle. Deliberately
+ * NO in-window visual: the old REC banner was part of the captured page and
+ * ended up in every take; the indicator is now main's floating pill window
+ * (content-protected, excluded from captures). Inert unless the app was
+ * launched with RACCORD_DEMO=1 (app:getInfo.demo).
+ */
+function DemoModeController(): null {
+  const info = useQuery({ queryKey: ['app', 'info'], queryFn: () => invoke('app:getInfo') })
+  const demo = info.data?.demo === true
+  const { recording } = useDemoRecorder()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const projectId = /^\/projects\/([^/]+)/.exec(pathname)?.[1]
+
+  useEffect(() => {
+    if (!demo) return
+    void reconcileDemoStatus()
+    const offControl = window.api.on('event:demoControl', (payload) =>
+      handleDemoControl(payload as DemoControlPayload)
+    )
+    const offGesture = window.api.on('event:demoGesture', (payload) =>
+      handleDemoGesture(payload as DemoGesturePayload)
+    )
+    return () => {
+      offControl()
+      offGesture()
+    }
+  }, [demo])
+
+  const toggle = useCallback(() => {
+    const run = recording
+      ? invoke('demo:stop', undefined)
+      : invoke('demo:start', projectId ? { projectId } : {})
+    void run.then(
+      () => undefined,
+      (error: unknown) => reportRendererError('demo', error)
+    )
+  }, [recording, projectId])
+
+  // Stop must work while a text field has focus — a demo often ends mid-typing.
+  useShortcut('toggleDemoRecording', toggle, { enabled: demo, allowWhileTyping: true })
+
+  return null
 }
 
 /**

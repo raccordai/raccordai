@@ -10,6 +10,9 @@ import {
   buildConcatArgs,
   buildConcatListContent,
   buildCrossfadeArgs,
+  buildCursorImageArgs,
+  buildDemoCameraArgs,
+  buildDemoTranscodeArgs,
   buildLastFrameArgs,
   buildPreviewArgs,
   resolvePreviewSeek,
@@ -402,6 +405,18 @@ describe('progress mapping', () => {
     }
   })
 
+  it('budgets a real span for demo bakes, absent otherwise', () => {
+    for (const normalize of [true, false]) {
+      const spans = computeStageSpans(normalize, false, { hasDemoBakes: true })
+      const demo = spans.find((s) => s.step === 'demo')
+      expect(demo).toBeDefined()
+      // The bake re-encodes each take in full — it deserves a visible share.
+      expect(demo!.to - demo!.from).toBeGreaterThan(20)
+      expect(spans.at(-1)!.to).toBeCloseTo(100)
+      expect(computeStageSpans(normalize, false).some((s) => s.step === 'demo')).toBe(false)
+    }
+  })
+
   it('maps a stage-local fraction to the overall percent, clamped', () => {
     const spans = computeStageSpans(true, true)
     expect(overallPercent(spans, 'probe', 0)).toBe(0)
@@ -441,6 +456,83 @@ describe('trim on planned clips', () => {
     const joined = args.join(' ')
     expect(joined).toContain('-ss 1.500')
     expect(joined).toContain('-t 2.500 -i /media/a.mp4')
+  })
+})
+
+describe('demo camera builders', () => {
+  it('buildCursorImageArgs draws the one-shot cursor png', () => {
+    const args = buildCursorImageArgs('/tmp/demo-cursor.png')
+    const joined = args.join(' ')
+    expect(joined).toContain('color=white:s=56x56,format=rgba')
+    expect(joined).toContain('geq=')
+    expect(joined).toContain('-frames:v 1')
+    expect(args.at(-1)).toBe('/tmp/demo-cursor.png')
+  })
+
+  it('buildDemoCameraArgs wires capture + cursor through the filter to h264', () => {
+    const args = buildDemoCameraArgs(
+      '/media/take.mp4',
+      '/tmp/demo-cursor.png',
+      '/tmp/demo-cam-01.mp4',
+      '[0:v][1:v]overlay=x=1:y=1[comp];[comp]zoompan=z=1[out]'
+    )
+    const joined = args.join(' ')
+    expect(joined).toContain('-i /media/take.mp4 -i /tmp/demo-cursor.png')
+    expect(joined).toContain('-map [out]')
+    expect(joined).toContain('-c:v libx264')
+    expect(joined).toContain('-pix_fmt yuv420p')
+    expect(joined).toContain('-an')
+    // Machine-readable encode progress — the render maps it onto the bar.
+    expect(joined).toContain('-progress pipe:1')
+    expect(args.at(-1)).toBe('/tmp/demo-cam-01.mp4')
+  })
+
+  it('buildDemoCameraArgs skips the cursor input on a positionless journal', () => {
+    const args = buildDemoCameraArgs(
+      '/media/take.mp4',
+      null,
+      '/tmp/out.mp4',
+      '[0:v]zoompan=z=1[out]'
+    )
+    const joined = args.join(' ')
+    expect(joined).toContain('-i /media/take.mp4 -filter_complex')
+    expect(joined).not.toContain('cursor')
+  })
+})
+
+describe('buildDemoTranscodeArgs', () => {
+  it('turns a webm capture into an editable mp4: h264, even dims, no audio, faststart', () => {
+    const args = buildDemoTranscodeArgs('/tmp/capture.webm', '/tmp/capture.mp4')
+    const joined = args.join(' ')
+    expect(joined).toContain('-i /tmp/capture.webm')
+    expect(joined).toContain('-vf scale=trunc(iw/2)*2:trunc(ih/2)*2')
+    expect(joined).toContain('-c:v libx264')
+    expect(joined).toContain('-pix_fmt yuv420p')
+    expect(joined).toContain('-an')
+    expect(joined).toContain('-movflags +faststart')
+    expect(args.at(-1)).toBe('/tmp/capture.mp4')
+  })
+})
+
+describe('asset-sourced clips', () => {
+  // A video ASSET (imported mp4, screen recording) reaches this layer as a
+  // plain {isStill: false, probe} clip — deliberately indistinguishable from a
+  // generated clip, so trims/speed/lossless-concat behave identically.
+  it('behave exactly like generated clips: lossless concat and trimmed/speeded argv', () => {
+    const assetClip = (over: Partial<PlannedClip> = {}) =>
+      clip({ path: '/media/recording.mp4', ...over })
+    const spec = decideSequenceSpec([assetClip()])
+    expect(canConcatLosslessly([assetClip(), assetClip()], spec)).toBe(true)
+    expect(decideSequenceSpec([assetClip({ probe: probe({ width: 1280, height: 720 }) })])).toEqual(
+      { width: 1280, height: 720, fps: 24 }
+    )
+
+    const edited = assetClip({ trimStartSec: 2, trimEndSec: 10, speed: 2 })
+    const args = buildNormalizeArgs(edited, spec, '/tmp/seg.mp4').join(' ')
+    expect(args).toContain('-ss 2.000')
+    expect(args).toContain('-t 8.000 -i /media/recording.mp4')
+    expect(args).toContain('setpts=PTS/2')
+    expect(clipEffectiveDuration(edited)).toBe(4)
   })
 })
 

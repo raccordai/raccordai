@@ -1,5 +1,6 @@
 import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import type { Scenario } from '@shared/scenario'
+import type { DemoEvent } from '@shared/screenMotion'
 
 /**
  * Schema evolutions are additive only: new tables/columns via drizzle-kit
@@ -54,6 +55,10 @@ export const assets = sqliteTable(
     designSubject: text('design_subject'),
     /** SHA-256 of the managed file — duplicate detection within a project. */
     contentHash: text('content_hash'),
+    /** Demo mode (§9): the recording's input-event journal, feed of the screen-motion compiler. */
+    demoEvents: text('demo_events', { mode: 'json' }).$type<DemoEvent[]>(),
+    /** What the take captured: 'self' (Raccord window), 'screen' (external display) or 'staged' (gesture-driven — visible cursor in the pixels). */
+    demoSource: text('demo_source', { enum: ['self', 'screen', 'staged'] }),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at')
   },

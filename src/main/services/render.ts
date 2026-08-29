@@ -25,6 +25,7 @@ import {
   type TimelineEntry
 } from '@shared/timeline'
 import { xfadeNameFor } from '@shared/transitions'
+import { bakeTargetSize, buildScreenMotionFilter, demoCameraEnabled } from '@shared/screenMotion'
 import type { SpeechTranscript } from '@shared/speech'
 import { broadcastRenderProgress } from '../events'
 import { resolveMediaUrlToFile } from '../media/protocol'
@@ -34,6 +35,7 @@ import {
   timelineFallbackImages,
   type GenerationRow
 } from './generations'
+import { logError } from './logger'
 import { listTextLayers } from './textLayers'
 import { listImageLayers } from './imageLayers'
 import { getAsset } from './assets'
@@ -45,6 +47,8 @@ import {
   buildConcatArgs,
   buildConcatListContent,
   buildCrossfadeArgs,
+  buildCursorImageArgs,
+  buildDemoCameraArgs,
   buildMuxArgs,
   buildNormalizeArgs,
   buildOverlayArgs,
@@ -188,12 +192,24 @@ async function downloadTo(workDir: string, name: string, url: string): Promise<s
   return target
 }
 
-/** Local path of a node's best output (generation rows carry absolute paths). */
+/**
+ * Local path of a node's best output (generation rows carry absolute paths).
+ * Asset nodes have no generation rows: their managed file IS the output
+ * (a video asset renders as a real clip), so `row` is null for them — a
+ * dangling filePath returns null and the slot lands in `skipped`.
+ */
 async function resolveNodeMedia(
   workDir: string,
   node: GraphNode,
   name: string
-): Promise<{ path: string; row: GenerationRow } | null> {
+): Promise<{ path: string; row: GenerationRow | null } | null> {
+  if (node.modelId === 'studio/asset') {
+    const url = resolveSelectedOutputUrl(node, 'output')
+    if (!url) return null
+    const local = resolveMediaUrlToFile(url)
+    if (local) return existsSync(local.path) ? { path: local.path, row: null } : null
+    return { path: await downloadTo(workDir, name, url), row: null }
+  }
   const rows = listGenerationsForNode(node.id)
   const best = bestGeneration(
     node,
@@ -347,7 +363,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           const { start, end } = clipTrim(node, Number.POSITIVE_INFINITY)
           const volume = clipVolume(node)
           lane.push({
-            transcript: (media.row.transcript ?? null) as SpeechTranscript | null,
+            transcript: (media.row?.transcript ?? null) as SpeechTranscript | null,
             offsetSec: clipTimelineOffset(node),
             track: {
               path: media.path,
@@ -392,12 +408,109 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     const hasAudioLane = musicTracks.length > 0 || speechTracks.length > 0
 
     // ── Probe ────────────────────────────────────────────────────────────
-    const probeSpansGuess = computeStageSpans(true, hasAudioLane)
+    // Demo bakes are known BEFORE probing (journal + markers live in the db),
+    // so the progress bar can budget them a real span up front.
+    const demoBakeKeyFor = (clip: PlannedClip, node: GraphNode): string | null => {
+      if (clip.isStill || node.modelId !== 'studio/asset') return null
+      const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+      const asset = assetId ? getAsset(assetId) : null
+      if (!asset?.demoEvents || !demoCameraEnabled(node.params, asset.demoEvents)) return null
+      // The framed look (§9) is a per-clip params marker — two nodes
+      // sharing an asset may frame differently, so the key carries it.
+      const framed = (node.params as { demoFrame?: unknown } | undefined)?.demoFrame === true
+      return `${clip.path}|${framed ? 'framed' : 'plain'}`
+    }
+    const demoBakeKeys = new Set<string>()
+    for (const [i, clip] of clips.entries()) {
+      const key = demoBakeKeyFor(clip, clipEntries[i]!.node)
+      if (key) demoBakeKeys.add(key)
+    }
+    const hasDemoBakes = demoBakeKeys.size > 0
+    const probeSpansGuess = computeStageSpans(true, hasAudioLane, { hasDemoBakes })
     progress(probeSpansGuess, 'probe', 0)
+
+    // Demo camera (§9): a clip whose asset carries an input-event journal is
+    // BAKED first (auto zoom on clicks + synthetic cursor, shared screen-
+    // motion compiler) — 1:1 in time, so the baked file then flows through
+    // the pipeline exactly where the raw capture was (trims/speed/transitions
+    // untouched, probe reads the baked truth). One bake per path (split
+    // segments share); opt-out via the node's `demoCamera: false` params
+    // marker; a bake failure renders the raw capture, never fails the render.
+    const bakedByPath = new Map<string, string | null>()
+    let cursorPath: string | null = null
+    let bakeIndex = 0
+    const bakeDemoCamera = async (clip: PlannedClip, node: GraphNode): Promise<void> => {
+      const bakeKey = demoBakeKeyFor(clip, node)
+      if (!bakeKey) return
+      const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+      const asset = getAsset(assetId!)!
+      const framed = bakeKey.endsWith('|framed')
+      if (bakedByPath.has(bakeKey)) {
+        const baked = bakedByPath.get(bakeKey)
+        if (baked) clip.path = baked
+        return
+      }
+      const rawPath = clip.path
+      try {
+        const rawProbe = await probeFile(active, rawPath)
+        if (!rawProbe.width || !rawProbe.height || !rawProbe.durationSeconds) {
+          bakedByPath.set(bakeKey, null)
+          return
+        }
+        // Retina captures come in at 2× — bake at the capped size (the whole
+        // downstream pipeline inherits the baked resolution).
+        const target = bakeTargetSize(rawProbe.width, rawProbe.height)
+        const { filter, usesCursor } = buildScreenMotionFilter(
+          asset.demoEvents!,
+          rawProbe.durationSeconds,
+          {
+            width: target.width,
+            height: target.height,
+            fps: rawProbe.fps ?? 30,
+            // Synthetic cursor unless the take was gesture-driven ('staged'):
+            // the gesture engine's visible cursor is already in the pixels.
+            // (Screen captures exclude the real OS cursor, so everywhere else
+            // the journal-driven glide is the only cursor there is.)
+            cursor: asset.demoSource !== 'staged',
+            ...(framed ? { frame: {} } : {})
+          }
+        )
+        if (usesCursor && !cursorPath) {
+          cursorPath = join(workDir, 'demo-cursor.png')
+          await run(active, ffmpegPath(), buildCursorImageArgs(cursorPath))
+        }
+        bakeIndex += 1
+        const bakedPath = join(workDir, `demo-cam-${String(bakeIndex).padStart(2, '0')}.mp4`)
+        // Real encode progress on the 'demo' span — a bake re-encodes the
+        // whole take, easily the longest part of a demo export.
+        const done = bakeIndex - 1
+        const bakeDuration = rawProbe.durationSeconds
+        progress(probeSpansGuess, 'demo', done / demoBakeKeys.size)
+        await run(
+          active,
+          ffmpegPath(),
+          buildDemoCameraArgs(rawPath, usesCursor ? cursorPath : null, bakedPath, filter),
+          (line) => {
+            const seconds = parseProgressLine(line)
+            if (seconds === null) return
+            const local = Math.min(1, seconds / bakeDuration)
+            progress(probeSpansGuess, 'demo', (done + local) / demoBakeKeys.size)
+          }
+        )
+        bakedByPath.set(bakeKey, bakedPath)
+        clip.path = bakedPath
+      } catch (error) {
+        if (error instanceof RenderCancelledError) throw error
+        logError('demo', 'camera bake failed — rendering the raw capture', error)
+        bakedByPath.set(bakeKey, null)
+      }
+    }
+
     // Split halves share one file — probe each path once.
     const probeByPath = new Map<string, ClipProbe>()
     for (const [i, clip] of clips.entries()) {
       if (!clip.isStill) {
+        await bakeDemoCamera(clip, clipEntries[i]!.node)
         let probe = probeByPath.get(clip.path)
         if (!probe) {
           probe = await probeFile(active, clip.path)
@@ -592,7 +705,8 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     const spans = computeStageSpans(!lossless, hasAudioLane, {
       hasTransitions: hasCrossfades(clips),
       hasSubtitles: hasBurnPass,
-      hasOverlays: overlays.length > 0
+      hasOverlays: overlays.length > 0,
+      hasDemoBakes
     })
 
     // ── Normalize (heterogeneous clips only) ─────────────────────────────
@@ -793,6 +907,8 @@ export interface RenderPlanEntry {
   source: 'video' | 'still' | 'fallback-still' | 'remote' | 'skipped'
   /** Effective slot length when computable (trim + speed applied). */
   durationSec: number | null
+  /** Demo camera (§9): the automatic screen-motion pass will bake this slot. */
+  demoCamera?: boolean
 }
 
 export interface RenderPlanSummary {
@@ -875,6 +991,48 @@ export async function planRender(
         skipped.push(label(node))
         entries.push({ ...base, source: 'skipped', durationSec: null })
       }
+      continue
+    }
+    // A non-still asset node is a VIDEO asset: its managed file is the clip.
+    if (node.modelId === 'studio/asset') {
+      const url = resolveSelectedOutputUrl(node, 'output')
+      const local = url ? resolveMediaUrlToFile(url) : null
+      const localPath = local && existsSync(local.path) ? local.path : null
+      if (!localPath && (local || !url)) {
+        // No asset, or a managed file gone missing → the render would skip it.
+        skipped.push(label(node))
+        entries.push({ ...base, source: 'skipped', durationSec: null })
+        continue
+      }
+      const probe = localPath ? await probeOnce(localPath) : null
+      const clip: PlannedClip = {
+        path: localPath ?? url!,
+        isStill: false,
+        stillDurationSeconds: 0,
+        probe
+      }
+      const { start, end } = segmentTrim(entry.segment, probe?.durationSeconds ?? undefined)
+      if (start > 0) clip.trimStartSec = start
+      if (end !== undefined) clip.trimEndSec = end
+      const speed = clipSpeed(node)
+      if (speed !== 1) clip.speed = speed
+      const look = clipLook(node)
+      if (look) clip.look = look
+      clip.transitionAfter = segmentTransitionAfter(entry.segment)
+      clip.transitionDurationSec = segmentTransitionSeconds(entry.segment)
+      clips.push(clip)
+      const duration = clipEffectiveDuration(clip)
+      // Demo camera (§9): reported, never baked in a dry run (1:1 in time,
+      // so the planned duration is already exact).
+      const assetId = (node.params as { assetId?: string } | undefined)?.assetId
+      const asset = assetId ? getAsset(assetId) : null
+      const demoCamera = demoCameraEnabled(node.params, asset?.demoEvents ?? null)
+      entries.push({
+        ...base,
+        source: localPath ? 'video' : 'remote',
+        durationSec: duration > 0 ? Number(duration.toFixed(3)) : null,
+        ...(demoCamera ? { demoCamera: true } : {})
+      })
       continue
     }
     const rows = listGenerationsForNode(node.id)

@@ -38,6 +38,13 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # uiohook-napi (demo mode's input hook) compiles against X11 on Linux.
+      - name: Install uiohook-napi build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxrandr-dev libxtst-dev libxt-dev
+
       # postinstall rebuilds better-sqlite3 for Electron's ABI on each OS.
       - run: pnpm install --frozen-lockfile
 
