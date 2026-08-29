@@ -18,6 +18,12 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # uiohook-napi (demo mode's input hook) compiles against X11 on Linux.
+      - name: Install uiohook-napi build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxt-dev libxinerama-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev
+
       # postinstall runs electron-builder install-app-deps, so better-sqlite3
       # is built for Electron's ABI — tests run through Electron's node
       # (ELECTRON_RUN_AS_NODE, see scripts/run-vitest.mjs).
@@ -61,10 +67,12 @@ jobs:
 
       # Electron's runtime deps + a virtual display: the app is a real window,
       # even headless. libasound is named libasound2t64 since Ubuntu 24.04.
+      # The X11 dev headers are for uiohook-napi's native build (demo mode).
       - name: Install Electron runtime dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1
+          sudo apt-get install -y libx11-dev libxtst-dev libxt-dev libxinerama-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev
           sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2
 
       - run: pnpm install --frozen-lockfile
