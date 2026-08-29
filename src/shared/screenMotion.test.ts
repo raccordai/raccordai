@@ -208,8 +208,8 @@ describe('filter builders', () => {
     // Gradient background + shadow + a chromed window, ended by the capture.
     expect(framed.filter).toContain('gradients=s=1280x720:c0=0xb7b6ff:c1=0xff9bc6')
     expect(framed.filter).toContain('boxblur=0:0:0:0:18:2')
-    // The composition ends WITH the take: shortest overlays + a hard trim.
-    expect(framed.filter).toContain('shortest=1[fr0]')
+    // The composition ends WITH the take: shortest overlay + a hard trim.
+    expect(framed.filter).toContain('shortest=1[f0]')
     expect(framed.filter).toContain('trim=end=20.000,setpts=PTS-STARTPTS[framed]')
     // 1280×0.85 = 1088 even, 720×0.85 = 612 even.
     expect(framed.filter).toContain('[0:v]scale=1088:612[cap]')
@@ -218,9 +218,13 @@ describe('filter builders', () => {
     expect(framed.filter).toContain('color=c=0xff5f57')
     expect(framed.filter).toContain('color=c=0xfebc2e')
     expect(framed.filter).toContain('color=c=0x28c840')
-    // Rounding via a static mask (perf doctrine), sources bounded by the take.
+    // Perf doctrine: each static element is ONE frame, looped by reference;
+    // rounding via a static mask + alphamerge, never a per-frame geq.
     expect(framed.filter).toContain('alphamerge')
-    expect(framed.filter).toContain(':r=2:d=20.050,')
+    expect(framed.filter).toContain(':r=2:d=0.5,')
+    expect(framed.filter).toContain('loop=loop=-1:size=1,fps=30')
+    // The capture rides the flattened backdrop as a plain yuv420 overlay.
+    expect(framed.filter).toContain('format=yuv420p,split=3')
     // The cursor rides the framed composition, then the camera zooms it all.
     expect(framed.usesCursor).toBe(true)
     expect(framed.filter).toContain('[framed][1:v]overlay')

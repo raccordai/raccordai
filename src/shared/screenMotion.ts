@@ -491,12 +491,16 @@ function circleAlpha(d: number): string {
  * shadow silhouette, then a fake macOS WINDOW — title bar with the three
  * traffic lights above the capture, the whole thing rounded together.
  *
- * Performance doctrine: every STATIC element (gradient, shadow, dots, the
- * rounding mask) is generated at 2 fps — its per-pixel geq runs 15× less —
- * then duplicated to full rate by `fps`; the rounding itself is applied by
- * `alphamerge` against that static mask (a plane copy per frame) instead of
- * a per-frame geq. Every lavfi source is BOUNDED by the take's duration so
- * the output can never outrun the capture.
+ * Performance doctrine: EVERYTHING static — gradient, shadow, window chrome,
+ * traffic lights, rounding — is flattened into ONE backdrop frame computed
+ * exactly once (each lavfi source emits a single frame), then looped by
+ * reference at full rate. The per-frame work is a single rectangular yuv420
+ * overlay of the capture (the SIMD fast path — a full-frame RGBA blend per
+ * frame was one bottleneck, per-output-frame geq recomputation the other)
+ * plus two radius-sized corner patches, pre-cropped from the backdrop, that
+ * restore the window's rounded bottom corners over the capture's square
+ * ones. The looped statics cannot run away: the capture overlay's shortest=1
+ * bounds the main chain and a final trim pins the output to the take.
  */
 function frameChain(
   fps: number,
@@ -506,21 +510,23 @@ function frameChain(
 ): string {
   const radius = frame.radius ?? FRAME_DEFAULTS.radius
   const [c0, c1] = frame.background ?? FRAME_DEFAULTS.background
-  // One frame of slack so rounding never cuts the last capture frame; the
-  // final shortest=1 overlays clamp the output to the take itself.
-  const dur = Number.isFinite(durationSec) ? (durationSec + 0.05).toFixed(3) : '3600'
   const { canvasW, canvasH, fgW, fgH, barH } = layout
   const winW = fgW
   const winH = fgH + barH
-  const winX = (canvasW - winW) / 2
-  const winY = (canvasH - winH) / 2
+  // Even offsets keep the per-frame yuv420 overlays chroma-aligned.
+  const evenDown = (v: number): number => 2 * Math.floor(v / 2)
+  const winX = evenDown((canvasW - winW) / 2)
+  const winY = evenDown((canvasH - winH) / 2)
+  const capY = winY + barH
   const pad = 80
   const shW = winW + pad
   const shH = winH + pad
   const dot = Math.max(6, even(Math.round(barH * 0.34)))
   const dotY = (barH - dot) / 2
-  // Static generator: cheap 2 fps geq, duplicated to the real rate.
-  const stillSrc = (src: string, chain: string): string => `${src}:r=2:d=${dur},${chain},fps=${fps}`
+  // Static generator: every source emits exactly ONE frame (d=0.5 at r=2) —
+  // the geq/blur cost is paid once, not once per output frame. The flattened
+  // results are then looped by REFERENCE below.
+  const stillSrc = (src: string, chain: string): string => `${src}:r=2:d=0.5,${chain}`
   const rgba = "format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)'"
   const [red, yellow, green] = FRAME_DEFAULTS.trafficLights
   const lights = [red, yellow, green]
@@ -535,24 +541,47 @@ function frameChain(
         `[w${i}][dot${i}]overlay=x=${Math.round(barH * 0.5) + i * (dot + Math.round(dot * 0.8))}:y=${dotY}[w${i + 1}]`
     )
     .join(';')
+  // The capture's bottom corners land ON the window's rounded ones: two
+  // static patches (backdrop crops masked to OUTSIDE the curve) repaint them.
+  const r = radius
+  const cornerY = capY + fgH - r
+  const cornerRightX = winX + fgW - r
+  const cornerMask = (centerX: number): string => `255*clip(hypot(X-${centerX},Y)-${r - 0.5},0,1)`
   return [
-    `[0:v]scale=${fgW}:${fgH}[cap]`,
-    // The window: chrome-colored canvas, capture below the bar, dots on top.
-    `color=c=${FRAME_DEFAULTS.chrome}:s=${winW}x${winH}:r=${fps}:d=${dur}[winbase]`,
-    `[winbase][cap]overlay=x=0:y=${barH}:shortest=1[w0]`,
+    // ── Static branch, entirely at 2 fps ─────────────────────────────────
+    // The window chrome: bar + body in chrome color, the three lights on top.
+    `${stillSrc(`color=c=${FRAME_DEFAULTS.chrome}:s=${winW}x${winH}`, 'null')}[w0]`,
     lights,
     lightOverlays,
-    // Rounded as one via a STATIC mask + alphamerge (never a per-frame geq).
     `${stillSrc(`color=c=white:s=${winW}x${winH}`, `format=gray,geq=lum='${roundedAlpha(winW, winH, winW, winH, radius)}'`)}[mask]`,
     `[w3]format=rgba[w3f]`,
     `[w3f][mask]alphamerge[win]`,
     `${stillSrc(`gradients=s=${canvasW}x${canvasH}:c0=${c0}:c1=${c1}:x0=0:y0=0:x1=${canvasW}:y1=${canvasH}`, 'null')}[bg]`,
     `${stillSrc(`color=c=black:s=${shW}x${shH}`, `format=rgba,geq=r=0:g=0:b=0:a='${roundedAlpha(shW, shH, winW, winH, radius + 4)}',boxblur=0:0:0:0:18:2,colorchannelmixer=aa=0.45`)}[sh]`,
-    `[bg][sh]overlay=x=${(canvasW - shW) / 2}:y=${(canvasH - shH) / 2 + 10}[b1]`,
+    `[bg][sh]overlay=x=${winX - pad / 2}:y=${winY - pad / 2 + 10}[b1]`,
+    `[b1][win]overlay=x=${winX}:y=${winY}[bd]`,
+    `[bd]format=yuv420p,split=3[bda][bdb][bdc]`,
+    `[bdb]crop=${r}:${r}:${winX}:${cornerY},format=rgba[c1s]`,
+    `${stillSrc(`color=c=white:s=${r}x${r}`, `format=gray,geq=lum='${cornerMask(r)}'`)}[m1]`,
+    `[c1s][m1]alphamerge[p1s]`,
+    `[bdc]crop=${r}:${r}:${cornerRightX}:${cornerY},format=rgba[c2s]`,
+    `${stillSrc(`color=c=white:s=${r}x${r}`, `format=gray,geq=lum='${cornerMask(0)}'`)}[m2]`,
+    `[c2s][m2]alphamerge[p2s]`,
+    // Loop the single static frame by reference, at full rate. The infinite
+    // loops cannot run away: the backdrop is bounded by the capture overlay's
+    // shortest=1, the patches end with the stream they overlay, and the
+    // final trim pins the output to the take exactly.
+    `[bda]loop=loop=-1:size=1,fps=${fps}[bdmain]`,
+    `[p1s]loop=loop=-1:size=1,fps=${fps}[p1]`,
+    `[p2s]loop=loop=-1:size=1,fps=${fps}[p2]`,
+    // ── Per-frame: one rectangular yuv420 overlay + two corner patches ───
+    `[0:v]scale=${fgW}:${fgH}[cap]`,
+    `[bdmain][cap]overlay=x=${winX}:y=${capY}:shortest=1[f0]`,
+    `[f0][p1]overlay=x=${winX}:y=${cornerY}[f1]`,
+    `[f1][p2]overlay=x=${cornerRightX}:y=${cornerY}[f2]`,
     // trim bounds the composition DETERMINISTICALLY: lavfi frame durations
     // (2 fps stills) otherwise pad the tail past the take via repeatlast.
-    `[b1][win]overlay=x=${winX}:y=${winY}:shortest=1[fr0]`,
-    `[fr0]trim=end=${Number.isFinite(durationSec) ? durationSec.toFixed(3) : '3600'},setpts=PTS-STARTPTS[framed]`
+    `[f2]trim=end=${Number.isFinite(durationSec) ? durationSec.toFixed(3) : '3600'},setpts=PTS-STARTPTS[framed]`
   ].join(';')
 }
 
