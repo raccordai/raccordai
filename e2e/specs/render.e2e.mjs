@@ -125,6 +125,7 @@ await spec('render', async () => {
 
   checkEqual(result.path, outputPath, 'the render honoured the explicit output path')
   checkEqual(result.skipped.length, 0, 'no timeline slot was skipped')
+  checkEqual(result.cachedArtifacts, 0, 'a cold render reuses nothing from the cache')
   checkClose(result.durationSeconds, TOTAL_SECONDS, 1, 'the reported duration is the clips sum')
   check(existsSync(outputPath), 'the MP4 exists on disk')
 
@@ -257,6 +258,14 @@ await spec('render', async () => {
   const assetsPath = join(outDir, 'with-assets.mp4')
   const withAssets = await app.mcp('render_video', { videoId: video.id, outputPath: assetsPath })
   checkEqual(withAssets.skipped.length, 0, 'no slot was skipped with the asset clips in place')
+  // Incremental renders: shot A and shot B kept the exact trim/transition
+  // and sequence spec of the previous export — their normalized segments come
+  // back from the render cache instead of re-encoding (the two asset slots
+  // are new and still encode cold).
+  check(
+    withAssets.cachedArtifacts >= 2,
+    `the unchanged shots were reused from the render cache (${withAssets.cachedArtifacts})`
+  )
   const withAssetsSeconds = editedSeconds + FIXTURES.clipA.seconds + 5
   checkClose(
     withAssets.durationSeconds,

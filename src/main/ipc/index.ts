@@ -522,7 +522,7 @@ export function registerIpcHandlers(): void {
         filters: [{ name: 'MPEG-4 video', extensions: ['mp4'] }]
       })
       if (result.canceled || !result.filePath) return null
-      const { durationSeconds, skipped } = await renderService.renderVideo({
+      const { durationSeconds, skipped, cachedArtifacts } = await renderService.renderVideo({
         videoId,
         outputPath: result.filePath,
         fps,
@@ -534,7 +534,7 @@ export function registerIpcHandlers(): void {
         codec,
         watermark
       })
-      return { path: result.filePath, durationSeconds, skipped }
+      return { path: result.filePath, durationSeconds, skipped, cachedArtifacts }
     }
   )
   handle('render:cancel', ({ videoId }) => renderService.cancelRender(videoId))

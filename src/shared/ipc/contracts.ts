@@ -1856,7 +1856,9 @@ export const ipcContracts = {
         path: z.string(),
         durationSeconds: z.number(),
         /** Labels of timeline slots that had no usable media and were skipped. */
-        skipped: z.array(z.string())
+        skipped: z.array(z.string()),
+        /** Per-clip encode artifacts reused from the render cache (0 = cold render). */
+        cachedArtifacts: z.number()
       })
       .nullable()
   },

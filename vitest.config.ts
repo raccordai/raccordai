@@ -34,6 +34,7 @@ export default defineConfig({
         'src/main/services/generationWait.ts',
         'src/main/services/changeFeed.ts',
         'src/main/services/renderPlan.ts',
+        'src/main/services/renderCache.ts',
         'src/main/services/runPlanner.ts',
         'src/main/services/runParams.ts',
         'src/main/services/checkpoints.ts',
