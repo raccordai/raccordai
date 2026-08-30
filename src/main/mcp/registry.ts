@@ -2500,7 +2500,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       const res = resolution as { width?: unknown; height?: unknown } | undefined
       const corners = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const
       const corner = corners.find((c) => c === watermarkPosition)
-      const { durationSeconds, skipped } = await renderService.renderVideo({
+      const { durationSeconds, skipped, cachedArtifacts } = await renderService.renderVideo({
         videoId: String(videoId),
         outputPath: target,
         ...(fps !== undefined ? { fps: Number(fps) } : {}),
@@ -2514,7 +2514,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           ? { watermark: { text: String(watermarkText), ...(corner ? { position: corner } : {}) } }
           : {})
       })
-      return { path: target, durationSeconds, skipped }
+      return { path: target, durationSeconds, skipped, cachedArtifacts }
     }
   },
   {

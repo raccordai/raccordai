@@ -68,9 +68,21 @@ toasts, everything mirrored to the log via `log:renderer`). Silent failure is
 no longer the renderer's default, and a packaged-build bug report can now
 attach a log file.
 
-| Proposal                                                  | Effort | Why                                                                                                             |
-| --------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------- |
-| Opt-in crash telemetry (Sentry or self-hosted equivalent) | M      | The log file covers the local case; without aggregated crash reports, patterns across installs remain invisible |
+Also shipped (August 2026): **incremental renders** — per-clip encode
+artifacts (normalize segments, demo-camera bakes) are content-addressed in
+`userData/render-cache` (`renderCache.ts` + the pure `renderCacheKey`/
+`pickCacheEvictions` in renderPlan, all tested): re-rendering after changing
+one clip re-encodes that clip only, the rest comes back from the cache.
+2 GiB cap, oldest-first eviction with an in-use protection window, atomic
+staging commits; `cachedArtifacts` reported on `render:export`/`render_video`
+and asserted by the E2E render spec.
+
+| Proposal                                                                     | Effort | Why                                                                                                                                                      |
+| ---------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Opt-in crash telemetry (Sentry or self-hosted equivalent)                    | M      | The log file covers the local case; without aggregated crash reports, patterns across installs remain invisible                                          |
+| Hardware encoders (VideoToolbox/NVENC) as a NEW export option                | M      | Never silently: 'standard' h264 must stay the historical argv byte-for-byte (project rule), and hw quality mapping (no CRF) needs its own preset         |
+| Low-res "preview render" preset + export history (`renders` table)           | M      | The one way to SEE captions/watermark/transitions exactly before paying a full-quality export; draft quality exists, a resolution preset + history don't |
+| Cache the crossfade merges too (inputs are cached segments with stable keys) | S      | The remaining re-encode on a warm re-render of an unchanged transition group                                                                             |
 
 ## 4. Product — smaller items
 

@@ -5,6 +5,7 @@
  * this module owns every decision (and is unit-tested for it).
  */
 
+import { createHash } from 'node:crypto'
 import { lookFfmpegFilter } from '@shared/looks'
 
 export interface ClipProbe {
@@ -1223,4 +1224,76 @@ export function overallPercent(spans: StageSpan[], step: RenderStep, fraction: n
   if (!span) return 0
   const clamped = Math.min(1, Math.max(0, fraction))
   return Math.round(span.from + (span.to - span.from) * clamped)
+}
+
+// ── Incremental render cache (decisions — the store lives in renderCache.ts) ─
+
+/**
+ * Bump to invalidate every cached artifact at once — when an encode's
+ * SEMANTICS change without its argv changing (an ffmpeg upgrade with different
+ * defaults, say). Argv changes invalidate themselves through the key.
+ */
+export const RENDER_CACHE_KEY_VERSION = 1
+
+/** Placeholder paths a producer builds its KEY argv with — never real files. */
+export const CACHE_OUT_TOKEN = '<out>'
+export const CACHE_AUX_TOKEN = '<aux>'
+
+export interface CacheInput {
+  path: string
+  size: number
+  mtimeMs: number
+}
+
+/**
+ * Content-addressed key of one encoded artifact: the full ffmpeg argv with
+ * every volatile path replaced by a stable token, plus each input's identity
+ * (size + mtime as a content proxy). Anything that changes the output —
+ * trim/speed/look, the sequence spec, the encoder args, a re-generated source
+ * — changes the argv or an input identity, and therefore the key; building
+ * the key FROM the argv means no by-hand field list can drift out of sync
+ * with what ffmpeg actually receives.
+ */
+export function renderCacheKey(argv: string[], inputs: CacheInput[]): string {
+  const tokens = new Map<string, string>()
+  inputs.forEach((input, i) => tokens.set(input.path, `<in${i}>`))
+  const stable = argv.map((arg) => tokens.get(arg) ?? arg)
+  // The path is part of the identity: size+mtime alone could collide across
+  // two different files. A moved profile just cold-starts the cache.
+  const identity = inputs.map((input) => `${input.path}:${input.size}:${Math.round(input.mtimeMs)}`)
+  return createHash('sha256')
+    .update(JSON.stringify({ v: RENDER_CACHE_KEY_VERSION, argv: stable, inputs: identity }))
+    .digest('hex')
+}
+
+export interface CacheFileStat {
+  path: string
+  size: number
+  mtimeMs: number
+}
+
+/**
+ * Oldest-first artifacts to delete so the cache fits under `maxBytes`.
+ * Files touched within `protectMs` are never picked: a lookup freshens the
+ * artifact's mtime, so anything a concurrent render may be reading stays.
+ */
+export function pickCacheEvictions(
+  files: CacheFileStat[],
+  maxBytes: number,
+  nowMs: number,
+  protectMs = 60 * 60 * 1000
+): string[] {
+  const total = files.reduce((acc, f) => acc + f.size, 0)
+  if (total <= maxBytes) return []
+  let excess = total - maxBytes
+  const evictable = [...files]
+    .filter((f) => nowMs - f.mtimeMs > protectMs)
+    .sort((a, b) => a.mtimeMs - b.mtimeMs)
+  const out: string[] = []
+  for (const f of evictable) {
+    if (excess <= 0) break
+    out.push(f.path)
+    excess -= f.size
+  }
+  return out
 }

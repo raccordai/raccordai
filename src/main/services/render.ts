@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { app } from 'electron'
@@ -78,8 +78,18 @@ import {
   type PlannedClip,
   type RenderStep,
   type StageSpan,
-  type AssEvent
+  type AssEvent,
+  CACHE_AUX_TOKEN,
+  CACHE_OUT_TOKEN,
+  renderCacheKey,
+  type CacheInput
 } from './renderPlan'
+import {
+  commitCachedArtifact,
+  evictRenderCache,
+  lookupCachedArtifact,
+  stageCachedArtifact
+} from './renderCache'
 
 /**
  * Rendered MP4 export: resolves the timeline (same shared selection logic as
@@ -233,6 +243,8 @@ async function resolveNodeMedia(
 export interface RenderResult {
   durationSeconds: number
   skipped: string[]
+  /** Per-clip encode artifacts reused from the render cache (0 = cold render). */
+  cachedArtifacts: number
 }
 
 export interface RenderOptions {
@@ -274,6 +286,30 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
 
   const progress = (spans: StageSpan[], step: RenderStep, fraction: number) =>
     broadcastRenderProgress({ videoId, percent: overallPercent(spans, step, fraction), step })
+
+  // Incremental renders: per-clip encode artifacts reused from the cache.
+  let cachedArtifacts = 0
+  /**
+   * Cache identity of a source file — or null when the artifact must not be
+   * cached: media downloaded into this render's workDir carries a fresh mtime
+   * every run, so caching it would only fill the store with never-hit files.
+   */
+  const cacheSourceFor = (path: string): CacheInput | null => {
+    if (path.startsWith(workDir)) return null
+    try {
+      const stat = statSync(path)
+      return { path, size: stat.size, mtimeMs: stat.mtimeMs }
+    } catch {
+      return null
+    }
+  }
+  // Bound the store before this render adds to it (fenced: a broken cache
+  // must degrade to cold encodes, never fail an export).
+  try {
+    evictRenderCache()
+  } catch (err) {
+    logError('render', 'render-cache eviction failed', err)
+  }
 
   try {
     const graph = graphService.listGraph(videoId)
@@ -485,12 +521,40 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
             ...(framed ? { frame: {} } : {})
           }
         )
+        // Incremental renders: the bake is content-addressed like the
+        // normalize segments — the filter string in the key argv carries the
+        // whole journal, framing and target size. The cursor PNG is the
+        // deterministic output of buildCursorImageArgs, so its (per-render)
+        // path is keyed as a fixed token instead of an input identity.
+        const source = cacheSourceFor(rawPath)
+        const cacheKey = source
+          ? renderCacheKey(
+              buildDemoCameraArgs(
+                rawPath,
+                usesCursor ? CACHE_AUX_TOKEN : null,
+                CACHE_OUT_TOKEN,
+                filter
+              ),
+              [source]
+            )
+          : null
+        const cached = cacheKey ? lookupCachedArtifact(cacheKey) : null
+        if (cached) {
+          cachedArtifacts += 1
+          bakeIndex += 1
+          bakedByPath.set(bakeKey, cached)
+          clip.path = cached
+          progress(probeSpansGuess, 'demo', bakeIndex / demoBakeKeys.size)
+          return
+        }
         if (usesCursor && !cursorPath) {
           cursorPath = join(workDir, 'demo-cursor.png')
           await run(active, ffmpegPath(), buildCursorImageArgs(cursorPath))
         }
         bakeIndex += 1
-        const bakedPath = join(workDir, `demo-cam-${String(bakeIndex).padStart(2, '0')}.mp4`)
+        const stagingPath = cacheKey
+          ? stageCachedArtifact(cacheKey)
+          : join(workDir, `demo-cam-${String(bakeIndex).padStart(2, '0')}.mp4`)
         // Real encode progress on the 'demo' span — a bake re-encodes the
         // whole take, easily the longest part of a demo export.
         const done = bakeIndex - 1
@@ -499,7 +563,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         await run(
           active,
           ffmpegPath(),
-          buildDemoCameraArgs(rawPath, usesCursor ? cursorPath : null, bakedPath, filter),
+          buildDemoCameraArgs(rawPath, usesCursor ? cursorPath : null, stagingPath, filter),
           (line) => {
             const seconds = parseProgressLine(line)
             if (seconds === null) return
@@ -507,6 +571,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
             progress(probeSpansGuess, 'demo', (done + local) / demoBakeKeys.size)
           }
         )
+        const bakedPath = cacheKey ? commitCachedArtifact(stagingPath, cacheKey) : stagingPath
         bakedByPath.set(bakeKey, bakedPath)
         clip.path = bakedPath
       } catch (error) {
@@ -728,8 +793,26 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       let doneDuration = 0
       for (const [i, clip] of clips.entries()) {
         const clipDur = clipEffectiveDuration(clip)
-        const segment = join(workDir, `seg-${String(i + 1).padStart(2, '0')}.mp4`)
         const base = doneDuration
+        // Incremental renders: the segment is content-addressed — same source
+        // + same argv (trim/speed/look/spec/encoder) = same artifact, reused
+        // from userData/render-cache instead of re-encoded. The key argv is
+        // built with a placeholder output so only real inputs shape it.
+        const source = cacheSourceFor(clip.path)
+        const cacheKey = source
+          ? renderCacheKey(buildNormalizeArgs(clip, spec, CACHE_OUT_TOKEN, encodeArgs), [source])
+          : null
+        const cached = cacheKey ? lookupCachedArtifact(cacheKey) : null
+        if (cached) {
+          cachedArtifacts += 1
+          doneDuration += clipDur
+          segmentPaths.push(cached)
+          progress(spans, 'normalize', totalDuration > 0 ? doneDuration / totalDuration : 1)
+          continue
+        }
+        const segment = cacheKey
+          ? stageCachedArtifact(cacheKey)
+          : join(workDir, `seg-${String(i + 1).padStart(2, '0')}.mp4`)
         await run(
           active,
           ffmpegPath(),
@@ -742,7 +825,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
           }
         )
         doneDuration += clipDur
-        segmentPaths.push(segment)
+        segmentPaths.push(cacheKey ? commitCachedArtifact(segment, cacheKey) : segment)
         progress(spans, 'normalize', totalDuration > 0 ? doneDuration / totalDuration : 1)
       }
     }
@@ -892,7 +975,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     if (active.cancelled) throw new RenderCancelledError()
     copyFileSync(finalPath, outputPath)
     broadcastRenderProgress({ videoId, percent: 100, step: 'mux', done: true })
-    return { durationSeconds: finalDuration, skipped }
+    return { durationSeconds: finalDuration, skipped, cachedArtifacts }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     broadcastRenderProgress({ videoId, percent: 0, step: 'probe', done: true, error: message })

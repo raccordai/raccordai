@@ -40,6 +40,9 @@ import {
   parseFfprobeJson,
   parseProgressLine,
   sequenceDurationSeconds,
+  CACHE_OUT_TOKEN,
+  pickCacheEvictions,
+  renderCacheKey,
   type ClipProbe,
   type PlannedClip
 } from './renderPlan'
@@ -1128,5 +1131,92 @@ describe('stage spans with transitions and subtitles', () => {
     expect(spans.at(-1)!.to).toBeCloseTo(100)
     const plain = computeStageSpans(true, false)
     expect(plain.map((s) => s.step)).toEqual(['probe', 'normalize', 'concat'])
+  })
+})
+
+describe('renderCacheKey', () => {
+  const clip = (over: Partial<PlannedClip> = {}): PlannedClip => ({
+    path: '/media/gen-1.mp4',
+    isStill: false,
+    stillDurationSeconds: 0,
+    probe: {
+      formatName: 'mov,mp4',
+      codec: 'h264',
+      width: 1280,
+      height: 720,
+      fps: 24,
+      durationSeconds: 8,
+      hasAudio: true,
+      audioCodec: 'aac',
+      audioSampleRate: 44100
+    },
+    ...over
+  })
+  const spec = { width: 1280, height: 720, fps: 24 }
+  const source = { path: '/media/gen-1.mp4', size: 1000, mtimeMs: 1_700_000_000_000 }
+  const keyFor = (c: PlannedClip, src = source) =>
+    renderCacheKey(buildNormalizeArgs(c, spec, CACHE_OUT_TOKEN), [src])
+
+  it('is deterministic: same argv + same source identity = same key', () => {
+    expect(keyFor(clip())).toBe(keyFor(clip()))
+    expect(keyFor(clip())).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('changes with anything that changes the argv (trim, speed, look, spec)', () => {
+    const base = keyFor(clip())
+    expect(keyFor(clip({ trimStartSec: 0.5 }))).not.toBe(base)
+    expect(keyFor(clip({ speed: 2 }))).not.toBe(base)
+    expect(keyFor(clip({ look: 'noir' }))).not.toBe(base)
+    expect(
+      renderCacheKey(buildNormalizeArgs(clip(), { ...spec, fps: 30 }, CACHE_OUT_TOKEN), [source])
+    ).not.toBe(base)
+  })
+
+  it('changes when the source file changes (size, mtime, or path)', () => {
+    const base = keyFor(clip())
+    expect(keyFor(clip(), { ...source, size: 1001 })).not.toBe(base)
+    expect(keyFor(clip(), { ...source, mtimeMs: source.mtimeMs + 1 })).not.toBe(base)
+    // Same size + mtime but a DIFFERENT file must never collide.
+    const other = { ...source, path: '/media/gen-2.mp4' }
+    expect(
+      renderCacheKey(buildNormalizeArgs(clip({ path: other.path }), spec, CACHE_OUT_TOKEN), [other])
+    ).not.toBe(base)
+  })
+
+  it('ignores where the output lands: the out path is a placeholder by contract', () => {
+    // Producers build the KEY argv with CACHE_OUT_TOKEN and only then encode
+    // to a staging path — the key can never depend on the destination.
+    const a = renderCacheKey(buildNormalizeArgs(clip(), spec, CACHE_OUT_TOKEN), [source])
+    const b = renderCacheKey(buildNormalizeArgs(clip(), spec, CACHE_OUT_TOKEN), [source])
+    expect(a).toBe(b)
+  })
+})
+
+describe('pickCacheEvictions', () => {
+  const now = 10_000_000_000
+  const HOUR = 60 * 60 * 1000
+  const file = (path: string, size: number, ageMs: number) => ({
+    path,
+    size,
+    mtimeMs: now - ageMs
+  })
+
+  it('picks nothing while the cache fits', () => {
+    expect(pickCacheEvictions([file('a', 500, 5 * HOUR)], 1000, now)).toEqual([])
+  })
+
+  it('evicts oldest-first until the cache fits', () => {
+    const files = [
+      file('newest', 400, 2 * HOUR),
+      file('oldest', 400, 9 * HOUR),
+      file('middle', 400, 5 * HOUR)
+    ]
+    expect(pickCacheEvictions(files, 700, now)).toEqual(['oldest', 'middle'])
+  })
+
+  it('never touches files freshened within the protection window', () => {
+    const files = [file('in-use', 900, HOUR / 2), file('old', 300, 9 * HOUR)]
+    // Still over the cap after evicting 'old' — the fresh file survives anyway.
+    expect(pickCacheEvictions(files, 100, now)).toEqual(['old'])
   })
 })
