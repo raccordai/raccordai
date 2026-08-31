@@ -10,6 +10,7 @@ import { seedance2Fast } from './seedance-2-fast'
 import { seedance2Mini } from './seedance-2-mini'
 import { seedance15Pro } from './seedance-15-pro'
 import { geminiOmniFlash11 } from './gemini-omni-flash-1-1'
+import { minimaxH3I2V } from './minimax-h3-i2v'
 import { grokImagineI2V } from './grok-imagine-i2v'
 import { grokImagineT2V } from './grok-imagine-t2v'
 import { grokImagine15Preview } from './grok-imagine-15-preview'
@@ -37,6 +38,7 @@ export const MODELS: ModelDefinition[] = [
   seedance2Mini,
   seedance15Pro,
   geminiOmniFlash11,
+  minimaxH3I2V,
   kling3,
   grokImagineT2V,
   grokImagineI2V,
