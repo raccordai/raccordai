@@ -197,6 +197,29 @@ describe('filter builders', () => {
     expect(bare.filter).toMatch(/^\[0:v\]fps=30\[src\];\[src\]zoompan=/)
   })
 
+  it('keeps expression nesting logarithmic on long takes', () => {
+    // ffmpeg's expression parser caps recursion at ~100 nested calls: one
+    // `if` per journal event overflowed it past ~90 moves — the bake then
+    // failed ("Missing ')' or too many args") and the export silently
+    // shipped the raw capture. The chains are balanced trees now.
+    const events: DemoEvent[] = []
+    for (let i = 0; i < 400; i++) {
+      const t = i * 0.15
+      const x = 0.1 + (0.8 * ((i * 7) % 100)) / 100
+      const y = 0.1 + (0.8 * ((i * 13) % 100)) / 100
+      events.push(i % 20 === 0 ? click(t, x, y) : { t, type: 'move', x, y })
+    }
+    const { filter, usesCursor } = buildScreenMotionFilter(events, 70, opts)
+    expect(usesCursor).toBe(true)
+    let depth = 0
+    let max = 0
+    for (const c of filter) {
+      if (c === '(') max = Math.max(max, ++depth)
+      else if (c === ')') depth--
+    }
+    expect(max).toBeLessThan(80)
+  })
+
   it('cursor: false skips the synthetic cursor even with positioned events', () => {
     const screenTake = buildScreenMotionFilter([click(5)], 20, { ...opts, cursor: false })
     expect(screenTake.usesCursor).toBe(false)

@@ -246,19 +246,45 @@ const ssExpr = (p: string): string => {
   return `(${c}*${c}*(3-2*${c}))`
 }
 
-/** The segment's pan center (x or y) as an expression of the time variable. */
-function panExpr(seg: ZoomSegment, axis: 'x' | 'y', time: string): string {
-  const targets = seg.targets
-  let expr = n(targets[targets.length - 1]![axis])
-  // Build right-to-left: if(before leg i, interpolate leg i, later legs…).
-  for (let i = targets.length - 2; i >= 0; i--) {
+/**
+ * Balanced `if(lt(time,threshold),value,…)` chain — the first entry whose
+ * threshold exceeds `time` wins, `tail` when none does (thresholds ascending).
+ * Semantically the linear right-fold, but log-depth: ffmpeg's expression
+ * parser caps nesting at ~100 levels, which one `if` per journal event blows
+ * past on takes beyond a minute — the bake then fails and the render falls
+ * back to the raw capture.
+ */
+function ltChain(time: string, entries: { th: number; value: string }[], tail: string): string {
+  if (entries.length === 0) return tail
+  const mid = entries.length >> 1
+  const m = entries[mid]!
+  const left = ltChain(time, entries.slice(0, mid), m.value)
+  const right = ltChain(time, entries.slice(mid + 1), tail)
+  return `if(lt(${time},${n(m.th)}),${left},${right})`
+}
+
+/** The glide's `[threshold → leg]` entries + final value, shared by pan and cursor. */
+function glideEntries(
+  targets: PanTarget[],
+  axis: 'x' | 'y',
+  time: string
+): { entries: { th: number; value: string }[]; tail: string } {
+  const entries: { th: number; value: string }[] = [
+    { th: targets[0]!.t, value: n(targets[0]![axis]) }
+  ]
+  for (let i = 0; i < targets.length - 1; i++) {
     const a = targets[i]!
     const b = targets[i + 1]!
     const e = ssExpr(`(${time}-${n(a.t)})/${n(b.t - a.t)}`)
-    const leg = `(${n(a[axis])}+${n(b[axis] - a[axis])}*${e})`
-    expr = `if(lt(${time},${n(b.t)}),${leg},${expr})`
+    entries.push({ th: b.t, value: `(${n(a[axis])}+${n(b[axis] - a[axis])}*${e})` })
   }
-  return `if(lt(${time},${n(targets[0]!.t)}),${n(targets[0]![axis])},${expr})`
+  return { entries, tail: n(targets[targets.length - 1]![axis]) }
+}
+
+/** The segment's pan center (x or y) as an expression of the time variable. */
+function panExpr(seg: ZoomSegment, axis: 'x' | 'y', time: string): string {
+  const { entries, tail } = glideEntries(seg.targets, axis, time)
+  return ltChain(time, entries, tail)
 }
 
 /** The segment's zoom as an expression of the time variable. */
@@ -272,19 +298,27 @@ function zoomExpr(seg: ZoomSegment, time: string): string {
   return `if(lt(${time},${n(inEnd)}),${rise},if(gt(${time},${n(outStart)}),${fall},${n(seg.zoom)}))`
 }
 
-/** Piecewise expression over the segments; `fallback` outside all of them. */
+/**
+ * Piecewise expression over the segments; `fallback` outside all of them.
+ * Balanced like ltChain (log-depth against the parser's nesting cap); the
+ * leaves keep the historical `if(between(…))` form, so a lone segment still
+ * emits the exact historical expression.
+ */
 function piecewise(
   segments: ZoomSegment[],
   time: string,
   perSegment: (seg: ZoomSegment) => string,
   fallback: string
 ): string {
-  let expr = fallback
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const seg = segments[i]!
-    expr = `if(between(${time},${n(seg.startSec)},${n(seg.endSec)}),${perSegment(seg)},${expr})`
+  const build = (lo: number, hi: number): string => {
+    if (lo > hi) return fallback
+    const mid = (lo + hi) >> 1
+    const seg = segments[mid]!
+    const leaf = `if(between(${time},${n(seg.startSec)},${n(seg.endSec)}),${perSegment(seg)},${build(mid + 1, hi)})`
+    if (mid === lo) return leaf
+    return `if(lt(${time},${n(seg.startSec)}),${build(lo, mid - 1)},${leaf})`
   }
-  return expr
+  return build(0, segments.length - 1)
 }
 
 /**
@@ -336,15 +370,8 @@ export function sampleCursor(keyframes: PanTarget[], t: number): { x: number; y:
 
 /** One axis of the cursor glide as an overlay expression of `t`. */
 function cursorAxisExpr(keyframes: PanTarget[], axis: 'x' | 'y'): string {
-  let expr = n(keyframes[keyframes.length - 1]![axis])
-  for (let i = keyframes.length - 2; i >= 0; i--) {
-    const a = keyframes[i]!
-    const b = keyframes[i + 1]!
-    const e = ssExpr(`(t-${n(a.t)})/${n(b.t - a.t)}`)
-    const leg = `(${n(a[axis])}+${n(b[axis] - a[axis])}*${e})`
-    expr = `if(lt(t,${n(b.t)}),${leg},${expr})`
-  }
-  return `if(lt(t,${n(keyframes[0]!.t)}),${n(keyframes[0]![axis])},${expr})`
+  const { entries, tail } = glideEntries(keyframes, axis, 't')
+  return ltChain('t', entries, tail)
 }
 
 /**
