@@ -586,6 +586,58 @@ describe('google/gemini-omni-flash-1-1', () => {
   })
 })
 
+describe('minimax-h3/image-to-video', () => {
+  const minimax = getModelOrThrow('minimax-h3/image-to-video')
+
+  it('declares both anchors as single-connection frame anchors, first frame required', () => {
+    const first = minimax.inputs.find((i) => i.key === 'first_frame_url')
+    expect(first?.required).toBe(true)
+    expect(first?.maxCount).toBe(1)
+    expect(first?.frameAnchor).toBe(true)
+    const last = minimax.inputs.find((i) => i.key === 'last_frame_url')
+    expect(last?.required).toBeUndefined()
+    expect(last?.maxCount).toBe(1)
+    expect(last?.frameAnchor).toBe(true)
+  })
+
+  it('accepts any whole second from 4 to 15 and rejects the API bounds', () => {
+    for (const duration of [4, 7, 11, 15]) {
+      expect(minimax.paramsSchema.safeParse({ prompt: 'x', duration }).success).toBe(true)
+    }
+    expect(minimax.paramsSchema.safeParse({ prompt: 'x', duration: 3 }).success).toBe(false)
+    expect(minimax.paramsSchema.safeParse({ prompt: 'x', duration: 16 }).success).toBe(false)
+    expect(minimax.paramsSchema.safeParse({ prompt: 'x', duration: 6.5 }).success).toBe(false)
+  })
+
+  it('omits unwired anchors and sends an integer duration with the resolution', () => {
+    const params = minimax.paramsSchema.parse({ prompt: 'a cat' })
+    const bare = minimax.buildPayload({ params, inputs: {} })
+    expect(bare).toEqual({ prompt: 'a cat', duration: 6, resolution: '2K' })
+    const anchored = minimax.buildPayload({
+      params,
+      inputs: { first_frame_url: ['https://x/a.png'], last_frame_url: ['https://x/b.png'] }
+    })
+    expect(anchored).toEqual({
+      prompt: 'a cat',
+      first_frame_url: 'https://x/a.png',
+      last_frame_url: 'https://x/b.png',
+      duration: 6,
+      resolution: '2K'
+    })
+  })
+
+  // kie.ai rates (model page pricing, 2026-08): 768P 8 cr/s, 2K 13 cr/s.
+  it('prices per second by resolution', () => {
+    expect(estimateCreditsFor(minimax.id, { prompt: 'x', duration: 6 })).toBe(78)
+    expect(estimateCreditsFor(minimax.id, { prompt: 'x', duration: 6, resolution: '768P' })).toBe(
+      48
+    )
+    expect(estimateCreditsFor(minimax.id, { prompt: 'x', duration: 15, resolution: '2K' })).toBe(
+      195
+    )
+  })
+})
+
 describe('kling-3.0/video', () => {
   const kling = getModelOrThrow('kling-3.0/video')
 
