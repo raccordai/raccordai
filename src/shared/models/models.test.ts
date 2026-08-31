@@ -513,6 +513,79 @@ describe('grok imagine family', () => {
   })
 })
 
+describe('google/gemini-omni-flash-1-1', () => {
+  const gemini = getModelOrThrow('google/gemini-omni-flash-1-1')
+
+  it('declares first/last frame handles as single-connection frame anchors', () => {
+    for (const key of ['first_frame_url', 'last_frame_url']) {
+      const handle = gemini.inputs.find((i) => i.key === key)
+      expect(handle?.frameAnchor).toBe(true)
+      expect(handle?.maxCount).toBe(1)
+    }
+    expect(gemini.inputs.find((i) => i.key === 'image_urls')?.frameAnchor).toBeUndefined()
+  })
+
+  it('text-to-video: sends a snapped string duration and omits every media field', () => {
+    const params = gemini.paramsSchema.parse({ prompt: 'a fox', duration: 5 })
+    const payload = gemini.buildPayload({ params, inputs: {} })
+    // 5 s snaps DOWN to the cheaper 4 s tier, sent as the API's string enum.
+    expect(payload).toEqual({
+      prompt: 'a fox',
+      duration: '4',
+      aspect_ratio: '16:9',
+      resolution: '720p'
+    })
+  })
+
+  it('keyframe mode: sends first/last frames when wired', () => {
+    const params = gemini.paramsSchema.parse({ prompt: 'a fox' })
+    const payload = gemini.buildPayload({
+      params,
+      inputs: { first_frame_url: ['https://x/a.png'], last_frame_url: ['https://x/b.png'] }
+    })
+    expect(payload).toMatchObject({
+      first_frame_url: 'https://x/a.png',
+      last_frame_url: 'https://x/b.png'
+    })
+    expect(payload).not.toHaveProperty('image_urls')
+    expect(payload).not.toHaveProperty('video_list')
+  })
+
+  it('multimodal mode: forwards references and trims the source video to a legal window', () => {
+    const params = gemini.paramsSchema.parse({
+      prompt: 'a fox',
+      video_start: 5,
+      video_end: 25
+    })
+    const payload = gemini.buildPayload({
+      params,
+      inputs: { image_urls: ['https://x/sheet.png'], video_list: ['https://x/prev.mp4'] }
+    })
+    // 25 s exceeds the API's 10 s span cap — snapped to start + 10.
+    expect(payload).toMatchObject({
+      image_urls: ['https://x/sheet.png'],
+      video_list: [{ url: 'https://x/prev.mp4', start: 5, ends: 15 }]
+    })
+  })
+
+  it('snaps an inverted trim window to the longest legal one', () => {
+    const params = gemini.paramsSchema.parse({ prompt: 'a fox', video_start: 8, video_end: 3 })
+    const payload = gemini.buildPayload({ params, inputs: { video_list: ['https://x/prev.mp4'] } })
+    expect(payload).toMatchObject({
+      video_list: [{ url: 'https://x/prev.mp4', start: 8, ends: 18 }]
+    })
+  })
+
+  it('prices by duration tier with a flat 4K surcharge', () => {
+    const base = { prompt: 'a fox' }
+    expect(estimateCreditsFor(gemini.id, { ...base, duration: 4 })).toBe(63)
+    expect(estimateCreditsFor(gemini.id, { ...base, duration: 8 })).toBe(105)
+    // 360p/720p/1080p share one price; 4K adds +84 flat.
+    expect(estimateCreditsFor(gemini.id, { ...base, duration: 8, resolution: '360p' })).toBe(105)
+    expect(estimateCreditsFor(gemini.id, { ...base, duration: 10, resolution: '4k' })).toBe(210)
+  })
+})
+
 describe('kling-3.0/video', () => {
   const kling = getModelOrThrow('kling-3.0/video')
 
