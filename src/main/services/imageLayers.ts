@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { asc, eq } from 'drizzle-orm'
-import type { ImageLayer } from '@shared/ipc/contracts'
+import { imageLayerPatchSchema, type ImageLayer } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { imageLayers, videos } from '../db/schema'
 import { broadcastWorkflowChanged } from '../events'
@@ -71,12 +71,15 @@ export function updateImageLayer(
   id: string,
   patch: Partial<Omit<ImageLayer, 'id' | 'videoId' | 'nodeId' | 'assetId' | 'createdAt'>>
 ): ImageLayer {
+  // Unvalidated callers (MCP tools) pass arguments through — strip immutable
+  // keys and reject bad values before they reach the row (see textLayers.ts).
+  const clean = imageLayerPatchSchema.parse(patch)
   const db = getDb()
   const current = getImageLayer(id)
   if (!current) throw new Error(`Unknown sticker "${id}".`)
-  const next = { ...current, ...patch }
+  const next = { ...current, ...clean }
   assertTiming(next.startSec, next.endSec)
-  db.update(imageLayers).set(patch).where(eq(imageLayers.id, id)).run()
+  db.update(imageLayers).set(clean).where(eq(imageLayers.id, id)).run()
   broadcastWorkflowChanged(current.videoId)
   return next
 }

@@ -584,6 +584,12 @@ export const imageLayerInputSchema = imageLayerSchema
   .omit({ id: true, createdAt: true })
   .partial({ nodeId: true, assetId: true, x: true, y: true, widthPct: true })
 
+/** Update payload — mutable columns only. Also enforced by the service, so
+ *  callers that skip IPC validation (MCP tools) can't reach the row raw. */
+export const imageLayerPatchSchema = imageLayerSchema
+  .omit({ id: true, videoId: true, nodeId: true, assetId: true, createdAt: true })
+  .partial()
+
 /**
  * A free text layer on the timeline (§6.12b): absolute final-timeline seconds,
  * normalized frame position + ASS numpad anchor, own typography. Burned at
@@ -622,6 +628,11 @@ export const textLayerInputSchema = textLayerSchema.omit({ id: true, createdAt: 
   animation: true
 })
 
+/** Update payload — mutable columns only (see imageLayerPatchSchema). */
+export const textLayerPatchSchema = textLayerSchema
+  .omit({ id: true, videoId: true, createdAt: true })
+  .partial()
+
 /**
  * A feedback note (§6.13): a comment taken while watching the timeline,
  * anchored to a final-timeline timecode and to the node under the playhead
@@ -644,6 +655,11 @@ export type FeedbackItem = z.infer<typeof feedbackItemSchema>
 export const feedbackItemInputSchema = feedbackItemSchema
   .omit({ id: true, createdAt: true })
   .partial({ nodeId: true, nodeLabel: true, timecodeSec: true, status: true })
+
+/** Update payload — mutable columns only (see imageLayerPatchSchema). */
+export const feedbackItemPatchSchema = feedbackItemSchema
+  .omit({ id: true, videoId: true, createdAt: true })
+  .partial()
 
 export const graphNodeSchema = z.object({
   id: z.string(),
@@ -1433,10 +1449,7 @@ export const ipcContracts = {
   },
   'textLayers:create': { input: textLayerInputSchema, output: textLayerSchema },
   'textLayers:update': {
-    input: z.object({
-      id: z.string(),
-      patch: textLayerSchema.omit({ id: true, videoId: true, createdAt: true }).partial()
-    }),
+    input: z.object({ id: z.string(), patch: textLayerPatchSchema }),
     output: textLayerSchema
   },
   'textLayers:delete': { input: z.object({ id: z.string() }), output: z.void() },
@@ -1448,12 +1461,7 @@ export const ipcContracts = {
   },
   'imageLayers:create': { input: imageLayerInputSchema, output: imageLayerSchema },
   'imageLayers:update': {
-    input: z.object({
-      id: z.string(),
-      patch: imageLayerSchema
-        .omit({ id: true, videoId: true, nodeId: true, assetId: true, createdAt: true })
-        .partial()
-    }),
+    input: z.object({ id: z.string(), patch: imageLayerPatchSchema }),
     output: imageLayerSchema
   },
   'imageLayers:delete': { input: z.object({ id: z.string() }), output: z.void() },
@@ -1465,10 +1473,7 @@ export const ipcContracts = {
   },
   'feedback:create': { input: feedbackItemInputSchema, output: feedbackItemSchema },
   'feedback:update': {
-    input: z.object({
-      id: z.string(),
-      patch: feedbackItemSchema.omit({ id: true, videoId: true, createdAt: true }).partial()
-    }),
+    input: z.object({ id: z.string(), patch: feedbackItemPatchSchema }),
     output: feedbackItemSchema
   },
   'feedback:delete': { input: z.object({ id: z.string() }), output: z.void() },

@@ -7,6 +7,7 @@ import {
   serpTaskItems,
   type SerpVideoItem
 } from '@shared/niches'
+import { app } from 'electron'
 import { logInfo } from './logger'
 import { getDataForSeoLogin, getDataForSeoPassword } from './settings'
 
@@ -17,7 +18,12 @@ import { getDataForSeoLogin, getDataForSeoPassword } from './settings'
  * holds the HTTP call. Billed per block of 20 results on DataForSEO's side.
  */
 
-const BASE = process.env['RACCORD_DATAFORSEO_BASE'] ?? 'https://api.dataforseo.com'
+// RACCORD_DATAFORSEO_BASE overrides the host for tests — dev/E2E only: a
+// packaged build ignores it (an inherited env var must not redirect requests
+// carrying the credentials; same gate as RACCORD_KIE_BASE in kie.ts).
+const BASE =
+  (app.isPackaged ? undefined : process.env['RACCORD_DATAFORSEO_BASE']) ??
+  'https://api.dataforseo.com'
 
 function authHeader(): string {
   const login = getDataForSeoLogin()

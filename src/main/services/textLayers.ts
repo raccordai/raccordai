@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { asc, eq } from 'drizzle-orm'
-import type { TextLayer } from '@shared/ipc/contracts'
+import { textLayerPatchSchema, type TextLayer } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { textLayers, videos } from '../db/schema'
 import { broadcastWorkflowChanged } from '../events'
@@ -76,12 +76,16 @@ export function updateTextLayer(
   id: string,
   patch: Partial<Omit<TextLayer, 'id' | 'videoId' | 'createdAt'>>
 ): TextLayer {
+  // Not all callers validate their input (MCP tools pass arguments through):
+  // the parse strips immutable keys (id, videoId) and rejects bad values
+  // before they reach the row.
+  const clean = textLayerPatchSchema.parse(patch)
   const db = getDb()
   const current = getTextLayer(id)
   if (!current) throw new Error(`Unknown text layer "${id}".`)
-  const next = { ...current, ...patch }
+  const next = { ...current, ...clean }
   assertTiming(next.startSec, next.endSec)
-  db.update(textLayers).set(patch).where(eq(textLayers.id, id)).run()
+  db.update(textLayers).set(clean).where(eq(textLayers.id, id)).run()
   broadcastWorkflowChanged(current.videoId)
   return next
 }
