@@ -56,7 +56,6 @@ export default defineConfig({
         'src/main/services/feedback.ts',
         'src/main/services/search.ts',
         'src/main/services/voicePersonas.ts',
-        'src/main/mcp/registry.ts',
         'src/main/mcp/docs.ts',
         'src/main/media/files.ts',
         'src/main/media/download.ts',
@@ -75,10 +74,10 @@ export default defineConfig({
       // config.ts is a bare constant — nothing to test.
       exclude: ['**/*.test.ts', 'src/shared/config.ts'],
       thresholds: {
-        lines: 80,
-        functions: 80,
-        branches: 75,
-        statements: 80
+        lines: 90,
+        functions: 90,
+        branches: 80,
+        statements: 90
       }
     }
   }
