@@ -72,8 +72,15 @@ credits and touches no network.
 Coverage is measured on an **explicit scope** (`coverage.include` in
 `vitest.config.ts`) with blocking thresholds in CI:
 
-- lines / statements / functions: **80%**
-- branches: **75%**
+- lines / statements / functions: **90%**
+- branches: **80%**
+
+The MCP registry (`src/main/mcp/registry/`) is deliberately OUT of that scope,
+like the IPC handlers: its entries are wiring over the tested services, its
+declarative invariants are guarded by `registry.test.ts`, and its behavior is
+exercised end to end by the E2E suite. It sat in the scope historically at ~3%
+coverage, which both ate the branch-threshold margin and contradicted this
+paragraph — its removal is that correction, not a shrink to get CI passing.
 
 Rules:
 
