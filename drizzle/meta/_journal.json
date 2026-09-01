@@ -204,6 +204,13 @@
       "when": 1787920660506,
       "tag": "0028_cynical_leopardon",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1788268172753,
+      "tag": "0029_aspiring_spot",
+      "breakpoints": true
     }
   ]
 }

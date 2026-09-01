@@ -84,11 +84,12 @@ export const graphTools: AgentTool[] = [
           segments: n.segments ?? null,
           overlay: n.overlay ?? null,
           // Baked per-clip effects + audio placement — what set_clip_speed /
-          // set_clip_look / set_still_motion / set_clip_volume /
-          // set_audio_offset wrote (null = untouched). get_timeline returns
-          // the RESOLVED placement these produce.
+          // set_clip_look / set_clip_framing / set_still_motion /
+          // set_clip_volume / set_audio_offset wrote (null = untouched).
+          // get_timeline returns the RESOLVED placement these produce.
           speed: n.speed ?? null,
           look: n.look ?? null,
+          framing: n.framing ?? null,
           stillMotion: n.stillMotion ?? null,
           volume: n.volume ?? null,
           timelineOffsetSec: n.timelineOffsetSec ?? null,

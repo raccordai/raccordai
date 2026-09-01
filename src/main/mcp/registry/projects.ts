@@ -2,6 +2,7 @@ import { videoAspectRatioSchema, videoResolutionSchema } from '@shared/ipc/contr
 import { broadcastFocusNode, broadcastNavigate } from '../../events'
 import * as graph from '../../services/graph'
 import * as projects from '../../services/projects'
+import { deriveShort } from '../../services/shorts'
 import { createVideoFromTemplate } from '../../services/templates'
 import * as videos from '../../services/videos'
 import { obj, str, type AgentTool } from './types'
@@ -120,6 +121,50 @@ export const projectTools: AgentTool[] = [
               )
             }
           : {})
+      })
+  },
+  {
+    name: 'derive_short',
+    description:
+      'Derive a 9:16 Short from a long-form MP4: one fill-framed clip per excerpt in a new vertical video, one undo step. Source: a finished Raccord video (videoId + its render_video output), an external file (projectId + sourcePath), or an imported video asset (assetId — reuse ONE import across several Shorts). Segments = MP4 media seconds, kept in order. Render at 1080×1920. Method: docs "timeline".',
+    inputSchema: obj(
+      {
+        videoId: str('The SOURCE Raccord video (style inherited). Omit for an external source.'),
+        projectId: str('External source: the project receiving the Short (overrides videoId).'),
+        sourcePath: str('Absolute path of the source MP4 — omit when passing assetId.'),
+        assetId: str('An already-imported VIDEO asset to use as the source (no re-import).'),
+        segments: {
+          type: 'array',
+          description: 'Excerpts to keep, e.g. [{"startSec": 12, "endSec": 18}]. Max 20.',
+          items: {
+            type: 'object',
+            properties: { startSec: { type: 'number' }, endSec: { type: 'number' } },
+            required: ['startSec', 'endSec']
+          }
+        },
+        title: str('Name of the new video (default: "<source> — Short").')
+      },
+      ['segments']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, projectId, sourcePath, assetId, segments, title }) =>
+      deriveShort({
+        // An explicit projectId or assetId signals an EXTERNAL source: it wins
+        // over the videoId a video-bound chat session injects into every
+        // 'video' tool.
+        ...(projectId !== undefined || assetId !== undefined
+          ? {
+              ...(projectId !== undefined ? { projectId: String(projectId) } : {}),
+              ...(assetId !== undefined ? { assetId: String(assetId) } : {})
+            }
+          : { videoId: String(videoId) }),
+        ...(sourcePath !== undefined ? { sourcePath: String(sourcePath) } : {}),
+        segments: (Array.isArray(segments) ? segments : []).map((s) => ({
+          startSec: Number((s as { startSec?: unknown }).startSec),
+          endSec: Number((s as { endSec?: unknown }).endSec)
+        })),
+        ...(title !== undefined ? { title: String(title) } : {})
       })
   },
   {

@@ -16,6 +16,7 @@ import type { NicheOverview } from '@shared/ipc/contracts'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { OpportunitySummary } from '@renderer/features/niches/OpportunitySummary'
 import { compactNumber, VideoRow } from '@renderer/features/niches/VideoRow'
+import { openAssistant } from '@renderer/features/assistant/assistantStore'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
 
@@ -382,6 +383,11 @@ function KeywordSearch({
                     likeCount: video.likeCount,
                     commentCount: video.commentCount
                   }}
+                  onCreateShorts={() =>
+                    openAssistant(
+                      t('niches.createShortsPrompt', { title: video.title, url: video.url })
+                    )
+                  }
                   trailing={
                     trackedChannels.has(video.channelId) ? (
                       <span className="text-[11px] text-success">✓</span>

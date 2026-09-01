@@ -11,6 +11,7 @@ import {
   clipDuration,
   clipResolution,
   clipTransitionAfter,
+  clipFraming,
   clipLook,
   clipSegments,
   clipSpeed,
@@ -148,6 +149,12 @@ describe('clipSpeed / clipLook / stillMotionOf', () => {
     expect(clipLook(node())).toBeNull()
     expect(stillMotionOf(node({ stillMotion: 'pan-left' }))).toBe('pan-left')
     expect(stillMotionOf(node({ stillMotion: 'spin' }))).toBeNull()
+  })
+
+  it('clipFraming only resolves known framings (null = historical letterbox)', () => {
+    expect(clipFraming(node({ framing: 'fill' }))).toBe('fill')
+    expect(clipFraming(node({ framing: 'stretch' }))).toBeNull()
+    expect(clipFraming(node())).toBeNull()
   })
 })
 

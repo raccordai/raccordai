@@ -1,4 +1,4 @@
-import { Captions } from 'lucide-react'
+import { Captions, Smartphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   channelRatioSignal,
@@ -100,10 +100,13 @@ export function formatEngagement(rate: number): string {
 export function VideoRow({
   video,
   onTranscript,
+  onCreateShorts,
   trailing
 }: {
   video: VideoRowData
   onTranscript?: (nicheVideoId: string) => void
+  /** Opens the assistant pre-drafted to derive Shorts from this video. */
+  onCreateShorts?: () => void
   /** Extra action rendered after the ratio badge (e.g. "track channel"). */
   trailing?: React.ReactNode
 }): React.JSX.Element {
@@ -142,6 +145,15 @@ export function VideoRow({
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2 text-xs text-neutral-400">
+        {onCreateShorts && (
+          <button
+            onClick={onCreateShorts}
+            title={t('niches.createShorts')}
+            className="rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-accent"
+          >
+            <Smartphone className="h-4 w-4" />
+          </button>
+        )}
         {/* Transcript indicator — always visible on tracked videos: green and
             clickable when fetched, muted when absent. */}
         {video.hasTranscript !== undefined &&

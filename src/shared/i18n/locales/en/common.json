@@ -231,6 +231,11 @@
       "noir": "Noir",
       "vintage": "Vintage"
     },
+    "framing": "Framing",
+    "framingFit": "Fit (letterbox)",
+    "framings": {
+      "fill": "Fill (crop)"
+    },
     "motion": "Motion (Ken Burns)",
     "motionNone": "Static",
     "motions": {
@@ -410,6 +415,13 @@
     "subsHidden": "hidden subscribers",
     "hasTranscript": "Transcript",
     "transcriptTitle": "Transcript",
+    "createShorts": "Create shorts",
+    "createShortsPrompt": "Make shorts from this YouTube video: \"{{title}}\" ({{url}}). Use its niche transcript to spot 2–3 strong moments, then ask me for the video's MP4 file (I'll give you the path — Raccord doesn't download from YouTube) and derive each excerpt as a 9:16 vertical rendered at 1080×1920.",
+    "createShortsHint": "Pick the project, then select the video's MP4 file (Raccord doesn't download from YouTube). The file is imported into the project's assets and the assistant takes over with the already-fetched transcript.",
+    "createShortsProject": "Project",
+    "createShortsPickFile": "Choose the MP4…",
+    "createShortsNoProjects": "Create a project first to receive the shorts.",
+    "createShortsAssetPrompt": "Make shorts from \"{{title}}\". The MP4 is already imported: asset \"{{assetName}}\" (assetId {{assetId}}) in project \"{{project}}\" (projectId {{projectId}}). Its transcript is already stored — read it with get_niche_video (nicheVideoId {{nicheVideoId}}). Spot 2–3 strong moments, create one short per moment with derive_short (assetId + projectId + segments in MP4 media seconds, narrative order), then render each short at 1080×1920.",
     "noTranscript": "No transcript available for this video.",
     "close": "Close",
     "channelTracked": "Channel \"{{name}}\" tracked in the niche",
@@ -528,6 +540,8 @@
   },
   "videosPage": {
     "newVideo": "New video",
+    "createShorts": "Create shorts",
+    "createShortsPrompt": "Make shorts from this video: render it to MP4 first, pick 2–3 strong moments (the hook, a key beat, the payoff) from the transcript or the scenario, then derive each excerpt as a 9:16 vertical and render it at 1080×1920.",
     "namePlaceholder": "Video name (e.g. Sequence 1)",
     "empty": "No videos in this project.",
     "emptyHint": "Create a video to open the workflow editor.",

@@ -20,6 +20,7 @@ import {
   formatSubscribers,
   VideoRow
 } from '@renderer/features/niches/VideoRow'
+import { openAssistant } from '@renderer/features/assistant/assistantStore'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
 
@@ -54,6 +55,37 @@ function NicheDetailPage(): React.JSX.Element {
   const invalidate = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['niches'] })
   }
+
+  // "Create shorts" on a tracked video: pick a project, import the MP4 through
+  // the native dialog (Raccord never downloads from YouTube), then hand the
+  // assistant a draft carrying the asset AND the already-fetched transcript.
+  const [shortsOf, setShortsOf] = useState<{ nicheVideoId: string; title: string } | null>(null)
+  const [shortsProjectId, setShortsProjectId] = useState('')
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => invoke('projects:list') })
+  const importForShorts = useMutation({
+    mutationFn: async () => {
+      const assets = await invoke('assets:importFromDialog', { projectId: shortsProjectId })
+      return assets.find((a) => a.kind === 'video') ?? null
+    },
+    onSuccess: (asset) => {
+      if (!shortsOf) return
+      // Dialog cancelled, or no video file among the picked files.
+      if (!asset) return
+      const project = (projects.data ?? []).find((p) => p.id === shortsProjectId)
+      openAssistant(
+        t('niches.createShortsAssetPrompt', {
+          title: shortsOf.title,
+          assetName: asset.name,
+          assetId: asset.id,
+          project: project?.name ?? '',
+          projectId: shortsProjectId,
+          nicheVideoId: shortsOf.nicheVideoId
+        })
+      )
+      setShortsOf(null)
+    },
+    onError: (err) => toast.error(err.message)
+  })
   const saveBrief = useMutation({
     mutationFn: (description: string) =>
       invoke('niches:update', { nicheId, description: description.trim() || null }),
@@ -449,11 +481,67 @@ function NicheDetailPage(): React.JSX.Element {
                   commentCount: video.commentCount
                 }}
                 onTranscript={setTranscriptOf}
+                onCreateShorts={() => {
+                  setShortsProjectId((prev) => prev || (projects.data?.[0]?.id ?? ''))
+                  setShortsOf({ nicheVideoId: video.id, title: video.title })
+                }}
               />
             ))}
           </div>
         )}
       </section>
+
+      {/* ── Create shorts: project picker + native MP4 import ── */}
+      {shortsOf !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-8"
+          onClick={() => setShortsOf(null)}
+        >
+          <div
+            className="island flex w-full max-w-md flex-col gap-3 p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="line-clamp-2 text-sm font-medium text-neutral-100">
+              {t('niches.createShorts')} — {shortsOf.title}
+            </h3>
+            <p className="text-xs text-neutral-500">{t('niches.createShortsHint')}</p>
+            {(projects.data?.length ?? 0) === 0 ? (
+              <p className="text-xs text-warning">{t('niches.createShortsNoProjects')}</p>
+            ) : (
+              <label className="flex flex-col gap-1 text-xs text-neutral-400">
+                {t('niches.createShortsProject')}
+                <select
+                  value={shortsProjectId}
+                  onChange={(e) => setShortsProjectId(e.target.value)}
+                  className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200 focus:border-accent focus:outline-none"
+                >
+                  {(projects.data ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setShortsOf(null)}
+                className="rounded-md px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+              >
+                {t('library.cancel')}
+              </button>
+              <button
+                disabled={shortsProjectId === '' || importForShorts.isPending}
+                onClick={() => importForShorts.mutate()}
+                className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-accent-hover disabled:opacity-40"
+              >
+                {importForShorts.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {t('niches.createShortsPickFile')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Transcript viewer ── */}
       {transcriptOf !== null && (

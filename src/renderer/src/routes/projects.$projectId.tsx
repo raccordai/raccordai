@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, Outlet, createFileRoute, useChildMatches, useNavigate } from '@tanstack/react-router'
-import { Film, FolderInput, Image as ImageIcon, Pencil, Plus, Search } from 'lucide-react'
+import {
+  Film,
+  FolderInput,
+  Image as ImageIcon,
+  Pencil,
+  Plus,
+  Search,
+  Smartphone
+} from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { assetMatchesQuery, nameMatchesQuery } from '@shared/assets/search'
@@ -16,6 +24,7 @@ import { InstructionsTab } from '@renderer/features/projects/InstructionsTab'
 import { LibraryCard } from '@renderer/components/LibraryCard'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { useProject } from '@renderer/features/workflow/data'
+import { openAssistant } from '@renderer/features/assistant/assistantStore'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
 
@@ -536,6 +545,22 @@ function VideosPage(): React.JSX.Element {
                   }}
                   renameTitle={t('library.rename')}
                   deleteTitle={t('library.delete')}
+                  actions={[
+                    {
+                      icon: Smartphone,
+                      title: t('videosPage.createShorts'),
+                      // Open the video with the assistant pre-drafted: the global
+                      // sidebar keeps the draft across the navigation, and the
+                      // video-bound context gives the agent its toolset.
+                      onClick: () => {
+                        openAssistant(t('videosPage.createShortsPrompt'))
+                        void navigate({
+                          to: '/projects/$projectId/videos/$videoId',
+                          params: { projectId, videoId: video.id }
+                        })
+                      }
+                    }
+                  ]}
                 />
               ))}
             </div>

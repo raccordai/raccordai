@@ -1,5 +1,5 @@
 import type { GraphNode, TimelineSegment } from './ipc/contracts'
-import { SPEED_MAX, SPEED_MIN, VOLUME_MAX, VOLUME_MIN } from './config'
+import { CLIP_FRAMING_IDS, SPEED_MAX, SPEED_MIN, VOLUME_MAX, VOLUME_MIN } from './config'
 import { isClipLookId } from './looks'
 import { getModel } from './models'
 import { isStillMotionId } from './stillMotion'
@@ -297,6 +297,19 @@ export function clipSpeed(node: GraphNode): number {
 /** The clip's colour look (a CLIP_LOOKS id) or null (untouched). */
 export function clipLook(node: GraphNode): string | null {
   return isClipLookId(node.look) ? node.look : null
+}
+
+/** True for a known framing id ('fill' — cover + center-crop the sequence frame). */
+export function isClipFramingId(value: unknown): value is string {
+  return typeof value === 'string' && CLIP_FRAMING_IDS.includes(value)
+}
+
+/**
+ * The clip's framing against the sequence frame, or null (the historical
+ * scale-to-fit + letterbox). 'fill' is how a 16:9 clip fills a 9:16 Short.
+ */
+export function clipFraming(node: GraphNode): string | null {
+  return isClipFramingId(node.framing) ? node.framing : null
 }
 
 /** The still slot's Ken Burns preset (a STILL_MOTIONS id) or null (frozen frame). */
