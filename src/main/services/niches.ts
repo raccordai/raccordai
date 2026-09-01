@@ -845,9 +845,11 @@ export async function fetchTranscripts(input: {
     .orderBy(desc(nicheVideos.views))
     .all()
     .filter((row) => !input.videoIds || input.videoIds.includes(row.videoId))
-    // The API says these have no captions — don't burn unofficial fetches on
-    // them (an explicit videoIds request overrides, captions do appear late).
-    .filter((row) => row.hasCaptions !== false || input.videoIds?.includes(row.videoId))
+  // hasCaptions is deliberately NOT an eligibility gate: the Data API's
+  // `caption` flag only reflects MANUAL tracks, so ASR-only videos (most
+  // competitor channels) report false yet fetch fine through the unofficial
+  // path. A truly caption-less video costs one attempt, gets stamped, and
+  // drops to the retry tier below — that is cheap enough.
   // Never-attempted videos first; once none remain, a new call RETRIES the
   // previously-failed ones (captions appear late, and fetch bugs get fixed).
   const fresh = withoutTranscript.filter((row) => row.transcriptFetchedAt === null)
