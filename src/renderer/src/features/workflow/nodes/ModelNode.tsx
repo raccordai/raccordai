@@ -21,7 +21,7 @@ import type { GraphNode } from '@shared/ipc/contracts'
 import { useConfirm, useToast } from '@renderer/components/feedback/Feedback'
 import { useDismissable } from '@renderer/components/ui/useDismissable'
 import { VideoThumb } from '@renderer/components/VideoThumb'
-import { MODELS, getModel, type ModelDefinition } from '@shared/models'
+import { getModel, listModels, type ModelDefinition } from '@shared/models'
 import { incomingConnectionsFor, useWorkflowGraph } from '../workflowContext'
 import {
   useAsset,
@@ -85,7 +85,7 @@ function ReplaceModelMenu({ node, model }: { node: GraphNode; model: ModelDefini
     ['generations']
   ])
   const targets = useMemo(
-    () => MODELS.filter((m) => m.kind === model.kind && m.id !== model.id),
+    () => listModels().filter((m) => m.kind === model.kind && m.id !== model.id),
     [model.kind, model.id]
   )
   if (targets.length === 0) return null

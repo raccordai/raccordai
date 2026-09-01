@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   MODELS,
   clampParamToField,
@@ -7,9 +7,11 @@ import {
   estimateCreditsFor,
   getModel,
   getModelOrThrow,
+  listModels,
+  registerDynamicModels,
   videoDefaultParams
 } from './index'
-import type { ParamField } from './types'
+import type { ModelDefinition, ParamField } from './types'
 
 describe('model registry invariants', () => {
   it('has unique model ids', () => {
@@ -157,6 +159,43 @@ describe('model lookup', () => {
     const model = getModel('grok-imagine-video-1-5-preview')
     expect(model?.id).toBe('grok-imagine-video-1-5-preview')
     expect(model?.label).toContain('1.5')
+  })
+})
+
+describe('dynamic models', () => {
+  afterEach(() => registerDynamicModels([]))
+
+  const shipped = MODELS[0] as ModelDefinition
+  const dynamic = (id: string): ModelDefinition => ({ ...shipped, id, label: `Dynamic ${id}` })
+
+  it('lists the shipped registry alone until something is registered', () => {
+    expect(listModels()).toBe(MODELS)
+    expect(getModel('local/one')).toBeUndefined()
+  })
+
+  it('resolves registered definitions after the shipped ones, and replaces the whole set', () => {
+    registerDynamicModels([dynamic('local/one'), dynamic('local/two')])
+    expect(listModels().map((m) => m.id)).toEqual([
+      ...MODELS.map((m) => m.id),
+      'local/one',
+      'local/two'
+    ])
+    expect(getModel('local/two')?.label).toBe('Dynamic local/two')
+    expect(getModelOrThrow('local/one').id).toBe('local/one')
+    expect(defaultParamsFor('local/one')).toEqual(defaultParamsFor(shipped.id))
+
+    registerDynamicModels([dynamic('local/three')])
+    expect(getModel('local/one')).toBeUndefined()
+    expect(getModel('local/three')).toBeDefined()
+  })
+
+  it('never lets a dynamic definition shadow a shipped model or itself', () => {
+    expect(() => registerDynamicModels([dynamic(shipped.id)])).toThrow(/collides/)
+    expect(() => registerDynamicModels([dynamic('local/dup'), dynamic('local/dup')])).toThrow(
+      /Duplicate/
+    )
+    // A rejected registration leaves the previous set untouched.
+    expect(listModels()).toBe(MODELS)
   })
 })
 

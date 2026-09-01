@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { MODELS } from '@shared/models'
+import { listModels } from '@shared/models'
 import * as generations from '../../services/generations'
 import { getChanges } from '../../services/changeFeed'
 import { kieGetCredits } from '../../services/kie'
@@ -28,7 +28,7 @@ export const platformTools: AgentTool[] = [
     scope: 'global',
     risk: 'read',
     execute: () =>
-      MODELS.map((m) => ({
+      listModels().map((m) => ({
         id: m.id,
         kind: m.kind,
         label: m.label,

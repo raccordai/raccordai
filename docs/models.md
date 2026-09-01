@@ -7,6 +7,14 @@ params form, the run payload, credit estimates, the timeline, the assistant
 and the MCP docs. There is no other place to wire a model — if it's in the
 registry, the whole app knows it.
 
+Consumers read the registry through `listModels()` / `getModel(id)`, never
+the raw `MODELS` array: besides the shipped definitions, the registry can hold
+**dynamic** models — definitions synthesized at runtime from user records (a
+local generation server's imported workflows), registered as a whole set with
+`registerDynamicModels(defs)` on each side that owns the records (main from
+the db, the renderer after fetching them over IPC, both through one pure
+factory). A dynamic id can never shadow a shipped one.
+
 Reference implementation to copy from: `seedance-15-pro.ts` (video, every
 feature used). Simplest one: `gpt-image-2-t2i.ts` (image, no inputs).
 Special-provider example: `suno-music.ts` (dedicated Suno API).
@@ -48,7 +56,7 @@ keep running, and remove the old definition. Add an alias test in
 ```ts
 export const myModel: ModelDefinition<Params> = {
   id, label, description, kind,          // identity
-  provider?,                             // 'jobs' (default) | 'suno'
+  provider?,                             // 'jobs' (default) | 'suno' | 'elevenlabs'
   paramsSchema, paramFields,             // parameters (zod + form)
   inputs, outputs,                       // graph handles
   buildPayload,                          // params+inputs → kie.ai body
@@ -72,10 +80,14 @@ export const myModel: ModelDefinition<Params> = {
   `'elevenlabs'` routes through the official ElevenLabs client
   (`src/main/services/elevenlabs.ts`, own key, own host, SYNCHRONOUS — the
   submit call returns the finished audio; the staged file's `file://` URL is
-  stored as the task id and `checkRemoteStatus` reports instant success).
-  A new provider = a client service + a branch in
-  `checkRemoteStatus`/`submitGeneration` (`runEngine.ts`) — avoid unless the
-  API family truly differs.
+  stored as the task id and its `status` reports instant success).
+  Each family is one `GenerationProvider` object under
+  `src/main/services/providers/` (`types.ts` is the contract: submit / status /
+  optional fetchResult / input publisher / poll policy / queue key), resolved
+  by `providerFor(modelId)`. The run engine never branches on the family.
+  A new provider = one file there + one entry in the `PROVIDERS` map
+  (`providers/index.ts`) + the `ModelProvider` union in `types.ts` — avoid
+  unless the API family truly differs.
 - `audioRole` — audio models only: `'music'` (default, the Suno bed) or
   `'speech'` (ElevenLabs voice-over) — decides which timeline/render lane the
   output rides; speech is mixed OVER the music, never concatenated after it.

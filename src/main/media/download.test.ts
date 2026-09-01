@@ -13,6 +13,16 @@ beforeAll(async () => {
     if (req.url === '/ok.mp4') {
       res.writeHead(200, { 'content-type': 'video/mp4' })
       res.end('MP4-BYTES')
+    } else if (req.url === '/gated.mp4') {
+      // An authenticated host (remote generation server): the provider's
+      // headers must reach the request verbatim.
+      if (req.headers.authorization !== 'Bearer secret') {
+        res.writeHead(401)
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'content-type': 'video/mp4' })
+      res.end('GATED-BYTES')
     } else if (req.url === '/oversized-declared') {
       res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': '4096' })
       res.end(Buffer.alloc(4096))
@@ -73,6 +83,17 @@ describe('downloadToFile', () => {
     )
     expect(result.path).toBe(join(dir, 'typed.mp4'))
     expect(existsSync(result.path)).toBe(true)
+  })
+
+  it('forwards the caller headers to the request (authenticated result hosts)', async () => {
+    const dir = tmp()
+    await expect(downloadToFile(`${base}/gated.mp4`, join(dir, 'bare.mp4'))).rejects.toThrow(
+      /HTTP 401/
+    )
+    const result = await downloadToFile(`${base}/gated.mp4`, join(dir, 'auth.mp4'), {
+      headers: { authorization: 'Bearer secret' }
+    })
+    expect(readFileSync(result.path, 'utf8')).toBe('GATED-BYTES')
   })
 
   it('a throwing target callback aborts before writing anything', async () => {

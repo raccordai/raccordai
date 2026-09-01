@@ -59,7 +59,7 @@ import { autoLayoutPositions, resolveOverlaps, type LayoutDirection } from './au
 import { useLastFrameExtractor } from './useLastFrameExtractor'
 import { graphKeys, useGraph, useIpcMutation, useProjectAssets } from './data'
 import { useNodeCreation } from './useNodeCreation'
-import { MODELS, getModel } from '@shared/models'
+import { getModel, listModels } from '@shared/models'
 import { collectTimelineClips } from '@shared/timeline'
 import { getDesignRecipe } from '@shared/designs/registry'
 
@@ -1193,7 +1193,9 @@ function NodeContextMenu({
   useDismissable(true, onClose, rootRef)
   const model = getModel(node.modelId)
   const isAsset = node.modelId === 'studio/asset'
-  const targets = model ? MODELS.filter((m) => m.kind === model.kind && m.id !== model.id) : []
+  const targets = model
+    ? listModels().filter((m) => m.kind === model.kind && m.id !== model.id)
+    : []
   const itemClass =
     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-neutral-200 hover:bg-neutral-800'
   return (
