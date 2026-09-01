@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { clipFraming, clipTrim } from '@shared/timeline'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
-import { getAsset } from './assets'
+import { getAsset, importAssetFromFile, listAssets } from './assets'
 import { listGraph } from './graph'
 import { undoGraph } from './graphHistory'
 import { createProject } from './projects'
@@ -109,6 +109,46 @@ describe('deriveShort', () => {
     expect(nodes).toHaveLength(1)
     expect(clipTrim(nodes[0]!)).toMatchObject({ start: 90, end: 118 })
     expect(clipFraming(nodes[0]!)).toBe('fill')
+  })
+
+  it('derives from an already-imported asset without re-importing the file', () => {
+    const imported = importAssetFromFile(projectId, writeRender('master.mp4'))
+    const first = deriveShort({
+      assetId: imported.id,
+      segments: [{ startSec: 5, endSec: 12 }]
+    })
+    const second = deriveShort({
+      assetId: imported.id,
+      segments: [{ startSec: 40, endSec: 55 }],
+      title: 'Short 2'
+    })
+    expect(first.asset.id).toBe(imported.id)
+    expect(second.asset.id).toBe(imported.id)
+    expect(first.video.projectId).toBe(projectId)
+    // ONE stored file serves both Shorts — no duplicate import.
+    expect(listAssets(projectId)).toHaveLength(1)
+    const { nodes } = listGraph(second.video.id)
+    expect(nodes[0]!.params).toMatchObject({ assetId: imported.id })
+  })
+
+  it('rejects a non-video asset, a foreign asset and a missing source', () => {
+    const still = join(dir, 'poster.png')
+    writeFileSync(still, 'png-bytes')
+    const image = importAssetFromFile(projectId, still)
+    expect(() =>
+      deriveShort({ assetId: image.id, segments: [{ startSec: 0, endSec: 2 }] })
+    ).toThrow(/not a video/)
+    expect(() => deriveShort({ assetId: 'ghost', segments: [{ startSec: 0, endSec: 2 }] })).toThrow(
+      /Unknown assetId/
+    )
+    const other = createProject('Q')
+    const foreign = importAssetFromFile(other.id, writeRender('other.mp4'))
+    expect(() =>
+      deriveShort({ projectId, assetId: foreign.id, segments: [{ startSec: 0, endSec: 2 }] })
+    ).toThrow(/another project/)
+    expect(() => deriveShort({ projectId, segments: [{ startSec: 0, endSec: 2 }] })).toThrow(
+      /sourcePath .* assetId/
+    )
   })
 
   it('requires a source: no videoId nor projectId, or an unknown projectId, refuse', () => {

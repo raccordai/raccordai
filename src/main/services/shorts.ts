@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import type { Asset, Video } from '@shared/ipc/contracts'
 import { mediaKindFor } from '../media/files'
-import { importAssetFromFile } from './assets'
+import { getAsset, importAssetFromFile } from './assets'
 import { createNode, setClipFraming, setClipTrim, setTimelineOrder } from './graph'
 import { withGraphHistoryGroup } from './graphHistory'
 import { getProject } from './projects'
@@ -61,37 +61,55 @@ export function normalizeShortSegments(segments: ShortSegment[]): ShortSegment[]
  * frame instead of letterboxing. All graph mutations land in ONE undo step on
  * the new video.
  *
- * Two source shapes: a FINISHED Raccord video (`videoId` — the Short lands in
- * its project and inherits its style; the MP4's media time IS that video's
- * final-timeline time, so segments read straight off get_timeline or a speech
- * transcript) or an EXTERNAL file (`projectId` — a YouTube master, a rush, a
- * screen recording; segments come from watching it or its own captions).
- * Render the result with a vertical resolution override (e.g. 1080×1920) —
- * the sequence spec still follows the first clip's probe.
+ * Three source shapes: a FINISHED Raccord video (`videoId` + `sourcePath` —
+ * the Short lands in its project and inherits its style; the MP4's media time
+ * IS that video's final-timeline time, so segments read straight off
+ * get_timeline or a speech transcript), an EXTERNAL file (`projectId` +
+ * `sourcePath` — a YouTube master, a rush, a screen recording; segments come
+ * from watching it or its own captions), or an ALREADY-IMPORTED video asset
+ * (`assetId` — several Shorts reuse one import instead of copying the file
+ * each time). Render the result with a vertical resolution override (e.g.
+ * 1080×1920) — the sequence spec still follows the first clip's probe.
  */
 export function deriveShort(args: {
   videoId?: string
   projectId?: string
-  sourcePath: string
+  sourcePath?: string
+  assetId?: string
   segments: ShortSegment[]
   title?: string
 }): DeriveShortResult {
   const source = args.videoId ? getVideo(args.videoId) : null
   if (args.videoId && !source) throw new Error(`Unknown videoId: ${args.videoId}`)
-  const projectId = source?.projectId ?? args.projectId
+  const existing = args.assetId ? getAsset(args.assetId) : null
+  if (args.assetId && !existing) throw new Error(`Unknown assetId: ${args.assetId}`)
+  if (existing && existing.kind !== 'video') {
+    throw new Error(`Asset "${existing.name}" is not a video (kind: ${existing.kind}).`)
+  }
+  const projectId = source?.projectId ?? args.projectId ?? existing?.projectId
   if (!projectId) {
-    throw new Error('Pass videoId (a finished Raccord video) or projectId (external source file).')
+    throw new Error(
+      'Pass videoId (a finished Raccord video), projectId + sourcePath (external file) or assetId (imported video asset).'
+    )
+  }
+  if (existing && existing.projectId !== projectId) {
+    throw new Error(`Asset "${existing.name}" belongs to another project.`)
   }
   if (!source && !getProject(projectId)) throw new Error(`Unknown projectId: ${projectId}`)
   const segments = normalizeShortSegments(args.segments)
-  if (!existsSync(args.sourcePath)) {
-    throw new Error(`Source file not found: ${args.sourcePath}`)
-  }
-  if (mediaKindFor(args.sourcePath) !== 'video') {
-    throw new Error('The source must be a video file (a rendered or imported long-form video).')
+  if (!existing) {
+    if (!args.sourcePath) {
+      throw new Error('Pass sourcePath (the source MP4) or assetId (an imported video asset).')
+    }
+    if (!existsSync(args.sourcePath)) {
+      throw new Error(`Source file not found: ${args.sourcePath}`)
+    }
+    if (mediaKindFor(args.sourcePath) !== 'video') {
+      throw new Error('The source must be a video file (a rendered or imported long-form video).')
+    }
   }
 
-  const asset = importAssetFromFile(projectId, args.sourcePath)
+  const asset = existing ?? importAssetFromFile(projectId, args.sourcePath!)
   const video = createVideo(
     projectId,
     args.title?.trim() || `${source?.name ?? asset.name} — Short`

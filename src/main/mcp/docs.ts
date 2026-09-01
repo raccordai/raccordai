@@ -819,7 +819,9 @@ MP4 media seconds, which ARE final-timeline seconds), pass them in narrative ord
 inherits the source style. From an EXTERNAL file (projectId + sourcePath — the master of a
 YouTube long-form, a rush): Raccord never downloads from YouTube, the user supplies the file;
 for excerpt picking, a video tracked in a niche may have its caption transcript
-(fetch_niche_transcripts, [m:ss] timestamps = media seconds). Render the Short with render_video
+(fetch_niche_transcripts, [m:ss] timestamps = media seconds). Deriving SEVERAL Shorts from one
+source: import once, then pass assetId (an imported VIDEO asset) instead of sourcePath — each
+call reuses the same stored file instead of copying it again. Render the Short with render_video
 resolution 1080×1920 — the crop only happens against a vertical sequence frame. Tie it back to
 the channel with add_roadmap_item / assign_roadmap_item.
 A clip whose asset carries a demo journal (record_demo — target "window" films Raccord's own
