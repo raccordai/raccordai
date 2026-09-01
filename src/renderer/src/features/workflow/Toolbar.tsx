@@ -32,7 +32,7 @@ import type {
   VideoAspectRatio,
   VideoResolution
 } from '@shared/ipc/contracts'
-import { MODELS, getModel, videoDefaultParams } from '@shared/models'
+import { getModel, listModels, videoDefaultParams } from '@shared/models'
 import { STYLES, type StyleTemplate } from '@shared/styles/registry'
 import {
   RECIPES,
@@ -397,7 +397,7 @@ export function AddNodePanel({
           }))
         : []),
       // Model label/description are product data (English), like the ids — not localized.
-      ...MODELS.map((m) => ({
+      ...listModels().map((m) => ({
         id: m.id,
         label: m.label,
         desc: `${m.description.split('.')[0]}.`,

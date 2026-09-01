@@ -67,12 +67,38 @@ for (const [alias, target] of Object.entries(MODEL_ALIASES)) {
   if (def) MODEL_MAP.set(alias, def)
 }
 
+/**
+ * Models that exist as DATA rather than code — definitions synthesized at
+ * runtime from user records (a local generation server's imported workflows).
+ * Registered as a whole set by whoever owns the records (main after reading
+ * the db, the renderer after fetching them over IPC — both through the same
+ * pure factory, so the two sides agree). Static ids always win: a dynamic
+ * definition can never shadow a shipped model.
+ */
+let dynamicModels: ReadonlyMap<string, ModelDefinition> = new Map()
+
+export function registerDynamicModels(defs: readonly ModelDefinition[]): void {
+  const next = new Map<string, ModelDefinition>()
+  for (const def of defs) {
+    if (MODEL_MAP.has(def.id))
+      throw new Error(`Dynamic model id collides with a shipped model: ${def.id}`)
+    if (next.has(def.id)) throw new Error(`Duplicate dynamic model id: ${def.id}`)
+    next.set(def.id, def)
+  }
+  dynamicModels = next
+}
+
+/** Every model currently available: the shipped registry, then the dynamic set. */
+export function listModels(): ModelDefinition[] {
+  return dynamicModels.size === 0 ? MODELS : [...MODELS, ...dynamicModels.values()]
+}
+
 export function getModel(id: string): ModelDefinition | undefined {
-  return MODEL_MAP.get(id)
+  return MODEL_MAP.get(id) ?? dynamicModels.get(id)
 }
 
 export function getModelOrThrow(id: string): ModelDefinition {
-  const m = MODEL_MAP.get(id)
+  const m = getModel(id)
   if (!m) throw new Error(`Unknown model: ${id}`)
   return m
 }

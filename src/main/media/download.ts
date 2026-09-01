@@ -39,11 +39,13 @@ export function assertDownloadableUrl(url: string): URL {
 export async function downloadToFile(
   url: string,
   target: string | ((contentType: string | null) => string),
-  opts: { maxBytes?: number } = {}
+  opts: { maxBytes?: number; headers?: Record<string, string> } = {}
 ): Promise<{ path: string; contentType: string | null; bytes: number }> {
   assertDownloadableUrl(url)
   const maxBytes = opts.maxBytes ?? MAX_DOWNLOAD_BYTES
-  const res = await fetch(url)
+  // `headers` carries a provider's auth for hosts that gate their results
+  // (a remote generation server); public CDNs get a bare request.
+  const res = await fetch(url, opts.headers ? { headers: opts.headers } : undefined)
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
   const contentType = res.headers.get('content-type')
   const declared = Number(res.headers.get('content-length'))

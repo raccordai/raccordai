@@ -1,4 +1,4 @@
-import { MODELS, getModel } from '@shared/models'
+import { getModel, listModels } from '@shared/models'
 import { STYLES, getStyle } from '@shared/styles/registry'
 import { WORKFLOW_TEMPLATES, getWorkflowTemplate } from '@shared/templates/registry'
 import {
@@ -368,7 +368,7 @@ does to the total: seven 4 s shots is a 28 s film, not the 20 s the script asked
 resulting total and reconcile it with the brief.`
 
 function modelsIndex(): string {
-  const lines = MODELS.map(
+  const lines = listModels().map(
     (m) =>
       `${m.id}  [${m.kind}]  ${m.label} — ${m.description.split('.')[0]}. (recommended for: ${m.recommendedFor.join(', ')})`
   )
@@ -409,7 +409,10 @@ Recipes:
 
 function modelDetail(id: string): string {
   const m = getModel(id)
-  if (!m) return `Unknown model "${id}". Valid ids: ${MODELS.map((x) => x.id).join(', ')}`
+  if (!m)
+    return `Unknown model "${id}". Valid ids: ${listModels()
+      .map((x) => x.id)
+      .join(', ')}`
   const inputs =
     m.inputs.length === 0
       ? '  (none — no connections needed)'
@@ -450,7 +453,10 @@ ${params}${m.promptingNotes ? `\n\nPrompting notes:\n${m.promptingNotes}` : ''}$
 
 function promptingGuide(id: string): string {
   const m = getModel(id)
-  if (!m) return `Unknown model "${id}". Valid ids: ${MODELS.map((x) => x.id).join(', ')}`
+  if (!m)
+    return `Unknown model "${id}". Valid ids: ${listModels()
+      .map((x) => x.id)
+      .join(', ')}`
   if (!m.promptGuide)
     return `${m.label} has no long-form prompting guide; see docs "model:${m.id}" (Prompting notes).`
   return `${m.label} — prompting guide\n\n${m.promptGuide}`

@@ -1,12 +1,10 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
-import type { ModelProvider } from '@shared/models/types'
 import { remapDraftInputs } from '@shared/models/draft'
 import { getStyle, nodeAppliesVideoStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
@@ -26,8 +24,6 @@ import {
   isRetryableGenerationError,
   isTimeoutFailure,
   MAX_GENERATION_RETRIES,
-  maxPollAttemptsFor,
-  POLL_INTERVAL_MS,
   timeoutFailureMessage,
   withRetry
 } from './genQueue'
@@ -35,56 +31,79 @@ import { composeRunParams } from './runParams'
 import { logError, logInfo, logWarn } from './logger'
 import { buildLastFrameArgs } from './renderPlan'
 import { clampVariants } from './runPlanner'
-import {
-  kieCreateSunoTask,
-  kieCreateTask,
-  kieGetSunoStatus,
-  kieGetTaskInfo,
-  kieUploadFile,
-  parseResultUrl
-} from './kie'
 import { type GenerationRow } from './generations'
 import { failGeneration } from './generationLifecycle'
-import { elevenlabsGenerateAudio } from './elevenlabs'
 import { maybeRunQcOnSettle } from './qc'
-import { getElevenLabsApiKey, getKieApiKey, getMaxConcurrentGenerations } from './settings'
+import { getMaxConcurrentGenerations } from './settings'
+import {
+  providerFor,
+  providerOf,
+  type GenerationProvider,
+  type InputPublisher,
+  type RemoteStatus,
+  type SubmitResult
+} from './providers'
 
 /**
  * Local generation engine — port of convex/generations.ts onto the Electron
  * main process. Differences from the Convex original:
  *   - no public URL, so no webhook: the poller IS the completion path;
- *   - local input media (assets, last frames, downloaded results) is uploaded
- *     to kie.ai's temporary file host on demand, cached with a TTL;
+ *   - local input media (assets, last frames, downloaded results) is published
+ *     on demand in whatever form the run's provider reads (kie.ai: uploaded to
+ *     its temporary file host, cached with a TTL);
  *   - successful results are downloaded into the local media store.
+ *
+ * Everything on the wire goes through a `GenerationProvider`
+ * (`services/providers/`): the engine owns the lifecycle — queue slots, smart
+ * retry, poll budget, settle, media download, last-frame extraction — and
+ * never branches on which API family a model belongs to.
  */
-
-// Poll cadence and attempt budget both live in genQueue.ts (maxPollAttemptsFor,
-// POLL_INTERVAL_MS): ~10 min for images/audio, ~20 min for video tasks.
-/** kie.ai deletes uploads after ~3 days; refresh well before that. */
-const UPLOAD_TTL_MS = 48 * 60 * 60 * 1000
 
 /**
  * In-flight budget control: a slot is held from task submission until the
- * generation settles. The limit is a user setting (default 2).
+ * generation settles. The limit is a user setting (default 2). One queue per
+ * provider `queueKey` — every hosted provider shares the `cloud` budget, so a
+ * local provider (its own key) can never starve the hosted runs, nor be
+ * starved by them.
  */
-const queue = new GenerationQueue(getMaxConcurrentGenerations, broadcastQueueChanged, (id, err) => {
-  // Backstop for a task that rejected before settling its own failure: fail
-  // the row so the settle event releases the slot — with maxConcurrent=2 by
-  // default, two leaked slots freeze all generation until restart.
-  logError('run-engine', `queued task crashed for ${id}`, err)
-  try {
-    const row = getDb().select().from(generations).where(eq(generations.id, id)).get()
-    if (row && row.status !== 'success' && row.status !== 'failed') {
-      failGeneration(id, `Internal error: ${err instanceof Error ? err.message : String(err)}`)
-      return // the settle event released the slot
+const queues = new Map<string, GenerationQueue>()
+
+function queueFor(key: string): GenerationQueue {
+  let queue = queues.get(key)
+  if (queue) return queue
+  queue = new GenerationQueue(getMaxConcurrentGenerations, broadcastQueueChanged, (id, err) => {
+    // Backstop for a task that rejected before settling its own failure: fail
+    // the row so the settle event releases the slot — with maxConcurrent=2 by
+    // default, two leaked slots freeze all generation until restart.
+    logError('run-engine', `queued task crashed for ${id}`, err)
+    try {
+      const row = getDb().select().from(generations).where(eq(generations.id, id)).get()
+      if (row && row.status !== 'success' && row.status !== 'failed') {
+        failGeneration(id, `Internal error: ${err instanceof Error ? err.message : String(err)}`)
+        return // the settle event released the slot
+      }
+    } catch (failErr) {
+      logError('run-engine', `failed to settle crashed task ${id}`, failErr)
     }
-  } catch (failErr) {
-    logError('run-engine', `failed to settle crashed task ${id}`, failErr)
-  }
-  queue.release(id)
-})
+    releaseEverywhere(id)
+  })
+  queues.set(key, queue)
+  return queue
+}
+
+/** The queue a generation row draws its slot from (its node's model → provider). */
+function queueOf(gen: { nodeId: string }): GenerationQueue {
+  const node = getDb().select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
+  return queueFor(providerFor(node?.modelId ?? '').queueKey)
+}
+
+/** Frees `id` wherever it holds or awaits a slot (release is a no-op elsewhere). */
+function releaseEverywhere(id: string): void {
+  for (const queue of queues.values()) queue.release(id)
+}
+
 onGenerationSettled((event) => {
-  queue.release(event.generationId)
+  releaseEverywhere(event.generationId)
   retryCounts.delete(event.generationId)
   broadcastQueueChanged()
   broadcastCreditsChanged()
@@ -97,8 +116,16 @@ export function queueState(): {
   limit: number
   retrying: Record<string, number>
 } {
+  const running: string[] = []
+  const queued: string[] = []
+  for (const queue of queues.values()) {
+    const snapshot = queue.snapshot()
+    running.push(...snapshot.running)
+    queued.push(...snapshot.queued)
+  }
   return {
-    ...queue.snapshot(),
+    running,
+    queued,
     limit: getMaxConcurrentGenerations(),
     retrying: Object.fromEntries(retryCounts)
   }
@@ -165,81 +192,47 @@ function maybeScheduleRetry(generationId: string, errorMessage: string): boolean
 
 type NodeRow = typeof nodes.$inferSelect
 
-// ── Remote status (provider-normalized) ──────────────────────────────────────
-
-async function checkRemoteStatus(
-  modelId: string,
-  kieTaskId: string
-): Promise<{ state: 'success' | 'fail' | 'pending'; resultUrl?: string; failMsg?: string }> {
-  const provider = getModel(modelId)?.provider ?? 'jobs'
-  if (provider === 'suno') return kieGetSunoStatus(kieTaskId)
-  // ElevenLabs is synchronous: submitGeneration already wrote the finished
-  // audio to a local staging file and stored its file:// URL as the task id.
-  // The file's existence IS the remote status; a restart that lost the staging
-  // file fails the run, and smart retry re-submits from the input snapshot.
-  if (provider === 'elevenlabs') {
-    if (kieTaskId.startsWith('file://') && existsSync(fileURLToPath(kieTaskId))) {
-      return { state: 'success', resultUrl: kieTaskId }
-    }
-    return {
-      state: 'fail',
-      failMsg: 'ElevenLabs result staging file is gone (app restarted mid-run?)'
-    }
-  }
-
-  const data = await kieGetTaskInfo(kieTaskId)
-  if (data.state === 'success')
-    return { state: 'success', resultUrl: parseResultUrl(data.resultJson) }
-  // Keep the failCode in the message: it is what lets isRetryableGenerationError
-  // classify remote 4xx rejections (bad inputs) as permanent instead of retrying.
-  if (data.state === 'fail') {
-    const failMsg =
-      [data.failCode ? `(${data.failCode})` : null, data.failMsg].filter(Boolean).join(' ') ||
-      undefined
-    return { state: 'fail', failMsg }
-  }
-  return { state: 'pending' }
-}
-
-// ── Public input URLs (kie.ai must be able to fetch every input) ─────────────
-
-function uploadFresh(url: string | null, at: number | null): string | null {
-  return url && at && Date.now() - at < UPLOAD_TTL_MS ? url : null
-}
+// ── Input references (the run's provider must be able to read every input) ──
 
 /**
- * kie deletes uploads earlier than its documented ~3 days (observed dead within
- * ~30 h), so a TTL-fresh cache entry is only reused after a live HEAD probe —
- * a dead URL re-uploads the local copy instead of failing the run with a
- * 400 "Image fetch failed".
+ * Publishes a local file through the TARGET provider's publisher and persists
+ * the reference in the row's cache columns (`uploadedUrl`/`uploadedAt` on
+ * assets, the per-source pair on generations) unless the publisher reused the
+ * cached one.
  */
-async function uploadStillAlive(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, { method: 'HEAD' })
-    return res.ok
-  } catch {
-    return false
-  }
+async function publishInput(
+  publisher: InputPublisher,
+  localPath: string,
+  purpose: 'assets' | 'frames' | 'results',
+  cached: { ref: string | null; at: number | null },
+  persist: (ref: string, at: number) => void
+): Promise<string> {
+  const published = await publisher.publish({ localPath, purpose, cached })
+  if (!published.reused) persist(published.ref, Date.now())
+  return published.ref
 }
 
-async function publicUrlForAsset(assetId: string): Promise<string | null> {
+async function publicUrlForAsset(
+  assetId: string,
+  publisher: InputPublisher
+): Promise<string | null> {
   const db = getDb()
   const asset = db.select().from(assets).where(eq(assets.id, assetId)).get()
   if (!asset) return null
   // Local-first: a URL-imported asset keeps its sourceUrl, but that remote
-  // reference can expire or refuse kie's fetcher (400 "Image fetch failed") —
-  // the managed local copy goes through the File Upload API like every other
+  // reference can expire or refuse the provider's fetcher (kie: 400 "Image
+  // fetch failed") — the managed local copy is published like every other
   // asset. sourceUrl is only the fallback for rows whose local file is gone.
   if (!asset.filePath || !existsSync(asset.filePath)) return asset.sourceUrl ?? null
 
-  const cached = uploadFresh(asset.uploadedUrl, asset.uploadedAt)
-  if (cached && (await uploadStillAlive(cached))) return cached
-  const url = await kieUploadFile(asset.filePath, 'raccord/assets')
-  db.update(assets)
-    .set({ uploadedUrl: url, uploadedAt: Date.now() })
-    .where(eq(assets.id, assetId))
-    .run()
-  return url
+  return publishInput(
+    publisher,
+    asset.filePath,
+    'assets',
+    { ref: asset.uploadedUrl, at: asset.uploadedAt },
+    (uploadedUrl, uploadedAt) =>
+      db.update(assets).set({ uploadedUrl, uploadedAt }).where(eq(assets.id, assetId)).run()
+  )
 }
 
 /** How long a run waits for the last-frame extraction to land. */
@@ -266,56 +259,72 @@ async function waitForLastFramePath(generationId: string): Promise<string | null
 
 async function publicUrlForGeneration(
   gen: GenerationRow,
-  sourceHandle: string
+  sourceHandle: string,
+  publisher: InputPublisher
 ): Promise<string | null> {
   const db = getDb()
   if (sourceHandle === 'lastFrame') {
     const lastFramePath = gen.lastFramePath ?? (await waitForLastFramePath(gen.id))
     if (!lastFramePath) return null
-    const cached = uploadFresh(gen.lastFrameUploadedUrl, gen.lastFrameUploadedAt)
-    if (cached && (await uploadStillAlive(cached))) return cached
-    const url = await kieUploadFile(lastFramePath, 'raccord/frames')
-    db.update(generations)
-      .set({ lastFrameUploadedUrl: url, lastFrameUploadedAt: Date.now() })
-      .where(eq(generations.id, gen.id))
-      .run()
-    return url
+    return publishInput(
+      publisher,
+      lastFramePath,
+      'frames',
+      { ref: gen.lastFrameUploadedUrl, at: gen.lastFrameUploadedAt },
+      (lastFrameUploadedUrl, lastFrameUploadedAt) =>
+        db
+          .update(generations)
+          .set({ lastFrameUploadedUrl, lastFrameUploadedAt })
+          .where(eq(generations.id, gen.id))
+          .run()
+    )
   }
 
-  // Main output: a kie.ai CDN URL is directly fetchable by kie itself — while
-  // it lasts (result files also expire server-side): with a local copy on hand
-  // the URL is probed first, and a dead one falls through to the upload path.
-  // An ElevenLabs result persists its LOCAL staging file's file:// URL as
-  // resultUrl, which kie cannot fetch (400 "Invalid audio format"): anything
-  // non-http goes through the same upload path as a downloaded resultPath.
+  // Main output: a hosted result URL may be directly readable by the provider
+  // (a kie.ai CDN URL is fetchable by kie itself — while it lasts, result
+  // files also expire server-side): with a local copy on hand the URL is
+  // probed first, and a dead one falls through to the publish path.
+  // A synchronous provider (ElevenLabs) persists its LOCAL staging file's
+  // file:// URL as resultUrl, which no remote host can fetch (kie: 400
+  // "Invalid audio format"): anything non-http is published like a downloaded
+  // resultPath.
   const remoteUrl = gen.resultUrl && !gen.resultUrl.startsWith('file://') ? gen.resultUrl : null
   const localPath =
     (gen.resultPath && existsSync(gen.resultPath) ? gen.resultPath : null) ??
     (gen.resultUrl?.startsWith('file://') && existsSync(fileURLToPath(gen.resultUrl))
       ? fileURLToPath(gen.resultUrl)
       : null)
-  if (remoteUrl && (!localPath || (await uploadStillAlive(remoteUrl)))) return remoteUrl
+  if (remoteUrl && (!localPath || (await publisher.acceptsRemoteUrl(remoteUrl)))) return remoteUrl
   if (!localPath) return null
-  const cached = uploadFresh(gen.resultUploadedUrl, gen.resultUploadedAt)
-  if (cached && (await uploadStillAlive(cached))) return cached
-  const url = await kieUploadFile(localPath, 'raccord/results')
-  db.update(generations)
-    .set({ resultUploadedUrl: url, resultUploadedAt: Date.now() })
-    .where(eq(generations.id, gen.id))
-    .run()
-  return url
+  return publishInput(
+    publisher,
+    localPath,
+    'results',
+    { ref: gen.resultUploadedUrl, at: gen.resultUploadedAt },
+    (resultUploadedUrl, resultUploadedAt) =>
+      db
+        .update(generations)
+        .set({ resultUploadedUrl, resultUploadedAt })
+        .where(eq(generations.id, gen.id))
+        .run()
+  )
 }
 
 /**
- * Public URL of a source node's output for a run (strict: model nodes need an
- * explicitly selected successful generation, matching the Convex original).
+ * Reference to a source node's output for a run, in the form the run's
+ * provider reads (strict: model nodes need an explicitly selected successful
+ * generation, matching the Convex original).
  */
-async function resolveRunInputUrl(node: NodeRow, sourceHandle: string): Promise<string | null> {
+async function resolveRunInputUrl(
+  node: NodeRow,
+  sourceHandle: string,
+  publisher: InputPublisher
+): Promise<string | null> {
   if (node.modelId === 'studio/asset') {
     if (sourceHandle !== 'output') return null
     const assetId = (node.params as { assetId?: string } | undefined)?.assetId
     if (!assetId) return null
-    return publicUrlForAsset(assetId)
+    return publicUrlForAsset(assetId, publisher)
   }
 
   if (!node.selectedGenerationId) return null
@@ -325,7 +334,7 @@ async function resolveRunInputUrl(node: NodeRow, sourceHandle: string): Promise<
     .where(eq(generations.id, node.selectedGenerationId))
     .get()
   if (!gen || gen.status !== 'success') return null
-  return publicUrlForGeneration(gen, sourceHandle)
+  return publicUrlForGeneration(gen, sourceHandle, publisher)
 }
 
 // ── Prepare ──────────────────────────────────────────────────────────────────
@@ -333,7 +342,7 @@ async function resolveRunInputUrl(node: NodeRow, sourceHandle: string): Promise<
 interface PreparedRun {
   videoId: string
   modelId: string
-  provider: ModelProvider
+  provider: GenerationProvider
   /** True when the run was substituted to the model's draftEquivalent (§6.1). */
   draft: boolean
   payload: Record<string, unknown>
@@ -404,10 +413,20 @@ async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Prom
   const inputUrls: Record<string, string[]> = {}
   const aliasMap: Record<string, string> = {}
 
+  // Inputs are published for the provider the run SUBMITS to (the draft
+  // model's, under draft mode — same family by registry test).
+  const provider = providerOf(model)
+  const publisher = provider.inputs
+  if (!publisher && incomingForNode.length > 0) {
+    throw new Error(
+      `${provider.label} models take no media inputs — disconnect the incoming edges.`
+    )
+  }
+
   for (const edge of incomingForNode) {
     const source = db.select().from(nodes).where(eq(nodes.id, edge.sourceNodeId)).get()
     if (!source) throw new Error(`Source node ${edge.sourceNodeId} missing`)
-    const url = await resolveRunInputUrl(source, edge.sourceHandle)
+    const url = await resolveRunInputUrl(source, edge.sourceHandle, publisher!)
     if (!url) {
       const hint =
         edge.sourceHandle === 'lastFrame'
@@ -445,7 +464,7 @@ async function prepareRun(nodeId: string, opts?: { forceFinal?: boolean }): Prom
   return {
     videoId: node.videoId,
     modelId: model.id,
-    provider: model.provider ?? 'jobs',
+    provider,
     draft: draftSub !== null,
     payload,
     inputSnapshot: {
@@ -542,7 +561,7 @@ function extForContentType(
   return defaultExt ?? (urlExt || '.bin')
 }
 
-/** Downloads the kie.ai result into the managed media store (fire-and-forget). */
+/** Downloads the provider's result into the managed media store (fire-and-forget). */
 async function downloadResult(generationId: string): Promise<void> {
   const db = getDb()
   const gen = db.select().from(generations).where(eq(generations.id, generationId)).get()
@@ -550,26 +569,38 @@ async function downloadResult(generationId: string): Promise<void> {
   const video = db.select().from(videos).where(eq(videos.id, gen.videoId)).get()
   if (!video) return
   const node = db.select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
-  const kind = node ? getModel(node.modelId)?.kind : undefined
+  const model = node ? getModel(node.modelId) : undefined
+  const kind = model?.kind
+  // The snapshot records the SUBMITTED model (the draft one under draft mode);
+  // its provider is the one that produced the result.
+  const snapshotModelId = (gen.inputSnapshot as { modelId?: string } | null)?.modelId
+  const provider = snapshotModelId ? providerFor(snapshotModelId) : providerOf(model)
+  const targetFor = (ext: string): string =>
+    join(mediaDirFor(video.projectId), `gen-${gen.id}${ext}`)
 
   let target: string
   let mediaMime: string | null
-  if (gen.resultUrl.startsWith('file://')) {
-    // Synchronous providers (ElevenLabs) stage their result locally — Node's
-    // fetch refuses file:// URLs, so copy into the media store instead.
-    const source = fileURLToPath(gen.resultUrl)
-    target = join(mediaDirFor(video.projectId), `gen-${gen.id}${extname(source) || '.mp3'}`)
-    copyFileSync(source, target)
-    rmSync(source, { force: true })
-    mediaMime = mimeTypeFor(target)
+  if (provider.fetchResult) {
+    // A synchronous provider staged its result locally (file://) — the
+    // provider moves it into the store, nothing to download.
+    const fetched = await provider.fetchResult({
+      taskRef: gen.kieTaskId ?? '',
+      resultUrl: gen.resultUrl,
+      kind,
+      targetFor
+    })
+    target = fetched.path
+    mediaMime = fetched.mimeType
   } else {
     const resultUrl = gen.resultUrl
     // Streamed to disk (bounded RAM, byte cap) — a multi-hundred-MB clip used
     // to sit in an arrayBuffer and freeze main for the duration.
-    const download = await downloadToFile(resultUrl, (contentType) => {
-      const ext = extForContentType(contentType, resultUrl, kind ? EXT_BY_KIND[kind] : undefined)
-      return join(mediaDirFor(video.projectId), `gen-${gen.id}${ext}`)
-    })
+    const download = await downloadToFile(
+      resultUrl,
+      (contentType) =>
+        targetFor(extForContentType(contentType, resultUrl, kind ? EXT_BY_KIND[kind] : undefined)),
+      { headers: provider.resultRequestHeaders?.(resultUrl) }
+    )
     target = download.path
     // Store a *media* mime only — the protocol handler serves it as Content-Type
     // (a generic application/octet-stream would make <video> undecodable).
@@ -645,7 +676,7 @@ function downloadResultWithRetry(generationId: string): void {
   )
 }
 
-function completeFromKie(
+function completeFromRemote(
   generationId: string,
   state: 'success' | 'fail',
   resultUrl?: string,
@@ -674,7 +705,7 @@ function completeFromKie(
     db.update(generations)
       .set({
         status: 'failed',
-        errorMessage: failMsg ?? 'kie.ai task failed',
+        errorMessage: failMsg ?? 'Generation failed',
         completedAt: Date.now()
       })
       .where(eq(generations.id, generationId))
@@ -718,7 +749,7 @@ function completeFromKie(
       videoId: gen.videoId,
       nodeId: gen.nodeId,
       status: 'failed',
-      errorMessage: failMsg ?? 'kie.ai task failed'
+      errorMessage: failMsg ?? 'Generation failed'
     })
   }
   return { transitioned: true }
@@ -728,7 +759,8 @@ function completeFromKie(
 
 const pollTimers = new Map<string, NodeJS.Timeout>()
 
-function schedulePoll(generationId: string, attempt: number, delayMs = POLL_INTERVAL_MS): void {
+/** Arms the next status check; `delayMs` comes from the provider's poll policy. */
+function schedulePoll(generationId: string, attempt: number, delayMs: number): void {
   clearTimeout(pollTimers.get(generationId))
   pollTimers.set(
     generationId,
@@ -753,10 +785,11 @@ async function pollGeneration(generationId: string, attempt: number): Promise<vo
     return
   }
 
-  const maxAttempts = maxPollAttemptsFor(getModel(node.modelId)?.kind)
-  let result: Awaited<ReturnType<typeof checkRemoteStatus>> | undefined
+  const provider = providerFor(node.modelId)
+  const maxAttempts = provider.poll.maxAttempts(getModel(node.modelId)?.kind)
+  let result: RemoteStatus | undefined
   try {
-    result = await checkRemoteStatus(node.modelId, gen.kieTaskId)
+    result = await provider.status(gen.kieTaskId)
   } catch (err) {
     // Transient — reschedule below, but leave a trace (a wedged poll used to
     // be invisible: 40 silent failures then a bare timeout).
@@ -768,31 +801,31 @@ async function pollGeneration(generationId: string, attempt: number): Promise<vo
   }
 
   if (result?.state === 'success') {
-    completeFromKie(generationId, 'success', result.resultUrl)
+    completeFromRemote(generationId, 'success', result.resultUrl)
     pollTimers.delete(generationId)
     return
   }
   if (result?.state === 'fail') {
     pollTimers.delete(generationId)
-    const failMsg = result.failMsg ?? 'kie.ai task failed'
+    const failMsg = result.failMsg ?? `${provider.label} task failed`
     if (!maybeScheduleRetry(generationId, failMsg)) {
-      completeFromKie(generationId, 'fail', undefined, withRetryNote(generationId, failMsg))
+      completeFromRemote(generationId, 'fail', undefined, withRetryNote(generationId, failMsg))
     }
     return
   }
   if (attempt >= maxAttempts) {
     // The task may still finish remotely — the message is the marker
     // refreshStatus recognizes to re-query the row and recover the result.
-    completeFromKie(
+    completeFromRemote(
       generationId,
       'fail',
       undefined,
-      timeoutFailureMessage(Math.round((maxAttempts * POLL_INTERVAL_MS) / 1000))
+      timeoutFailureMessage(Math.round((maxAttempts * provider.poll.intervalMs) / 1000))
     )
     pollTimers.delete(generationId)
     return
   }
-  schedulePoll(generationId, attempt + 1)
+  schedulePoll(generationId, attempt + 1, provider.poll.intervalMs)
 }
 
 /**
@@ -812,7 +845,7 @@ export function resumePolling(): void {
     // resuming (and, called from the boot sequence, must never crash startup).
     try {
       if (gen.kieTaskId) {
-        queue.adopt(gen.id)
+        queueOf(gen).adopt(gen.id)
         schedulePoll(gen.id, 1, 2000)
       } else {
         resubmitFromSnapshot(gen)
@@ -875,26 +908,26 @@ function prepFromSnapshot(gen: GenerationRow): PreparedRun | null {
   return {
     videoId: gen.videoId,
     modelId: model.id,
-    provider: model.provider ?? 'jobs',
+    provider: providerOf(model),
     draft: gen.draft ?? false,
     payload,
     inputSnapshot: { ...snapshot, modelId: model.id }
   }
 }
 
-/** Rebuilds the kie.ai payload from the persisted snapshot and re-queues the run. */
+/** Rebuilds the payload from the persisted snapshot and re-queues the run. */
 function resubmitFromSnapshot(gen: GenerationRow): void {
   const prep = prepFromSnapshot(gen)
   if (!prep) {
     failGeneration(gen.id, 'Interrupted by app restart before submission.')
     return
   }
-  queue.enqueue(gen.id, () => submitGeneration(gen.id, prep))
+  queueFor(prep.provider.queueKey).enqueue(gen.id, () => submitGeneration(gen.id, prep))
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Submits a claimed generation to kie.ai (with retry) and starts its poller. */
+/** Submits a claimed generation to its provider and starts its poller. */
 async function submitGeneration(generationId: string, prep: PreparedRun): Promise<void> {
   const db = getDb()
   const gen = db.select().from(generations).where(eq(generations.id, generationId)).get()
@@ -909,21 +942,13 @@ async function submitGeneration(generationId: string, prep: PreparedRun): Promis
     db.update(generations).set({ status: 'running' }).where(eq(generations.id, generationId)).run()
     broadcastGenerationsChanged({ videoId: prep.videoId, nodeId: gen.nodeId })
 
-    let kieTaskId: string
+    let submitted: SubmitResult
     try {
-      kieTaskId =
-        prep.provider === 'elevenlabs'
-          ? // Synchronous provider: the "task" is the staged result file.
-            await submitElevenLabs(generationId, prep)
-          : prep.provider === 'suno'
-            ? // The Suno client retries internally (its API 500s more often).
-              await kieCreateSunoTask({ input: prep.payload })
-            : await withRetry(() => kieCreateTask({ model: prep.modelId, input: prep.payload }), {
-                attempts: 3,
-                baseDelayMs: 2000,
-                // createTask surfaces the kie code in the message; 4xx codes won't heal.
-                isTransient: (err) => !/\((4\d\d)\)/.test(err instanceof Error ? err.message : '')
-              })
+      submitted = await prep.provider.submit({
+        generationId,
+        modelId: prep.modelId,
+        payload: prep.payload
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       if (!maybeScheduleRetry(generationId, msg)) {
@@ -932,8 +957,16 @@ async function submitGeneration(generationId: string, prep: PreparedRun): Promis
       return
     }
 
-    db.update(generations).set({ kieTaskId }).where(eq(generations.id, generationId)).run()
-    schedulePoll(generationId, 1)
+    // A speech provider hands the timed transcript back with the audio — it
+    // only exists in that response, so it lands on the row right away.
+    db.update(generations)
+      .set({
+        kieTaskId: submitted.taskRef,
+        ...(submitted.transcript ? { transcript: submitted.transcript } : {})
+      })
+      .where(eq(generations.id, generationId))
+      .run()
+    schedulePoll(generationId, 1, prep.provider.poll.intervalMs)
   } catch (err) {
     logError('run-engine', `submission crashed for ${generationId}`, err)
     failGeneration(
@@ -943,26 +976,6 @@ async function submitGeneration(generationId: string, prep: PreparedRun): Promis
   }
 }
 
-/**
- * ElevenLabs generation is one synchronous HTTP call: run it inside the queue
- * slot, stage the audio in a temp file whose file:// URL becomes the task id
- * (checkRemoteStatus then reports instant success), and stamp the timed
- * transcript on the row — the alignment only exists in this response.
- */
-async function submitElevenLabs(generationId: string, prep: PreparedRun): Promise<string> {
-  const result = await elevenlabsGenerateAudio(prep.payload)
-  const dir = join(tmpdir(), 'raccord-speech')
-  mkdirSync(dir, { recursive: true })
-  const staged = join(dir, `speech-${generationId}.mp3`)
-  writeFileSync(staged, result.audio)
-  getDb()
-    .update(generations)
-    .set({ transcript: result.transcript })
-    .where(eq(generations.id, generationId))
-    .run()
-  return pathToFileURL(staged).href
-}
-
 export async function runNode(
   nodeId: string,
   reuseSatisfied = false,
@@ -970,20 +983,11 @@ export async function runNode(
 ): Promise<{ generationId: string; kieTaskId: string; generationIds: string[] }> {
   // Fail fast on the one config error the user can fix immediately — every
   // other submission error surfaces asynchronously on the generation row.
-  // ElevenLabs models run on their own key; everything else needs the kie key.
   const node = getDb().select().from(nodes).where(eq(nodes.id, nodeId)).get()
-  const nodeProvider = node ? (getModel(node.modelId)?.provider ?? 'jobs') : 'jobs'
-  if (nodeProvider === 'elevenlabs') {
-    if (!getElevenLabsApiKey()) {
-      throw new Error('ElevenLabs API key is not configured. Add it in Settings → Integrations.')
-    }
-  } else if (!getKieApiKey()) {
-    throw new Error(
-      "kie.ai API key is not configured. Add it in the app's Integrations section on the home page."
-    )
-  }
+  providerFor(node?.modelId ?? '').assertConfigured()
   const variants = clampVariants(opts?.variants ?? 1)
   const prep = await prepareRun(nodeId, opts)
+  const queue = queueFor(prep.provider.queueKey)
 
   const estimate = estimateCreditsFor(prep.modelId, prep.inputSnapshot.params)
 
@@ -1058,24 +1062,25 @@ export async function refreshStatus(nodeId: string): Promise<{ status: string }>
   const node = db.select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
   if (!node) return { status: gen.status }
 
-  let result: Awaited<ReturnType<typeof checkRemoteStatus>>
+  const provider = providerFor(node.modelId)
+  let result: RemoteStatus
   try {
-    result = await checkRemoteStatus(node.modelId, gen.kieTaskId)
+    result = await provider.status(gen.kieTaskId)
   } catch (err) {
     throw new Error(
-      `kie.ai status check failed: ${err instanceof Error ? err.message : String(err)}`,
+      `${provider.label} status check failed: ${err instanceof Error ? err.message : String(err)}`,
       { cause: err }
     )
   }
 
   if (result.state === 'success') {
-    completeFromKie(gen.id, 'success', result.resultUrl)
+    completeFromRemote(gen.id, 'success', result.resultUrl)
     return { status: 'success' }
   }
   if (result.state === 'fail') {
-    const failMsg = result.failMsg ?? 'kie.ai task failed'
+    const failMsg = result.failMsg ?? `${provider.label} task failed`
     if (maybeScheduleRetry(gen.id, failMsg)) return { status: 'pending' }
-    completeFromKie(gen.id, 'fail', undefined, withRetryNote(gen.id, failMsg))
+    completeFromRemote(gen.id, 'fail', undefined, withRetryNote(gen.id, failMsg))
     return { status: 'failed' }
   }
   return { status: gen.status }
@@ -1094,12 +1099,13 @@ async function recoverTimedOutGeneration(gen: GenerationRow): Promise<{ status: 
   const node = db.select().from(nodes).where(eq(nodes.id, gen.nodeId)).get()
   if (!node || !gen.kieTaskId) return { status: 'failed' }
 
-  let result: Awaited<ReturnType<typeof checkRemoteStatus>>
+  const provider = providerFor(node.modelId)
+  let result: RemoteStatus
   try {
-    result = await checkRemoteStatus(node.modelId, gen.kieTaskId)
+    result = await provider.status(gen.kieTaskId)
   } catch (err) {
     throw new Error(
-      `kie.ai status check failed: ${err instanceof Error ? err.message : String(err)}`,
+      `${provider.label} status check failed: ${err instanceof Error ? err.message : String(err)}`,
       { cause: err }
     )
   }
@@ -1119,13 +1125,13 @@ async function recoverTimedOutGeneration(gen: GenerationRow): Promise<{ status: 
     .set({ status: 'running', errorMessage: null, completedAt: null })
     .where(eq(generations.id, gen.id))
     .run()
-  queue.adopt(gen.id)
+  queueFor(provider.queueKey).adopt(gen.id)
   broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
   if (result.state === 'success') {
-    completeFromKie(gen.id, 'success', result.resultUrl)
+    completeFromRemote(gen.id, 'success', result.resultUrl)
     return { status: 'success' }
   }
-  schedulePoll(gen.id, 1)
+  schedulePoll(gen.id, 1, provider.poll.intervalMs)
   return { status: 'running' }
 }
 
@@ -1148,8 +1154,8 @@ export function dequeueGeneration(generationId: string): { removed: boolean } {
   const db = getDb()
   const gen = db.select().from(generations).where(eq(generations.id, generationId)).get()
   if (!gen || gen.status !== 'pending' || gen.kieTaskId) return { removed: false }
-  if (!queue.snapshot().queued.includes(generationId)) return { removed: false }
-  queue.release(generationId)
+  if (!queueState().queued.includes(generationId)) return { removed: false }
+  releaseEverywhere(generationId)
   db.delete(generations).where(eq(generations.id, generationId)).run()
   broadcastGenerationsChanged({ videoId: gen.videoId, nodeId: gen.nodeId })
   emitGenerationSettled({
