@@ -126,11 +126,14 @@ export const projectTools: AgentTool[] = [
   {
     name: 'derive_short',
     description:
-      'Derive a 9:16 Short from a FINISHED video: imports its rendered MP4 as a video asset and builds a new vertical video with one fill-framed clip per excerpt, in one undo step. Segments = MP4 media seconds (the source final timeline), kept in the given order. Render it with render_video resolution 1080×1920. Method: docs "timeline".',
+      'Derive a 9:16 Short from a long-form MP4: imports it as a video asset and builds a new vertical video with one fill-framed clip per excerpt, in one undo step. Source = a finished Raccord video (videoId + its render_video output) OR any external file (projectId — a YouTube master, a rush). Segments = MP4 media seconds, kept in the given order. Render it at 1080×1920. Method: docs "timeline".',
     inputSchema: obj(
       {
-        videoId: str('The SOURCE video the Short is derived from.'),
-        sourcePath: str('Absolute path of the rendered MP4 (render_video output).'),
+        videoId: str('The SOURCE Raccord video (style inherited). Omit for an external file.'),
+        projectId: str('External source: the project receiving the Short (overrides videoId).'),
+        sourcePath: str(
+          'Absolute path of the source MP4 (render_video output, or any video file).'
+        ),
         segments: {
           type: 'array',
           description: 'Excerpts to keep, e.g. [{"startSec": 12, "endSec": 18}]. Max 20.',
@@ -142,13 +145,17 @@ export const projectTools: AgentTool[] = [
         },
         title: str('Name of the new video (default: "<source> — Short").')
       },
-      ['videoId', 'sourcePath', 'segments']
+      ['sourcePath', 'segments']
     ),
     scope: 'video',
     risk: 'write',
-    execute: ({ videoId, sourcePath, segments, title }) =>
+    execute: ({ videoId, projectId, sourcePath, segments, title }) =>
       deriveShort({
-        videoId: String(videoId),
+        // An explicit projectId signals an EXTERNAL source: it wins over the
+        // videoId a video-bound chat session injects into every 'video' tool.
+        ...(projectId !== undefined
+          ? { projectId: String(projectId) }
+          : { videoId: String(videoId) }),
         sourcePath: String(sourcePath),
         segments: (Array.isArray(segments) ? segments : []).map((s) => ({
           startSec: Number((s as { startSec?: unknown }).startSec),

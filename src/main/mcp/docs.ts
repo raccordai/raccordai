@@ -811,13 +811,17 @@ set_clip_speed / set_clip_look / set_clip_framing / set_still_motion bake per-cl
 VIDEO asset (add_asset_from_file, e.g. a screen recording) placed via set_timeline_order plays as
 a real clip — trims, split, speed, looks and transitions all apply; only IMAGE assets are stills.
 
-SHORTS. derive_short turns a FINISHED 16:9 video into a 9:16 vertical: render the source first
-(render_video), pick the excerpts (get_timeline for placements, get_transcript for the spoken
-beats — segments are MP4 media seconds, which ARE final-timeline seconds), then call derive_short
-with them in narrative order. It imports the MP4 as a video asset and builds a new 9:16 video
-(source style inherited) with one fill-framed, trimmed clip per excerpt in ONE undo step. Render
-the Short with render_video resolution 1080×1920 — the crop only happens against a vertical
-sequence frame. Tie it back to the channel with add_roadmap_item / assign_roadmap_item.
+SHORTS. derive_short turns a long-form 16:9 source into a 9:16 vertical: it imports the MP4 as a
+video asset and builds a new 9:16 video with one fill-framed, trimmed clip per excerpt in ONE
+undo step. From a FINISHED Raccord video (videoId): render the source first (render_video), pick
+the excerpts (get_timeline for placements, get_transcript for the spoken beats — segments are
+MP4 media seconds, which ARE final-timeline seconds), pass them in narrative order; the Short
+inherits the source style. From an EXTERNAL file (projectId + sourcePath — the master of a
+YouTube long-form, a rush): Raccord never downloads from YouTube, the user supplies the file;
+for excerpt picking, a video tracked in a niche may have its caption transcript
+(fetch_niche_transcripts, [m:ss] timestamps = media seconds). Render the Short with render_video
+resolution 1080×1920 — the crop only happens against a vertical sequence frame. Tie it back to
+the channel with add_roadmap_item / assign_roadmap_item.
 A clip whose asset carries a demo journal (record_demo — target "window" films Raccord's own
 window only, target "app" films ONE other application's window (pass app: "chrome" — other
 windows never appear), target "display" films a whole screen; one shared journal path) gets

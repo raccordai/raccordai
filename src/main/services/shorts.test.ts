@@ -94,6 +94,33 @@ describe('deriveShort', () => {
     expect(video.styleId).toBe('cinematic-realism')
   })
 
+  it('derives from an EXTERNAL file with projectId only (no source video)', () => {
+    const { video, asset } = deriveShort({
+      projectId,
+      sourcePath: writeRender('youtube-master.mp4'),
+      segments: [{ startSec: 90, endSec: 118 }]
+    })
+    expect(video.projectId).toBe(projectId)
+    expect(video.name).toBe('youtube-master — Short')
+    expect(video.styleId).toBeNull()
+    expect(video.defaultAspectRatio).toBe('9:16')
+    expect(getAsset(asset.id)?.kind).toBe('video')
+    const { nodes } = listGraph(video.id)
+    expect(nodes).toHaveLength(1)
+    expect(clipTrim(nodes[0]!)).toMatchObject({ start: 90, end: 118 })
+    expect(clipFraming(nodes[0]!)).toBe('fill')
+  })
+
+  it('requires a source: no videoId nor projectId, or an unknown projectId, refuse', () => {
+    const path = writeRender()
+    expect(() => deriveShort({ sourcePath: path, segments: [{ startSec: 0, endSec: 2 }] })).toThrow(
+      /videoId .* projectId/
+    )
+    expect(() =>
+      deriveShort({ projectId: 'ghost', sourcePath: path, segments: [{ startSec: 0, endSec: 2 }] })
+    ).toThrow(/Unknown projectId/)
+  })
+
   it('builds the whole graph as ONE undo step on the new video', () => {
     const { video } = deriveShort({
       videoId: sourceVideoId,

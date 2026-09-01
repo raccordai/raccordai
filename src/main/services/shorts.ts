@@ -4,6 +4,7 @@ import { mediaKindFor } from '../media/files'
 import { importAssetFromFile } from './assets'
 import { createNode, setClipFraming, setClipTrim, setTimelineOrder } from './graph'
 import { withGraphHistoryGroup } from './graphHistory'
+import { getProject } from './projects'
 import { createVideo, getVideo, setVideoDefaults, setVideoStyle } from './videos'
 
 /** One excerpt of the source film, in MEDIA seconds of the rendered MP4. */
@@ -53,38 +54,50 @@ export function normalizeShortSegments(segments: ShortSegment[]): ShortSegment[]
 }
 
 /**
- * Derive a 9:16 Short from a FINISHED 16:9 video (§4 of the product pitch):
- * the rendered MP4 is imported as a project VIDEO ASSET, and a new 9:16 video
- * is built next to the source with one `studio/asset` clip per requested
- * excerpt — trimmed to its window and framed 'fill' so the 16:9 picture
- * center-crops into the vertical frame instead of letterboxing. All graph
- * mutations land in ONE undo step on the new video.
+ * Derive a 9:16 Short from a long-form source (§4 of the product pitch): the
+ * source MP4 is imported as a project VIDEO ASSET, and a new 9:16 video is
+ * built with one `studio/asset` clip per requested excerpt — trimmed to its
+ * window and framed 'fill' so the 16:9 picture center-crops into the vertical
+ * frame instead of letterboxing. All graph mutations land in ONE undo step on
+ * the new video.
  *
- * The source MP4's media time IS the source video's final-timeline time
- * (a render is 1:1), so segments can be read straight off get_timeline or a
- * speech transcript. Render the result with a vertical resolution override
- * (e.g. 1080×1920) — the sequence spec still follows the first clip's probe.
+ * Two source shapes: a FINISHED Raccord video (`videoId` — the Short lands in
+ * its project and inherits its style; the MP4's media time IS that video's
+ * final-timeline time, so segments read straight off get_timeline or a speech
+ * transcript) or an EXTERNAL file (`projectId` — a YouTube master, a rush, a
+ * screen recording; segments come from watching it or its own captions).
+ * Render the result with a vertical resolution override (e.g. 1080×1920) —
+ * the sequence spec still follows the first clip's probe.
  */
 export function deriveShort(args: {
-  videoId: string
+  videoId?: string
+  projectId?: string
   sourcePath: string
   segments: ShortSegment[]
   title?: string
 }): DeriveShortResult {
-  const source = getVideo(args.videoId)
-  if (!source) throw new Error(`Unknown videoId: ${args.videoId}`)
+  const source = args.videoId ? getVideo(args.videoId) : null
+  if (args.videoId && !source) throw new Error(`Unknown videoId: ${args.videoId}`)
+  const projectId = source?.projectId ?? args.projectId
+  if (!projectId) {
+    throw new Error('Pass videoId (a finished Raccord video) or projectId (external source file).')
+  }
+  if (!source && !getProject(projectId)) throw new Error(`Unknown projectId: ${projectId}`)
   const segments = normalizeShortSegments(args.segments)
   if (!existsSync(args.sourcePath)) {
     throw new Error(`Source file not found: ${args.sourcePath}`)
   }
   if (mediaKindFor(args.sourcePath) !== 'video') {
-    throw new Error('The source must be a video file (the rendered MP4 of the finished video).')
+    throw new Error('The source must be a video file (a rendered or imported long-form video).')
   }
 
-  const asset = importAssetFromFile(source.projectId, args.sourcePath)
-  const video = createVideo(source.projectId, args.title?.trim() || `${source.name} — Short`)
+  const asset = importAssetFromFile(projectId, args.sourcePath)
+  const video = createVideo(
+    projectId,
+    args.title?.trim() || `${source?.name ?? asset.name} — Short`
+  )
   // The Short inherits the film's art direction; its own defaults go vertical.
-  if (source.styleId) setVideoStyle(video.id, source.styleId)
+  if (source?.styleId) setVideoStyle(video.id, source.styleId)
   setVideoDefaults(video.id, { defaultAspectRatio: '9:16' })
 
   const nodeIds = withGraphHistoryGroup(video.id, () => {
