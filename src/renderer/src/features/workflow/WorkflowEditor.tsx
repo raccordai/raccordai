@@ -36,17 +36,19 @@ import {
   Copy,
   Flag,
   History,
+  Import,
   Image as ImageIcon,
   MessageSquareText,
   PanelBottom,
   PanelBottomClose,
   Play,
   Replace,
+  Share2,
   Trash2
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@renderer/components/ui/Button'
-import { useAppMenus, useHeaderActions, type AppMenu } from '@renderer/components/menubar/MenuBar'
+import { useHeaderActions } from '@renderer/components/menubar/MenuBar'
 import { openAssistant } from '@renderer/features/assistant/assistantStore'
 import { resetEditorContext, setEditorContext } from '@renderer/features/assistant/appContextStore'
 import { WorkflowToolbar, AddNodePanel } from './Toolbar'
@@ -725,70 +727,13 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
     [graph]
   )
 
-  // "Fichier" menu in the app menu bar — import/export live there, not in the toolbar.
-  // Export is a single entry opening the guided dialog (one card per format).
+  // Import/export live in the title bar as icon buttons (like the panel
+  // toggles). Export is a single button opening the guided dialog (one card
+  // per format).
   const io = useWorkflowIO(videoId, graph?.nodes ?? [])
   const [exportOpen, setExportOpen] = useState(false)
-  const menus = useMemo<AppMenu[]>(
-    () => [
-      {
-        id: 'file',
-        label: t('menu.file'),
-        sections: [
-          {
-            id: 'import',
-            entries: [
-              {
-                id: 'import-json',
-                label: io.importing ? t('menu.importing') : t('menu.importWorkflow'),
-                onSelect: io.importWorkflow,
-                disabled: io.importing,
-                shortcut: 'importWorkflow'
-              }
-            ]
-          },
-          {
-            id: 'export',
-            entries: [
-              {
-                id: 'export-open',
-                label: t('menu.export'),
-                onSelect: () => setExportOpen(true),
-                shortcut: 'exportWorkflow'
-              }
-            ]
-          },
-          {
-            id: 'view',
-            entries: [
-              {
-                id: 'tidy',
-                label: t('editor.tidy'),
-                onSelect: () => void handleTidy('LR'),
-                shortcut: 'tidy'
-              },
-              {
-                id: 'toggle-timeline',
-                label: timelineCollapsed ? t('editor.showTimeline') : t('editor.hideTimeline'),
-                onSelect: () => setTimelineCollapsed(!timelineCollapsed),
-                shortcut: 'toggleTimeline'
-              },
-              {
-                id: 'toggle-history',
-                label: t('editor.historyBtnTitle'),
-                onSelect: () => setHistoryOpen((v) => !v),
-                shortcut: 'toggleHistory'
-              }
-            ]
-          }
-        ]
-      }
-    ],
-    [t, io, handleTidy, timelineCollapsed, setTimelineCollapsed]
-  )
-  useAppMenus(menus)
 
-  // Every menu entry's binding, so the shortcut shown next to it actually works.
+  // Icon buttons have no room for the combo, so the bindings live here.
   useShortcut('importWorkflow', () => void io.importWorkflow(), { enabled: !io.importing })
   useShortcut('exportWorkflow', () => setExportOpen(true))
   useShortcut('tidy', () => void handleTidy('LR'))
@@ -800,6 +745,23 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   const headerActions = useMemo(
     () => (
       <>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void io.importWorkflow()}
+          disabled={io.importing}
+          title={io.importing ? t('menu.importing') : t('menu.importWorkflow')}
+        >
+          <Import className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setExportOpen(true)}
+          title={t('menu.export')}
+        >
+          <Share2 className="h-4 w-4" />
+        </Button>
         <Button
           variant={timelineCollapsed ? 'ghost' : 'secondary'}
           size="sm"
@@ -848,6 +810,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
     ),
     [
       t,
+      io,
       timelineCollapsed,
       setTimelineCollapsed,
       historyOpen,

@@ -3,7 +3,7 @@ import { Link, Outlet, createRootRoute, useRouter, useRouterState } from '@tanst
 import { Download, KeyRound, MessageSquare, Settings, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { HeaderActions, MenuBar, MenuBarProvider } from '@renderer/components/menubar/MenuBar'
+import { HeaderActions, MenuBarProvider } from '@renderer/components/menubar/MenuBar'
 import { FeedbackProvider } from '@renderer/components/feedback/Feedback'
 import { HeaderCredits } from '@renderer/components/HeaderCredits'
 import { Button } from '@renderer/components/ui/Button'
@@ -43,8 +43,6 @@ function RootLayout(): React.JSX.Element {
       <FeedbackProvider>
         <div className="flex h-full flex-col">
           <header className="titlebar-drag flex h-12 shrink-0 items-center gap-3 border-b border-neutral-800 pr-4 pl-24">
-            {/* Pages contribute their menus (Fichier, …) while mounted. */}
-            <MenuBar />
             <div className="flex-1" />
             <HeaderCredits />
             <HeaderActions />
