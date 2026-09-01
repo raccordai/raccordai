@@ -227,6 +227,7 @@ export function registerIpcHandlers(): void {
   handle('nodes:setVolume', ({ nodeId, volume }) => graph.setClipVolume(nodeId, volume))
   handle('nodes:setSpeed', ({ nodeId, speed }) => graph.setClipSpeed(nodeId, speed))
   handle('nodes:setLook', ({ nodeId, look }) => graph.setClipLook(nodeId, look))
+  handle('nodes:setFraming', ({ nodeId, framing }) => graph.setClipFraming(nodeId, framing))
   handle('nodes:setStillMotion', ({ nodeId, motion }) => graph.setStillMotion(nodeId, motion))
   handle('nodes:setTimelineOffset', ({ nodeId, offsetSec }) =>
     graph.setTimelineOffset(nodeId, offsetSec)

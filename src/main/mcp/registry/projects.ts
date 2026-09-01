@@ -2,6 +2,7 @@ import { videoAspectRatioSchema, videoResolutionSchema } from '@shared/ipc/contr
 import { broadcastFocusNode, broadcastNavigate } from '../../events'
 import * as graph from '../../services/graph'
 import * as projects from '../../services/projects'
+import { deriveShort } from '../../services/shorts'
 import { createVideoFromTemplate } from '../../services/templates'
 import * as videos from '../../services/videos'
 import { obj, str, type AgentTool } from './types'
@@ -120,6 +121,40 @@ export const projectTools: AgentTool[] = [
               )
             }
           : {})
+      })
+  },
+  {
+    name: 'derive_short',
+    description:
+      'Derive a 9:16 Short from a FINISHED video: imports its rendered MP4 as a video asset and builds a new vertical video with one fill-framed clip per excerpt, in one undo step. Segments = MP4 media seconds (the source final timeline), kept in the given order. Render it with render_video resolution 1080×1920. Method: docs "timeline".',
+    inputSchema: obj(
+      {
+        videoId: str('The SOURCE video the Short is derived from.'),
+        sourcePath: str('Absolute path of the rendered MP4 (render_video output).'),
+        segments: {
+          type: 'array',
+          description: 'Excerpts to keep, e.g. [{"startSec": 12, "endSec": 18}]. Max 20.',
+          items: {
+            type: 'object',
+            properties: { startSec: { type: 'number' }, endSec: { type: 'number' } },
+            required: ['startSec', 'endSec']
+          }
+        },
+        title: str('Name of the new video (default: "<source> — Short").')
+      },
+      ['videoId', 'sourcePath', 'segments']
+    ),
+    scope: 'video',
+    risk: 'write',
+    execute: ({ videoId, sourcePath, segments, title }) =>
+      deriveShort({
+        videoId: String(videoId),
+        sourcePath: String(sourcePath),
+        segments: (Array.isArray(segments) ? segments : []).map((s) => ({
+          startSec: Number((s as { startSec?: unknown }).startSec),
+          endSec: Number((s as { endSec?: unknown }).endSec)
+        })),
+        ...(title !== undefined ? { title: String(title) } : {})
       })
   },
   {

@@ -42,6 +42,8 @@ export interface PlannedClip {
   speed?: number
   /** Colour look (a CLIP_LOOKS id) baked into the normalize pass. */
   look?: string | null
+  /** Framing against the sequence frame ('fill' = cover+crop; undefined/null = fit+pad). */
+  framing?: string | null
   /** Ken Burns preset of a still slot (a STILL_MOTIONS id). */
   stillMotion?: string | null
 }
@@ -198,9 +200,11 @@ export function canConcatLosslessly(clips: PlannedClip[], spec: SequenceSpec): b
   if (clips.length === 0) return false
   // Trims and crossfades both require re-encoding, whatever the codecs are.
   if (clips.some(clipIsTrimmed) || hasCrossfades(clips)) return false
-  // Any baked per-clip effect (speed retime, colour look) does too — without
-  // this guard the stream-copy path would silently drop it.
-  if (clips.some((c) => (!c.isStill && (c.speed ?? 1) !== 1) || !!c.look)) return false
+  // Any baked per-clip effect (speed retime, colour look, fill framing) does
+  // too — without this guard the stream-copy path would silently drop it.
+  if (clips.some((c) => (!c.isStill && (c.speed ?? 1) !== 1) || !!c.look || !!c.framing)) {
+    return false
+  }
   const first = clips[0]!.probe
   if (!first) return false
   for (const clip of clips) {
@@ -283,16 +287,21 @@ export function atempoChain(speed: number): string {
 
 /**
  * scale to fit + pad to the exact sequence frame (letterboxing, never
- * stretching), then the clip's baked effects: colour look, speed retime
- * (setpts BEFORE fps so the retimed stream is resampled), or a still's
- * Ken Burns. Byte-identical to the historical chain when the clip has none.
+ * stretching) — or, with framing 'fill', scale to cover + center-crop (how a
+ * 16:9 clip fills a 9:16 Short) — then the clip's baked effects: colour look,
+ * speed retime (setpts BEFORE fps so the retimed stream is resampled), or a
+ * still's Ken Burns. Byte-identical to the historical chain when the clip has
+ * none.
  */
 function videoFilter(spec: SequenceSpec, clip?: PlannedClip): string {
   const { width: w, height: h } = spec
-  const parts = [
-    `scale=${w}:${h}:force_original_aspect_ratio=decrease`,
-    `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black`
-  ]
+  const parts =
+    clip?.framing === 'fill'
+      ? [`scale=${w}:${h}:force_original_aspect_ratio=increase`, `crop=${w}:${h}`]
+      : [
+          `scale=${w}:${h}:force_original_aspect_ratio=decrease`,
+          `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black`
+        ]
   const look = lookFfmpegFilter(clip?.look)
   if (look) parts.push(look)
   if (clip?.isStill && clip.stillMotion) {

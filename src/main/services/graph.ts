@@ -13,7 +13,7 @@ import { SPEED_MAX, SPEED_MIN, VOLUME_MAX, VOLUME_MIN } from '@shared/config'
 import { isClipLookId } from '@shared/looks'
 import { isStillMotionId } from '@shared/stillMotion'
 import { clampTransitionSeconds, isClipTransitionId } from '@shared/transitions'
-import { clipSegments } from '@shared/timeline'
+import { clipSegments, isClipFramingId } from '@shared/timeline'
 import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes } from '../db/schema'
@@ -172,6 +172,7 @@ export function createNode(args: {
     volume: null,
     speed: null,
     look: null,
+    framing: null,
     stillMotion: null,
     timelineOffsetSec: null,
     segments: null,
@@ -506,6 +507,14 @@ export function setClipSpeed(nodeId: string, speed: number | null): void {
 export function setClipLook(nodeId: string, look: string | null): void {
   if (look !== null && !isClipLookId(look)) throw new Error(`Unknown look "${look}".`)
   patchNodeWithHistory(nodeId, { look })
+}
+
+/** Framing against the sequence frame ('fill' = cover+crop, null = fit+letterbox). */
+export function setClipFraming(nodeId: string, framing: string | null): void {
+  if (framing !== null && !isClipFramingId(framing)) {
+    throw new Error(`Unknown framing "${framing}".`)
+  }
+  patchNodeWithHistory(nodeId, { framing })
 }
 
 /** Ken Burns preset of a STILL slot (a STILL_MOTIONS id, null = frozen frame). */

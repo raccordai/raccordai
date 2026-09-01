@@ -1,3 +1,4 @@
+import { CLIP_FRAMING_IDS } from '@shared/config'
 import { CLIP_LOOK_IDS } from '@shared/looks'
 import { STILL_MOTION_IDS } from '@shared/stillMotion'
 import { TEXT_ANIMATION_IDS, isTextAnimationId } from '@shared/textAnimations'
@@ -266,6 +267,24 @@ export const timelineTools: AgentTool[] = [
     risk: 'write',
     execute: ({ nodeId, look }) => {
       graph.setClipLook(String(nodeId), look == null ? null : String(look))
+      return { ok: true }
+    }
+  },
+  {
+    name: 'set_clip_framing',
+    description:
+      "How the clip meets the sequence frame: null = scale-to-fit + letterbox (historical), 'fill' = scale-to-cover + center-crop — e.g. a 16:9 clip filling a 9:16 Short rendered at 1080×1920. Baked at render (forces the normalize path); not previewed.",
+    inputSchema: obj(
+      {
+        nodeId: str(),
+        framing: { type: ['string', 'null'], enum: [...CLIP_FRAMING_IDS, null] }
+      },
+      ['nodeId', 'framing']
+    ),
+    scope: 'global',
+    risk: 'write',
+    execute: ({ nodeId, framing }) => {
+      graph.setClipFraming(String(nodeId), framing == null ? null : String(framing))
       return { ok: true }
     }
   },

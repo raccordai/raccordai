@@ -10,6 +10,7 @@ import {
   audioLaneStarts,
   bestGeneration,
   clipDuration,
+  clipFraming,
   clipLook,
   clipSpeed,
   clipTimelineOffset,
@@ -615,6 +616,8 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       }
       const look = clipLook(node)
       if (look) clip.look = look
+      const framing = clipFraming(node)
+      if (framing) clip.framing = framing
       clip.transitionAfter = segmentTransitionAfter(entry.segment)
       clip.transitionDurationSec = segmentTransitionSeconds(entry.segment)
     }
@@ -1111,6 +1114,8 @@ export async function planRender(
       if (speed !== 1) clip.speed = speed
       const look = clipLook(node)
       if (look) clip.look = look
+      const framing = clipFraming(node)
+      if (framing) clip.framing = framing
       clip.transitionAfter = segmentTransitionAfter(entry.segment)
       clip.transitionDurationSec = segmentTransitionSeconds(entry.segment)
       clips.push(clip)
@@ -1151,6 +1156,8 @@ export async function planRender(
       if (speed !== 1) clip.speed = speed
       const look = clipLook(node)
       if (look) clip.look = look
+      const framing = clipFraming(node)
+      if (framing) clip.framing = framing
       clip.transitionAfter = segmentTransitionAfter(entry.segment)
       clip.transitionDurationSec = segmentTransitionSeconds(entry.segment)
       clips.push(clip)

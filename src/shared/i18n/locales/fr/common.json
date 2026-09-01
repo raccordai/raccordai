@@ -231,6 +231,11 @@
       "noir": "Noir contrasté",
       "vintage": "Vintage"
     },
+    "framing": "Cadrage",
+    "framingFit": "Ajusté (letterbox)",
+    "framings": {
+      "fill": "Rempli (recadré)"
+    },
     "motion": "Mouvement (Ken Burns)",
     "motionNone": "Statique",
     "motions": {

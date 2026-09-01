@@ -231,6 +231,11 @@
       "noir": "Noir",
       "vintage": "Vintage"
     },
+    "framing": "Framing",
+    "framingFit": "Fit (letterbox)",
+    "framings": {
+      "fill": "Fill (crop)"
+    },
     "motion": "Motion (Ken Burns)",
     "motionNone": "Static",
     "motions": {

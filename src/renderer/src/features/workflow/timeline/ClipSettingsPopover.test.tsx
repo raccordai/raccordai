@@ -97,8 +97,8 @@ describe('ClipSettingsPopover', () => {
         onClose={() => {}}
       />
     )
-    // Combobox order in the popover: speed, look, transition.
-    const transitionSelect = screen.getAllByRole('combobox')[2]!
+    // Combobox order in the popover: speed, look, framing, transition.
+    const transitionSelect = screen.getAllByRole('combobox')[3]!
     const id = CLIP_TRANSITION_IDS[0]!
     fireEvent.change(transitionSelect, { target: { value: id } })
     expect(invoke).toHaveBeenCalledTimes(1)
@@ -128,6 +128,23 @@ describe('ClipSettingsPopover', () => {
     expect(invoke).toHaveBeenCalledWith('nodes:setSpeed', { nodeId: 'clip1', speed: 2 })
     fireEvent.change(speedSelect, { target: { value: '1' } })
     expect(invoke).toHaveBeenCalledWith('nodes:setSpeed', { nodeId: 'clip1', speed: null })
+  })
+
+  it("writes the framing ('' stores null — the historical letterbox)", () => {
+    render(
+      <ClipSettingsPopover
+        clip={videoClip()}
+        isLast={false}
+        anchor={anchor}
+        splitAtMediaSec={null}
+        onClose={() => {}}
+      />
+    )
+    const framingSelect = screen.getAllByRole('combobox')[2]!
+    fireEvent.change(framingSelect, { target: { value: 'fill' } })
+    expect(invoke).toHaveBeenCalledWith('nodes:setFraming', { nodeId: 'clip1', framing: 'fill' })
+    fireEvent.change(framingSelect, { target: { value: '' } })
+    expect(invoke).toHaveBeenCalledWith('nodes:setFraming', { nodeId: 'clip1', framing: null })
   })
 
   it('the razor is disabled without a playhead split point, armed with one', () => {

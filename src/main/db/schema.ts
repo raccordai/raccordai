@@ -192,6 +192,8 @@ export const nodes = sqliteTable(
     speed: real('speed'),
     /** Colour look baked at render time (a CLIP_LOOKS id, null = untouched). */
     look: text('look'),
+    /** Framing against the sequence frame ('fill' = cover+crop, null = fit+letterbox). */
+    framing: text('framing'),
     /** Ken Burns preset of a STILL slot (a STILL_MOTIONS id, null = frozen frame). */
     stillMotion: text('still_motion'),
     /**

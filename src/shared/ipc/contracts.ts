@@ -6,6 +6,7 @@ import { type DemoEvent } from '../screenMotion'
 import { CLIP_TRANSITION_IDS, TRANSITION_MAX_SECONDS, TRANSITION_MIN_SECONDS } from '../transitions'
 import { CAPTION_PRESET_IDS } from '../captions'
 import {
+  CLIP_FRAMING_IDS,
   PROJECT_INSTRUCTIONS_MAX_CHARS,
   RENDER_CODECS,
   RENDER_QUALITIES,
@@ -686,6 +687,8 @@ export const graphNodeSchema = z.object({
   speed: z.number().nullable().optional(),
   /** Colour look baked at render (a CLIP_LOOKS id) — read through the shared clipLook. */
   look: z.string().nullable().optional(),
+  /** Framing against the sequence frame ('fill' = cover+crop) — shared clipFraming. */
+  framing: z.string().nullable().optional(),
   /** Ken Burns preset of a STILL slot (a STILL_MOTIONS id) — shared stillMotionOf. */
   stillMotion: z.string().nullable().optional(),
   /** Absolute start of an AUDIO track (final-timeline s) — shared clipTimelineOffset. */
@@ -1429,6 +1432,11 @@ export const ipcContracts = {
   /** Colour look baked at render time (a CLIP_LOOKS id, null = untouched). */
   'nodes:setLook': {
     input: z.object({ nodeId: z.string(), look: z.enum(CLIP_LOOK_IDS).nullable() }),
+    output: z.void()
+  },
+  /** Framing against the sequence frame ('fill' = cover+crop, null = fit+letterbox). */
+  'nodes:setFraming': {
+    input: z.object({ nodeId: z.string(), framing: z.enum(CLIP_FRAMING_IDS).nullable() }),
     output: z.void()
   },
   /** Ken Burns preset of a STILL slot (a STILL_MOTIONS id, null = frozen frame). */

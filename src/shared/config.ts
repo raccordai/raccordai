@@ -34,6 +34,14 @@ export const SPEED_MAX = 4
 export const PROJECT_INSTRUCTIONS_MAX_CHARS = 20_000
 
 /**
+ * Per-clip framing against the sequence frame. Null/absent = the historical
+ * scale-to-fit + letterbox; 'fill' scales to cover and center-crops — how a
+ * 16:9 source clip fills a 9:16 Short. Standalone here because contracts.ts
+ * and timeline.ts both need it (either would cycle).
+ */
+export const CLIP_FRAMING_IDS = ['fill'] as [string, ...string[]]
+
+/**
  * MP4 export quality/codec choices — standalone here because contracts.ts and
  * the (main-side) render plan both need them. 'standard' reproduces the
  * historical encoder args byte for byte; 'hevc' always forces the normalize

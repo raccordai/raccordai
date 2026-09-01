@@ -1,10 +1,12 @@
 import { Scissors, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { CLIP_FRAMING_IDS } from '@shared/config'
 import { CLIP_LOOK_IDS } from '@shared/looks'
 import { STILL_MOTION_IDS } from '@shared/stillMotion'
 import { CLIP_TRANSITION_IDS } from '@shared/transitions'
 import {
+  clipFraming,
   clipLook,
   clipSegments,
   clipSpeed,
@@ -231,6 +233,25 @@ export function ClipSettingsPopover({
             {CLIP_LOOK_IDS.map((id) => (
               <option key={id} value={id}>
                 {t(`timeline.looks.${id}` as never)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {/* Framing vs the SEQUENCE frame — render-only (like text animations):
+            'fill' covers + center-crops, e.g. a 16:9 clip in a 9:16 Short. */}
+        <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-neutral-400">
+          {t('timeline.framing')}
+          <select
+            className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-[11px] text-neutral-200 focus:border-accent focus:outline-none"
+            value={clipFraming(node) ?? ''}
+            onChange={(e) =>
+              void invoke('nodes:setFraming', { nodeId: node.id, framing: e.target.value || null })
+            }
+          >
+            <option value="">{t('timeline.framingFit')}</option>
+            {CLIP_FRAMING_IDS.map((id) => (
+              <option key={id} value={id}>
+                {t(`timeline.framings.${id}` as never)}
               </option>
             ))}
           </select>

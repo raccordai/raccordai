@@ -173,6 +173,10 @@ describe('canConcatLosslessly', () => {
     ).toBe(false)
   })
 
+  it('rejects any baked fill framing (stream copy cannot crop)', () => {
+    expect(canConcatLosslessly([clip(), clip({ framing: 'fill' })], spec)).toBe(false)
+  })
+
   it('accepts uniformly silent clips and tolerates tiny fps drift', () => {
     const silent = probe({ hasAudio: false, audioCodec: null, audioSampleRate: null })
     expect(
@@ -209,6 +213,15 @@ describe('buildNormalizeArgs', () => {
     expect(args.join(' ')).toContain('-map [v] -map 0:a')
     expect(args).not.toContain('-shortest')
     expect(args.at(-1)).toBe('/tmp/seg.mp4')
+  })
+
+  it("replaces fit+pad with cover+crop on a 'fill' framing (16:9 into a 9:16 frame)", () => {
+    const vertical = { width: 1080, height: 1920, fps: 24 }
+    const args = buildNormalizeArgs(clip({ framing: 'fill' }), vertical, '/tmp/seg.mp4')
+    const filter = args[args.indexOf('-filter_complex') + 1]!
+    expect(filter).toContain('scale=1080:1920:force_original_aspect_ratio=increase')
+    expect(filter).toContain('crop=1080:1920')
+    expect(filter).not.toContain('pad=')
   })
 
   it('adds a finite silent track to silent clips (-shortest)', () => {
