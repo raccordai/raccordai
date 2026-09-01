@@ -8,7 +8,6 @@
     "close": "Fermer"
   },
   "menu": {
-    "file": "Fichier",
     "importWorkflow": "Importer un workflow (JSON)…",
     "importing": "Import en cours…",
     "export": "Exporter…"

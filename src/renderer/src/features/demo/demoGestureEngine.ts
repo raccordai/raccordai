@@ -16,9 +16,10 @@ import { reportRendererError } from '@renderer/lib/errorReporter'
  *   onMouseDown (not onClick), everything else on onClick — the sequence
  *   satisfies both. React 19 delegates at the root, native dispatchEvent
  *   reaches handlers.
- * - NEVER hit-test (elementFromPoint): MenuBar's fixed inset-0 dismiss
- *   overlay would intercept. Resolve by harvest + scoring, dispatch on the
- *   resolved element (useDismissable ignores pointerdown inside its ref).
+ * - NEVER hit-test (elementFromPoint): a fixed inset-0 dismiss overlay
+ *   (open popovers) would intercept. Resolve by harvest + scoring, dispatch
+ *   on the resolved element (useDismissable ignores pointerdown inside its
+ *   ref).
  * - Controlled inputs need the native value setter + an 'input' event; the
  *   params-panel prompt commits on blur (gesture option `commit`).
  */
