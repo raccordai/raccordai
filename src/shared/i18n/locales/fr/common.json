@@ -533,6 +533,8 @@
   },
   "videosPage": {
     "newVideo": "Nouvelle vidéo",
+    "createShorts": "Créer des shorts",
+    "createShortsPrompt": "Fais-moi des shorts à partir de cette vidéo : rends-la d'abord en MP4, choisis 2 à 3 moments forts (le hook, un moment clé, la chute) d'après le transcript ou le scénario, puis dérive chaque extrait en vidéo verticale 9:16 et rends-la en 1080×1920.",
     "namePlaceholder": "Nom de la vidéo (ex. Séquence 1)",
     "empty": "Aucune vidéo dans ce projet.",
     "emptyHint": "Crée une vidéo pour ouvrir l'éditeur de workflow.",

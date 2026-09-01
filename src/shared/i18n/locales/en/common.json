@@ -533,6 +533,8 @@
   },
   "videosPage": {
     "newVideo": "New video",
+    "createShorts": "Create shorts",
+    "createShortsPrompt": "Make shorts from this video: render it to MP4 first, pick 2–3 strong moments (the hook, a key beat, the payoff) from the transcript or the scenario, then derive each excerpt as a 9:16 vertical and render it at 1080×1920.",
     "namePlaceholder": "Video name (e.g. Sequence 1)",
     "empty": "No videos in this project.",
     "emptyHint": "Create a video to open the workflow editor.",

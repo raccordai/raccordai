@@ -17,7 +17,8 @@ export function LibraryCard({
   onRename,
   onDelete,
   renameTitle,
-  deleteTitle
+  deleteTitle,
+  actions
 }: {
   name: string
   meta: string
@@ -29,6 +30,8 @@ export function LibraryCard({
   onDelete: () => void
   renameTitle: string
   deleteTitle: string
+  /** Extra hover actions, rendered before rename/delete. */
+  actions?: Array<{ icon: LucideIcon; title: string; onClick: () => void }>
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
@@ -64,6 +67,19 @@ export function LibraryCard({
         {/* z-10: must paint above the thumbnail <video>, lifted to z-index 1 by
             the .island video backdrop-filter workaround in styles.css */}
         <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          {actions?.map((action) => (
+            <button
+              key={action.title}
+              onClick={(e) => {
+                e.stopPropagation()
+                action.onClick()
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-neutral-300 backdrop-blur hover:text-neutral-100"
+              title={action.title}
+            >
+              <action.icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
           <button
             onClick={(e) => {
               e.stopPropagation()
