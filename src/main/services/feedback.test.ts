@@ -50,6 +50,17 @@ describe('feedback bucket', () => {
     expect(() => updateFeedbackItem('ghost', { status: 'done' })).toThrow(/Unknown feedback item/)
   })
 
+  it('strips immutable keys and rejects bad values on update', () => {
+    const note = createFeedbackItem({ videoId, comment: 'Trop sombre' })
+    // A patch smuggling videoId (MCP tools pass arguments through) must not
+    // move the note to another video.
+    const hostile = { videoId: 'other', status: 'done' } as Parameters<typeof updateFeedbackItem>[1]
+    expect(updateFeedbackItem(note.id, hostile).videoId).toBe(videoId)
+    expect(getFeedbackItem(note.id)?.videoId).toBe(videoId)
+    const badStatus = { status: 'weird' } as unknown as Parameters<typeof updateFeedbackItem>[1]
+    expect(() => updateFeedbackItem(note.id, badStatus)).toThrow()
+  })
+
   it('deletes a note, and the video cascade removes the rest', () => {
     const a = createFeedbackItem({ videoId, comment: 'A' })
     createFeedbackItem({ videoId, comment: 'B' })

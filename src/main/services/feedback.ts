@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { asc, eq } from 'drizzle-orm'
-import type { FeedbackItem } from '@shared/ipc/contracts'
+import { feedbackItemPatchSchema, type FeedbackItem } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
 import { feedbackItems, videos } from '../db/schema'
 import { broadcastWorkflowChanged } from '../events'
@@ -53,11 +53,14 @@ export function updateFeedbackItem(
   id: string,
   patch: Partial<Omit<FeedbackItem, 'id' | 'videoId' | 'createdAt'>>
 ): FeedbackItem {
+  // Unvalidated callers (MCP tools) pass arguments through — strip immutable
+  // keys and reject bad values before they reach the row (see textLayers.ts).
+  const clean = feedbackItemPatchSchema.parse(patch)
   const db = getDb()
   const current = getFeedbackItem(id)
   if (!current) throw new Error(`Unknown feedback item "${id}".`)
-  const next = { ...current, ...patch }
-  db.update(feedbackItems).set(patch).where(eq(feedbackItems.id, id)).run()
+  const next = { ...current, ...clean }
+  db.update(feedbackItems).set(clean).where(eq(feedbackItems.id, id)).run()
   broadcastWorkflowChanged(current.videoId)
   return next
 }

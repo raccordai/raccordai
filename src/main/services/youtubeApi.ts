@@ -8,6 +8,7 @@ import {
   type PlaylistVideoRef,
   type VideoMeta
 } from '@shared/niches'
+import { app } from 'electron'
 import { getYoutubeApiKey } from './settings'
 
 /**
@@ -18,7 +19,12 @@ import { getYoutubeApiKey } from './settings'
  * the units each request spent so callers can report usage.
  */
 
-const BASE = process.env['RACCORD_YOUTUBE_API_BASE'] ?? 'https://www.googleapis.com/youtube/v3'
+// RACCORD_YOUTUBE_API_BASE overrides the host for tests — dev/E2E only: a
+// packaged build ignores it (an inherited env var must not redirect requests
+// carrying the API key; same gate as RACCORD_KIE_BASE in kie.ts).
+const BASE =
+  (app.isPackaged ? undefined : process.env['RACCORD_YOUTUBE_API_BASE']) ??
+  'https://www.googleapis.com/youtube/v3'
 
 export interface QuotaCounter {
   units: number

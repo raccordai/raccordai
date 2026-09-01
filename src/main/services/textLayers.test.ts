@@ -10,12 +10,13 @@ import {
   updateTextLayer
 } from './textLayers'
 
+let projectId: string
 let videoId: string
 
 beforeEach(() => {
   useTestDatabase()
-  const project = createProject('P')
-  videoId = createVideo(project.id, 'V').id
+  projectId = createProject('P').id
+  videoId = createVideo(projectId, 'V').id
 })
 
 afterEach(() => resetTestDatabase())
@@ -65,8 +66,22 @@ describe('text layers', () => {
     const layer = createTextLayer({ videoId, content: 'Titre', startSec: 0, endSec: 3 })
     const moved = updateTextLayer(layer.id, { x: 0.2, y: 0.1, bold: true })
     expect(moved).toMatchObject({ x: 0.2, y: 0.1, bold: true, content: 'Titre' })
-    expect(() => updateTextLayer(layer.id, { endSec: 0 })).toThrow(/end after it starts/)
+    expect(() => updateTextLayer(layer.id, { startSec: 2, endSec: 1 })).toThrow(
+      /end after it starts/
+    )
     expect(() => updateTextLayer('ghost', { bold: true })).toThrow(/Unknown text layer/)
+  })
+
+  it('strips immutable keys and rejects bad values on update', () => {
+    const layer = createTextLayer({ videoId, content: 'Titre', startSec: 0, endSec: 3 })
+    const otherVideoId = createVideo(projectId, 'Other').id
+    // A patch smuggling videoId (MCP tools pass arguments through) must not
+    // move the layer to another video.
+    const hostile = { videoId: otherVideoId, bold: true } as Parameters<typeof updateTextLayer>[1]
+    expect(updateTextLayer(layer.id, hostile).videoId).toBe(videoId)
+    expect(getTextLayer(layer.id)?.videoId).toBe(videoId)
+    const badType = { startSec: 'abc' } as unknown as Parameters<typeof updateTextLayer>[1]
+    expect(() => updateTextLayer(layer.id, badType)).toThrow()
   })
 
   it('deletes a layer, and the video cascade removes the rest', () => {

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { serve, type HttpBindings, type ServerType } from '@hono/node-server'
 import { Hono } from 'hono'
 import { RESPONSE_ALREADY_SENT } from '@hono/node-server/utils/response'
@@ -18,6 +19,15 @@ import { logInfo } from '../services/logger'
 let server: ServerType | null = null
 let port: number | null = null
 
+/** Constant-time bearer check. The length guard timingSafeEqual requires only
+ *  leaks the token's length — constant, and worthless against a random token. */
+function bearerMatches(header: string | undefined): boolean {
+  if (!header) return false
+  const given = Buffer.from(header)
+  const expected = Buffer.from(`Bearer ${getLocalApiToken()}`)
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}
+
 function buildApp(): Hono<{ Bindings: HttpBindings }> {
   const api = new Hono<{ Bindings: HttpBindings }>()
 
@@ -29,12 +39,19 @@ function buildApp(): Hono<{ Bindings: HttpBindings }> {
     })
   )
 
-  const token = getLocalApiToken()
   const authed = new Hono<{ Bindings: HttpBindings }>()
   authed.use('*', async (c, next) => {
-    // Tokenless mode is re-read per request so the Settings toggle applies
-    // without a restart. Loopback-only binding is what makes it acceptable.
-    if (!getLocalApiAuthDisabled() && c.req.header('Authorization') !== `Bearer ${token}`) {
+    // Native clients never send an Origin header; a browser page always does
+    // (DNS rebinding gets past the loopback binding, so reject them all —
+    // the MCP Streamable HTTP spec requires Origin validation on local
+    // servers for exactly this reason).
+    if (c.req.header('Origin') !== undefined) {
+      return c.json({ error: 'forbidden' }, 403)
+    }
+    // Token and tokenless mode are re-read per request so the Settings toggle
+    // applies without a restart — and a token rotated away (backup restore
+    // strips it) stops validating immediately.
+    if (!getLocalApiAuthDisabled() && !bearerMatches(c.req.header('Authorization'))) {
       return c.json({ error: 'unauthorized' }, 401)
     }
     await next()
