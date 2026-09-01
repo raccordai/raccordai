@@ -20,6 +20,7 @@ import {
   formatSubscribers,
   VideoRow
 } from '@renderer/features/niches/VideoRow'
+import { openAssistant } from '@renderer/features/assistant/assistantStore'
 import { invoke } from '@renderer/lib/ipc'
 import { relativeTime } from '@renderer/lib/relativeTime'
 
@@ -449,6 +450,11 @@ function NicheDetailPage(): React.JSX.Element {
                   commentCount: video.commentCount
                 }}
                 onTranscript={setTranscriptOf}
+                onCreateShorts={() =>
+                  openAssistant(
+                    t('niches.createShortsPrompt', { title: video.title, url: video.url })
+                  )
+                }
               />
             ))}
           </div>

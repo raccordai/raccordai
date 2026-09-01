@@ -415,6 +415,8 @@
     "subsHidden": "hidden subscribers",
     "hasTranscript": "Transcript",
     "transcriptTitle": "Transcript",
+    "createShorts": "Create shorts",
+    "createShortsPrompt": "Make shorts from this YouTube video: \"{{title}}\" ({{url}}). Use its niche transcript to spot 2–3 strong moments, then ask me for the video's MP4 file (I'll give you the path — Raccord doesn't download from YouTube) and derive each excerpt as a 9:16 vertical rendered at 1080×1920.",
     "noTranscript": "No transcript available for this video.",
     "close": "Close",
     "channelTracked": "Channel \"{{name}}\" tracked in the niche",

@@ -415,6 +415,8 @@
     "subsHidden": "abonnés masqués",
     "hasTranscript": "Transcription",
     "transcriptTitle": "Transcription",
+    "createShorts": "Créer des shorts",
+    "createShortsPrompt": "Fais-moi des shorts à partir de cette vidéo YouTube : « {{title}} » ({{url}}). Utilise son transcript de la niche pour repérer 2 à 3 moments forts, puis demande-moi le fichier MP4 de la vidéo (je te donne le chemin — Raccord ne télécharge pas depuis YouTube) et dérive chaque extrait en vertical 9:16 rendu en 1080×1920.",
     "noTranscript": "Pas de transcription disponible pour cette vidéo.",
     "close": "Fermer",
     "channelTracked": "Chaîne « {{name}} » ajoutée à la niche",
