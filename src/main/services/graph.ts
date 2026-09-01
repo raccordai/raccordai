@@ -18,7 +18,7 @@ import type { GraphEdge, GraphNode, WorkflowExport } from '@shared/ipc/contracts
 import { getDb } from '../db/client'
 import { assets, edges, generations, nodes } from '../db/schema'
 import { deleteMediaFile } from '../media/files'
-import { cancelGeneration } from './generationLifecycle'
+import { cancelGeneration, cancelGenerationsForVideo } from './generationLifecycle'
 import { withGraphHistory } from './graphHistory'
 import { getVideo, touchVideo } from './videos'
 
@@ -981,6 +981,10 @@ export function importWorkflow(
     }
     return params
   }
+
+  // In-flight runs settle before the wipe deletes their rows under the poller
+  // (queue-slot leak otherwise — same doctrine as removeNode).
+  if (replace) cancelGenerationsForVideo(videoId)
 
   withGraphHistory(videoId, () =>
     db.transaction((tx) => {

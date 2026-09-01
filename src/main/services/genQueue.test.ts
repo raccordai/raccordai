@@ -4,6 +4,8 @@ import {
   isRetryableGenerationError,
   isTimeoutFailure,
   maxPollAttemptsFor,
+  maxSettleMs,
+  POLL_INTERVAL_MS,
   timeoutFailureMessage,
   withRetry
 } from './genQueue'
@@ -197,6 +199,15 @@ describe('poll timeout policy', () => {
     // The poller never routes timeouts through smart retry; this only
     // documents that the message alone wouldn't be classified permanent.
     expect(isRetryableGenerationError(timeoutFailureMessage(600))).toBe(true)
+  })
+
+  it('the settle wait budget covers the full poll budget of every kind', () => {
+    // A settle cap below the poll budget declares still-running generations
+    // failed — the runBatch regression this guards against.
+    for (const kind of ['video', 'image', 'audio', undefined] as const) {
+      expect(maxSettleMs(kind)).toBeGreaterThan(maxPollAttemptsFor(kind) * POLL_INTERVAL_MS)
+    }
+    expect(maxSettleMs('video')).toBeGreaterThan(maxSettleMs('image'))
   })
 })
 

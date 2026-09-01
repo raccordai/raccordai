@@ -122,6 +122,28 @@ export function maxPollAttemptsFor(kind: 'video' | 'image' | 'audio' | undefined
   return kind === 'video' ? 80 : 40
 }
 
+/** Poll cadence (schedulePoll's delay). Declared next to the attempts budget
+ *  so time-based waits derive from the same numbers the poller runs on. */
+export const POLL_INTERVAL_MS = 15_000
+
+/** Smart-retry budget — see maybeScheduleRetry in runEngine.ts. */
+export const MAX_GENERATION_RETRIES = 3
+export const GENERATION_RETRY_DELAY_MS = 5_000
+
+/**
+ * Worst-case wall-clock for a generation to settle: each smart retry restarts
+ * a full poll cycle, so the budget is one cycle per submission attempt plus
+ * the retry delays. Anything waiting on a settle must cap at or above this —
+ * a shorter cap declares still-running generations failed.
+ */
+export function maxSettleMs(kind: 'video' | 'image' | 'audio' | undefined): number {
+  const submissions = 1 + MAX_GENERATION_RETRIES
+  return (
+    submissions * maxPollAttemptsFor(kind) * POLL_INTERVAL_MS +
+    MAX_GENERATION_RETRIES * GENERATION_RETRY_DELAY_MS
+  )
+}
+
 const TIMEOUT_PREFIX = 'Timed out after '
 
 /**

@@ -1,6 +1,7 @@
 import { getModel } from '@shared/models'
 import type { PlannedRow } from '@shared/ipc/contracts'
 import { onGenerationSettled } from '../bus'
+import { maxSettleMs } from './genQueue'
 import * as generations from './generations'
 import * as graph from './graph'
 import { lintNodeById } from './lint'
@@ -18,8 +19,10 @@ import { runNode } from './runEngine'
  * the renderer's historical 2 s polling loop.
  */
 
-/** Renderer-side cap kept as a safety net: no generation takes longer. */
-const SETTLE_TIMEOUT_MS = 10 * 60 * 1000
+/** Safety-net cap, sized to the worst legitimate lifetime (video poll budget
+ *  with smart retries) so a still-running generation is never declared failed.
+ *  The bus event and the row recheck below are the real completion paths. */
+const SETTLE_TIMEOUT_MS = maxSettleMs('video')
 
 /** Cost-preview row — the shared contract shape, so IPC validation can't drift. */
 export type { PlannedRow }
@@ -113,10 +116,12 @@ function waitForSettle(generationId: string): Promise<'success' | 'failed'> {
       if (event.generationId === generationId) finish(event.status)
     })
     // Safety net: re-read the row in case a settle slipped by (e.g. smart
-    // retry rewrote the generation while we subscribed).
+    // retry rewrote the generation while we subscribed). A vanished row is a
+    // failure — the generation was deleted out from under the batch.
     const recheck = setInterval(() => {
-      const status = generations.getGeneration(generationId)?.status
-      if (status === 'success' || status === 'failed') finish(status)
+      const gen = generations.getGeneration(generationId)
+      if (!gen) finish('failed')
+      else if (gen.status === 'success' || gen.status === 'failed') finish(gen.status)
     }, 15_000)
     const cap = setTimeout(() => finish('failed'), SETTLE_TIMEOUT_MS)
   })

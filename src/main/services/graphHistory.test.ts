@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
 import type { Db } from '../db/client'
 import { generations } from '../db/schema'
+import { onGenerationSettled, type GenerationSettledEvent } from '../bus'
 import { mediaDirFor } from '../media/files'
 import { createProject } from './projects'
 import { createVideo } from './videos'
@@ -81,6 +82,28 @@ describe('graph history', () => {
     // The cascade removed the generation rows; the files must not be orphaned.
     expect(existsSync(resultPath)).toBe(false)
     expect(existsSync(lastFramePath)).toBe(false)
+  })
+
+  it('undoing a node creation settles its in-flight generations first', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    const generationId = randomUUID()
+    db.insert(generations)
+      .values({ id: generationId, nodeId: node.id, videoId, status: 'running', createdAt: 1 })
+      .run()
+
+    // The settle event is what releases the queue slot: a row deleted by the
+    // cascade without it leaks the slot until restart.
+    const events: GenerationSettledEvent[] = []
+    const off = onGenerationSettled((event) => events.push(event))
+    try {
+      undoGraph(videoId)
+    } finally {
+      off()
+    }
+
+    expect(listGraph(videoId).nodes).toHaveLength(0)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ generationId, nodeId: node.id, status: 'failed' })
   })
 
   it('undoes and redoes a node creation', () => {

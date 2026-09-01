@@ -5,7 +5,8 @@ import { collectTimelineEntries } from '@shared/timeline'
 import { resetTestDatabase, useTestDatabase } from '../../../tests/helpers/db'
 import type { Db } from '../db/client'
 import { inArray } from 'drizzle-orm'
-import { assets, edges } from '../db/schema'
+import { assets, edges, generations } from '../db/schema'
+import { onGenerationSettled, type GenerationSettledEvent } from '../bus'
 import { createProject } from './projects'
 import { createVideo, getVideo, setVideoDefaults } from './videos'
 import { undoGraph } from './graphHistory'
@@ -412,6 +413,28 @@ describe('workflow export / import', () => {
     importWorkflow(videoId, JSON.stringify(exported), true)
     const keys = listGraph(videoId).nodes.map((n) => n.key)
     expect(keys).toEqual(['node_old'])
+  })
+
+  it('replace=true settles in-flight generations before the wipe', () => {
+    const node = createNode({ videoId, modelId: SEEDANCE, position: { x: 0, y: 0 } })
+    const generationId = randomUUID()
+    db.insert(generations)
+      .values({ id: generationId, nodeId: node.id, videoId, status: 'running', createdAt: 1 })
+      .run()
+
+    // The settle event is what releases the queue slot: a row deleted by the
+    // cascade without it leaks the slot until restart.
+    const events: GenerationSettledEvent[] = []
+    const off = onGenerationSettled((event) => events.push(event))
+    try {
+      importWorkflow(videoId, JSON.stringify({ nodes: [], edges: [] }), true)
+    } finally {
+      off()
+    }
+
+    expect(listGraph(videoId).nodes).toHaveLength(0)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ generationId, nodeId: node.id, status: 'failed' })
   })
 
   it('rejects invalid JSON with a clear error', () => {
