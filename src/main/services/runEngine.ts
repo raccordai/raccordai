@@ -21,10 +21,13 @@ import { ffmpegPath } from '../media/ffbin'
 import { downloadToFile } from '../media/download'
 import { mediaDirFor, mimeTypeFor } from '../media/files'
 import {
+  GENERATION_RETRY_DELAY_MS,
   GenerationQueue,
   isRetryableGenerationError,
   isTimeoutFailure,
+  MAX_GENERATION_RETRIES,
   maxPollAttemptsFor,
+  POLL_INTERVAL_MS,
   timeoutFailureMessage,
   withRetry
 } from './genQueue'
@@ -55,9 +58,8 @@ import { getElevenLabsApiKey, getKieApiKey, getMaxConcurrentGenerations } from '
  *   - successful results are downloaded into the local media store.
  */
 
-const POLL_INTERVAL_MS = 15_000
-// Poll attempt budget is kind-dependent (maxPollAttemptsFor in genQueue.ts):
-// ~10 min for images/audio, ~20 min for video tasks that legitimately run long.
+// Poll cadence and attempt budget both live in genQueue.ts (maxPollAttemptsFor,
+// POLL_INTERVAL_MS): ~10 min for images/audio, ~20 min for video tasks.
 /** kie.ai deletes uploads after ~3 days; refresh well before that. */
 const UPLOAD_TTL_MS = 48 * 60 * 60 * 1000
 
@@ -107,8 +109,6 @@ export function queueState(): {
 // from the persisted snapshot a few seconds later, unless the error is
 // permanent (content-policy violation, 4xx) — see isRetryableGenerationError.
 
-const MAX_GENERATION_RETRIES = 3
-const GENERATION_RETRY_DELAY_MS = 5_000
 /** Attempts per generation id. In-memory: a restart resets the budget. */
 const retryCounts = new Map<string, number>()
 

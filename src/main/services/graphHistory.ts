@@ -3,6 +3,7 @@ import { getDb } from '../db/client'
 import { edges, generations, nodes } from '../db/schema'
 import { broadcastWorkflowChanged } from '../events'
 import { deleteMediaFile } from '../media/files'
+import { cancelGeneration } from './generationLifecycle'
 
 /**
  * Per-video undo/redo journal for graph mutations.
@@ -82,6 +83,17 @@ function snapshotsEqual(a: GraphSnapshot, b: GraphSnapshot): boolean {
 /** Diff-restore: only touch rows that differ, so unrelated generations survive. */
 function restoreSnapshot(videoId: string, snapshot: GraphSnapshot): void {
   const db = getDb()
+  // In-flight runs of the nodes about to be deleted settle first: deleting
+  // their rows under the poller would leak the queue slots until restart
+  // (same doctrine as removeNode).
+  const keptNodeIds = new Set(snapshot.nodes.map((n) => n.id))
+  const doomed = db
+    .select({ id: nodes.id })
+    .from(nodes)
+    .where(eq(nodes.videoId, videoId))
+    .all()
+    .filter((n) => !keptNodeIds.has(n.id))
+  for (const n of doomed) cancelGeneration(n.id)
   // Media of the generations the cascade is about to delete — removed from
   // disk only after the transaction commits (a rollback must not lose files).
   const orphanedMedia: (string | null)[] = []
