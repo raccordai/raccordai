@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { timingSafeEqual } from 'node:crypto'
 import { serve, type HttpBindings, type ServerType } from '@hono/node-server'
 import { Hono } from 'hono'
 import { RESPONSE_ALREADY_SENT } from '@hono/node-server/utils/response'
@@ -19,12 +19,13 @@ import { logInfo } from '../services/logger'
 let server: ServerType | null = null
 let port: number | null = null
 
-/** Constant-time bearer check (hashes normalize the lengths first). */
+/** Constant-time bearer check. The length guard timingSafeEqual requires only
+ *  leaks the token's length — constant, and worthless against a random token. */
 function bearerMatches(header: string | undefined): boolean {
   if (!header) return false
-  const given = createHash('sha256').update(header).digest()
-  const expected = createHash('sha256').update(`Bearer ${getLocalApiToken()}`).digest()
-  return timingSafeEqual(given, expected)
+  const given = Buffer.from(header)
+  const expected = Buffer.from(`Bearer ${getLocalApiToken()}`)
+  return given.length === expected.length && timingSafeEqual(given, expected)
 }
 
 function buildApp(): Hono<{ Bindings: HttpBindings }> {
