@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.5.0](https://github.com/raccordai/raccordai/compare/v1.4.0...v1.5.0) (2026-09-03)
+
+
+### Features
+
+* **demo:** self-recording demo mode with an automatic camera ([9661259](https://github.com/raccordai/raccordai/commit/966125946337db067ec0524b87c994e3e12ea7cf))
+* **models:** add Gemini Omni 1.1 Flash video model ([f230195](https://github.com/raccordai/raccordai/commit/f230195ad7073f47b73f77e5c01f61dc3461ded0))
+* **models:** add MiniMax H3 image-to-video model ([155a55e](https://github.com/raccordai/raccordai/commit/155a55e9513d02b6f96db09eb81657ed19c75058))
+* **render:** incremental renders with a per-clip artifact cache ([4ec36d6](https://github.com/raccordai/raccordai/commit/4ec36d6037c76b68a9bf8f062555c006cf538948))
+* **shorts:** derive 9:16 shorts from finished videos, external files and niche videos ([e6440f9](https://github.com/raccordai/raccordai/commit/e6440f93170cd880f84a82c50b515e5d2e8f329d))
+
+
+### Bug Fixes
+
+* **demo:** keep camera filter expressions under ffmpeg's nesting cap ([85c8539](https://github.com/raccordai/raccordai/commit/85c853909ac2cda5cb59bdb1417f71841096636d))
+* **engine:** settle in-flight generations on destructive graph restores ([c75fc15](https://github.com/raccordai/raccordai/commit/c75fc159b2d3c5ca65c3bf4ca74dd05a39f32e74))
+* **main:** generation reliability and process lifecycle hardening ([002b75a](https://github.com/raccordai/raccordai/commit/002b75a65684228dae1c309595ad03c3c24ffbce))
+* **main:** harden agent and network input surfaces ([608e7d8](https://github.com/raccordai/raccordai/commit/608e7d89844605e128362ea66dd9f7abdcd236ff))
+
 ## [1.4.0](https://github.com/raccordai/raccordai/compare/v1.3.0...v1.4.0) (2026-08-26)
 
 
