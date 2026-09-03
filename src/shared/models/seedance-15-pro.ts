@@ -29,9 +29,6 @@ export const seedance15Pro: ModelDefinition<Params> = {
   // No cheaper sibling — draft = same model floored to 480p (2 cr/s vs 10 at 1080p).
   draftEquivalent: { modelId: 'bytedance/seedance-1.5-pro', params: { resolution: '480p' } },
   paramsSchema,
-  // Indicative per-second rates by resolution — align with https://kie.ai/pricing.
-  estimateCredits: (params) =>
-    ({ '480p': 2, '720p': 5, '1080p': 10 })[params.resolution] * params.duration,
   paramFields: [
     { key: 'prompt', label: 'Prompt', type: 'textarea', defaultValue: '' },
     {

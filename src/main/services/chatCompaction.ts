@@ -92,7 +92,7 @@ export function renderForSummary(messages: Anthropic.MessageParam[]): string {
   return lines.join('\n')
 }
 
-export const SUMMARY_SYSTEM = `You compact an assistant conversation for context reuse. Summarize the transcript you receive into a dense brief the assistant can rely on later: the user's goals and constraints, decisions made, project/video/node/asset IDS with their names (ids are load-bearing — never drop one that is still referenced), what was built or generated (with credit costs when stated), current state and what remains open. Plain text, no preamble.`
+export const SUMMARY_SYSTEM = `You compact an assistant conversation for context reuse. Summarize the transcript you receive into a dense brief the assistant can rely on later: the user's goals and constraints, decisions made, project/video/node/asset IDS with their names (ids are load-bearing — never drop one that is still referenced), what was built or generated, current state and what remains open. Plain text, no preamble.`
 
 /**
  * Summary + kept tail → new history. The block is PREFIXED to the tail's

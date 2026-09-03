@@ -369,7 +369,8 @@ export const generations = sqliteTable(
     resultUploadedAt: integer('result_uploaded_at'),
     lastFrameUploadedUrl: text('last_frame_uploaded_url'),
     lastFrameUploadedAt: integer('last_frame_uploaded_at'),
-    /** Indicative kie.ai credit cost, computed from the model's declared rates at claim time. */
+    /** Legacy: per-run credit estimate, no longer written (the estimate feature was removed —
+     *  the kie.ai balance in the header is the only credit figure). Kept for migration compatibility. */
     creditsEstimated: real('credits_estimated'),
     /** True when the run was substituted to the model's draftEquivalent (§6.1). */
     draft: integer('draft', { mode: 'boolean' }),

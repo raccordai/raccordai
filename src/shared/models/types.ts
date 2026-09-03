@@ -95,13 +95,6 @@ export interface ModelDefinition<TParams = any> {
   outputs: OutputHandle[]
   buildPayload(args: BuildPayloadArgs<TParams>): Record<string, unknown>
   /**
-   * Indicative kie.ai credit cost of one run with the given params.
-   * These rates are maintained by hand from https://kie.ai/pricing — treat the
-   * result as an order-of-magnitude estimate, the kie.ai dashboard is the
-   * authority. Omit when no reliable rate is known (the UI then shows nothing).
-   */
-  estimateCredits?(params: TParams): number
-  /**
    * Cheaper stand-in used when the video is in draft mode (§6.1): `prepareRun`
    * swaps the run to `modelId` (same kind and provider — registry-test
    * enforced), overlaying `params` on the node's raw params. Enum values the

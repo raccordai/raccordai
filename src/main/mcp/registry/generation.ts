@@ -32,15 +32,6 @@ import { obj, str, type AgentTool } from './types'
 
 /** Running nodes, the queue, QC, checkpoints (§6.4) and annotations (§6.3). */
 export const generationTools: AgentTool[] = [
-  {
-    name: 'estimate_cost',
-    description:
-      'Indicative kie.ai credit cost of running a node with its current params (null when unknown).',
-    inputSchema: obj({ nodeId: str() }, ['nodeId']),
-    scope: 'global',
-    risk: 'read',
-    execute: ({ nodeId }) => ({ credits: generations.estimateNodeRunCredits(String(nodeId)) })
-  },
   // ── §6.4 checkpoints ───────────────────────────────────────────────────────
   {
     name: 'create_checkpoint',
@@ -233,7 +224,7 @@ export const generationTools: AgentTool[] = [
         },
         variants: {
           type: 'number',
-          description: `Parallel candidates per target node (1–${MAX_VARIANTS}, default 1 — the cost is multiplied accordingly)`
+          description: `Parallel candidates per target node (1–${MAX_VARIANTS}, default 1 — each candidate is a separate paid run)`
         }
       },
       ['videoId']
@@ -266,11 +257,11 @@ export const generationTools: AgentTool[] = [
   {
     name: 'finalize_video',
     description:
-      'Re-run every node whose selected generation is a draft on the REAL models (COSTS MONEY — draft substitution bypassed) and promote each result to the node’s selection. Pass plan_only: true to get the draft-vs-final cost preview without running anything.',
+      'Re-run every node whose selected generation is a draft on the REAL models (COSTS MONEY — draft substitution bypassed) and promote each result to the node’s selection. Pass plan_only: true to list the nodes it would re-run without running anything.',
     inputSchema: obj(
       {
         videoId: str(),
-        plan_only: { type: 'boolean', description: 'Only return the cost preview' }
+        plan_only: { type: 'boolean', description: 'Only return the nodes that would be re-run' }
       },
       ['videoId']
     ),

@@ -11,8 +11,8 @@ const paramsSchema = z.object({
   resolution: z.enum(RESOLUTION).default('720p'),
   aspect_ratio: z.enum(ASPECT).default('16:9'),
   // The API also accepts -1 (auto duration) — deliberately NOT exposed: the
-  // timeline, the render plan and the credit estimate all read params.duration
-  // as the clip's declared length, and -1 would poison all three.
+  // timeline and the render plan both read params.duration as the clip's
+  // declared length, and -1 would poison both.
   duration: z.number().int().min(4).max(30).default(5),
   web_search: z.boolean().default(false),
   nsfw_checker: z.boolean().default(true)
@@ -129,13 +129,6 @@ export const seedance25: ModelDefinition<Params> = {
     'Two clips only read as one sequence if each prompt says which frame it OPENS ON and which it CLOSES ON, and keeps the screen direction across the cut; the 4-panel shot board (designs recipe "shotboard") settles the hand-off on a cheap image.\n' +
     'Resolution caps at 1080p — for a native-4k master, run the keeper on Seedance 2 (model swap keeps the params). Platform compliance on realistic human faces in references follows kie.ai rules (the 2.0 tiers reject them) — prefer stylized sheets.',
   promptGuide: SEEDANCE25_PROMPT_GUIDE,
-  // Indicative per-second rates by resolution — align with https://kie.ai/pricing.
-  // A video-input run is billed differently (price × (input + output) seconds,
-  // at a lower unit price: 17 / 38 / 68.5 cr/s); `estimateCredits` only sees
-  // params, never the wired handles, so the no-video rate is what we quote —
-  // the higher per-output-second of the two, i.e. the estimate never under-sells.
-  estimateCredits: (params) =>
-    ({ '480p': 28, '720p': 63, '1080p': 114 })[params.resolution] * params.duration,
   buildPayload: ({ params, inputs }) => {
     const first = inputs.first_frame_url?.[0]
     const last = inputs.last_frame_url?.[0]

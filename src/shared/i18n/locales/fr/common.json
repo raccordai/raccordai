@@ -118,8 +118,6 @@
     "plan": {
       "title_one": "Plan proposé — {{count}} plan",
       "title_other": "Plan proposé — {{count}} plans",
-      "credits": "~{{credits}} cr",
-      "total": "Total estimé",
       "panels": "cases {{panels}}",
       "approve": "Approuver",
       "requestChanges": "Demander des changements"
@@ -550,7 +548,6 @@
     "nodeCount_one": "{{count}} nœud",
     "nodeCount_other": "{{count}} nœuds",
     "deleteConfirm": "Supprimer la vidéo « {{name}} » ?",
-    "creditsUsage": "{{count}} générations · ~{{credits}} crédits (estimation)",
     "startFrom": "Commencer depuis",
     "blankVideo": "Vidéo vierge",
     "blankVideoDesc": "Un graphe vide, à construire librement",
@@ -813,8 +810,7 @@
     },
     "variants": {
       "label": "Variantes",
-      "run": "Générer {{n}} candidats en parallèle et les comparer",
-      "runCost": "Générer {{n}} candidats en parallèle et les comparer · ~{{credits}} crédits"
+      "run": "Générer {{n}} candidats en parallèle et les comparer"
     },
     "generateVideos": "Générer les vidéos",
     "generating": "Génération…",
@@ -847,7 +843,6 @@
     "deleteNodeConfirm": "Supprimer ce nœud et toutes ses générations ?",
     "copyNodeName": "Copier le nom du nœud",
     "jumpToTimelineClip": "Voir ce clip dans la timeline",
-    "estimatedCost": "~{{credits}} crédits (estimation)",
     "historyPanel": {
       "title": "Historique",
       "close": "Fermer le panneau",
@@ -889,8 +884,6 @@
       "finalizeTitle": "Finaliser en qualité réelle",
       "finalizeHint": "Relance chaque nœud dont la génération sélectionnée est un brouillon sur son vrai modèle, puis sélectionne le résultat.",
       "finalizeEmpty": "Aucun nœud dont la génération sélectionnée est un brouillon.",
-      "draftCost": "brouillon",
-      "finalCost": "final",
       "finalizeConfirm_one": "Finaliser {{count}} nœud",
       "finalizeConfirm_other": "Finaliser {{count}} nœuds",
       "finalizeStarted": "Finalisation lancée : {{count}} nœud(s) relancé(s) en qualité réelle",
@@ -936,17 +929,6 @@
       "generating": "Génération…",
       "retrying": "Essai {{attempt}}/{{max}}"
     },
-    "costModal": {
-      "title": "Confirmer la génération",
-      "credits": "~{{credits}} cr",
-      "unknownCost": "—",
-      "total": "Total estimé",
-      "balance": "Solde : {{credits}} crédits",
-      "overBalance": "au-delà de votre solde",
-      "dontAskUnder": "Ne plus demander sous {{credits}} crédits",
-      "confirm_one": "Générer {{count}} génération",
-      "confirm_other": "Générer {{count}} générations"
-    },
     "mentionInputs": "Entrées connectées",
     "recipeMode": "Mode",
     "recipeModel": "Modèle",
@@ -961,7 +943,12 @@
     "promptGuide": "Guide de prompt du modèle",
     "promptingNotes": "Conseils du modèle (prompting, entrées, références)",
     "promptGuideShow": "Lire le guide de prompt",
-    "promptGuideHide": "Masquer le guide"
+    "promptGuideHide": "Masquer le guide",
+    "runConfirm": {
+      "title": "Confirmer la génération",
+      "confirm_one": "Générer {{count}} génération",
+      "confirm_other": "Générer {{count}} générations"
+    }
   },
   "mcp": {
     "title": "Serveur MCP",

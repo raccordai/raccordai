@@ -186,7 +186,7 @@ and lands as ONE undo step.
 
 Parallel exploration rides the run tools themselves: `run_node` and `run_batch`
 accept `variants: N` (2–4) to claim N candidates of the same node — one queue
-slot and one credit charge each, `run_node` returning every `generationIds`.
+slot and one paid run each, `run_node` returning every `generationIds`.
 Dependencies still generate once; only the explicit targets are multiplied. The
 user arbitrates the candidates in the app's compare grid, or an agent picks with
 `select_generation`.
@@ -215,7 +215,9 @@ Every tool declares two fields (invariant-tested in `registry.test.ts`):
   refresh the app UI after running. **Destructive tools are always
   approval-gated on the chat surface**, and **spending tools are gated too
   while the `assistantRunApproval` setting is `'ask'`** (its default) — an
-  action card showing the estimated credit cost + a `confirm: true` re-call.
+  action card naming what runs + a `confirm: true` re-call. The app never
+  estimates costs: `get_credits` (the live kie.ai balance) is the only credit
+  figure an agent can read.
   MCP clients remain the human's own agent and execute directly, whatever the
   setting.
 

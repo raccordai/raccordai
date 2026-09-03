@@ -40,7 +40,7 @@ const CONFIRM_PROPERTY = {
 const SPENDING_CONFIRM_PROPERTY = {
   type: 'boolean',
   description:
-    'Costs credits — when the app requires approval, omit on the first call (the user gets a card showing the estimated cost) and set true ONLY after they approved.'
+    'Costs credits — when the app requires approval, omit on the first call (the user gets an approval card) and set true ONLY after they approved.'
 }
 
 function withoutProperty(schema: JsonObjectSchema, property: string): JsonObjectSchema {

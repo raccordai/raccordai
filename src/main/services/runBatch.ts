@@ -24,7 +24,7 @@ import { runNode } from './runEngine'
  *  The bus event and the row recheck below are the real completion paths. */
 const SETTLE_TIMEOUT_MS = maxSettleMs('video')
 
-/** Cost-preview row — the shared contract shape, so IPC validation can't drift. */
+/** Run-confirm row — the shared contract shape, so IPC validation can't drift. */
 export type { PlannedRow }
 
 export interface BatchResult {
@@ -35,7 +35,7 @@ export interface BatchResult {
   generations: Record<string, string>
 }
 
-/** Node ids whose SELECTED generation is a success (cost-modal parity). */
+/** Node ids whose SELECTED generation is a success (run-confirm parity). */
 function satisfiedNodeIds(nodes: { id: string; selectedGenerationId?: string | null }[]): string[] {
   return nodes
     .filter(
@@ -63,13 +63,11 @@ function buildPlan(
   })
 }
 
-/** Cost row for one planned node: per-run estimate × the candidates it claims. */
-function plannedRow(entry: PlanEntry, opts?: { forceFinal?: boolean }): PlannedRow {
-  const perRun = generations.estimateNodeRunCredits(entry.id, opts)
+/** Run-confirm row for one planned node: the candidates it claims + its lint. */
+function plannedRow(entry: PlanEntry): PlannedRow {
   return {
     nodeId: entry.id,
     label: entry.label,
-    credits: perRun === null ? null : perRun * entry.runs,
     variants: entry.runs,
     // §6.5 — the run confirm is the last free moment to catch a bad prompt.
     lint: lintNodeById(entry.id).map((f) => ({
@@ -88,17 +86,15 @@ export function videoNodeTargets(videoId: string): string[] {
     .map((n) => n.id)
 }
 
-/** The §4.4 cost modal's data: nodes that will claim a generation + estimates. */
+/** The §4.4 run confirm's data: nodes that will claim a generation + their lint. */
 export function planBatch(
   videoId: string,
   targetNodeIds: string[],
   reuseTargets: boolean,
   variants?: number
-): { rows: PlannedRow[]; total: number } {
-  const rows = buildPlan(videoId, targetNodeIds, reuseTargets, variants).planned.map((entry) =>
-    plannedRow(entry)
-  )
-  return { rows, total: rows.reduce((sum, row) => sum + (row.credits ?? 0), 0) }
+): { rows: PlannedRow[] } {
+  const rows = buildPlan(videoId, targetNodeIds, reuseTargets, variants).planned.map(plannedRow)
+  return { rows }
 }
 
 /** Resolves on terminal status: row check first (settle may predate the wait). */
@@ -205,12 +201,7 @@ export function startBatch(args: {
     }
   })()
 
-  // Under forceFinal (§6.1 finalize) the rows must quote the REAL-model cost,
-  // not the draft estimate the node's current mode would produce.
-  return {
-    planned: plan.planned.map((entry) => plannedRow(entry, { forceFinal: args.forceFinal })),
-    done
-  }
+  return { planned: plan.planned.map(plannedRow), done }
 }
 
 // ── §6.1 finalize — re-run draft keepers on the real models ──────────────────
@@ -218,36 +209,19 @@ export function startBatch(args: {
 export interface FinalizeRow {
   nodeId: string
   label: string
-  /** Estimate stamped on the draft generation when it was claimed. */
-  draftCredits: number | null
-  /** Estimate of the same run on the real model (substitution bypassed). */
-  finalCredits: number | null
 }
 
-/** Nodes whose SELECTED generation is a successful draft, draft-vs-final cost. */
-export function planFinalize(videoId: string): {
-  rows: FinalizeRow[]
-  totalDraft: number
-  totalFinal: number
-} {
+/** Nodes whose SELECTED generation is a successful draft — what finalize re-runs. */
+export function planFinalize(videoId: string): { rows: FinalizeRow[] } {
   const { nodes } = graph.listGraph(videoId)
   const rows: FinalizeRow[] = []
   for (const node of nodes) {
     if (!node.selectedGenerationId) continue
     const gen = generations.getGeneration(node.selectedGenerationId)
     if (!gen || gen.status !== 'success' || !gen.draft) continue
-    rows.push({
-      nodeId: node.id,
-      label: node.label ?? node.key,
-      draftCredits: gen.creditsEstimated,
-      finalCredits: generations.estimateNodeRunCredits(node.id, { forceFinal: true })
-    })
+    rows.push({ nodeId: node.id, label: node.label ?? node.key })
   }
-  return {
-    rows,
-    totalDraft: rows.reduce((sum, r) => sum + (r.draftCredits ?? 0), 0),
-    totalFinal: rows.reduce((sum, r) => sum + (r.finalCredits ?? 0), 0)
-  }
+  return { rows }
 }
 
 /**

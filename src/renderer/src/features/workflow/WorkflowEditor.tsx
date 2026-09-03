@@ -68,9 +68,6 @@ const NODE_TYPES = {
   assetNode: AssetNode
 }
 
-/** "Don't ask again under X credits" — remembered locally on this machine. */
-const COST_SKIP_KEY = 'raccord.costConfirmSkipUnder'
-
 /**
  * In-app clipboard for node copy/paste (§4.6) — a workflow-JSON v1 fragment,
  * pasted through the importWorkflow validator with fresh keys and an offset.
@@ -90,18 +87,14 @@ interface NodeClipboard {
 }
 let nodeClipboard: NodeClipboard | null = null
 
-interface CostPreviewState {
+interface RunConfirmState {
   rows: {
     id: string
     label: string
-    credits: number | null
     variants: number
     /** §6.5 — prompt-lint findings for that node, surfaced in the run confirm. */
     lint: { severity: 'error' | 'warning'; message: string }[]
   }[]
-  total: number
-  /** Current kie.ai balance, null when unreachable (no key, offline). */
-  balance: number | null
   resolve: (accepted: boolean) => void
 }
 
@@ -205,7 +198,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
   /** True while a "generate all videos" batch run is in flight. */
   const [runningAll, setRunningAll] = useState(false)
   /** Pending cost-preview modal for a multi-node run (null = none). */
-  const [costPreview, setCostPreview] = useState<CostPreviewState | null>(null)
+  const [runConfirm, setRunConfirm] = useState<RunConfirmState | null>(null)
   /** Pending frame-anchor guard modal (null = none). */
   const [anchorGuard, setAnchorGuard] = useState<AnchorGuardState | null>(null)
   /** Pane right-click menu — add-node panel at the cursor (§4.6). */
@@ -640,7 +633,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
    * phase 4 (`generations:planRun` / `generations:runBatch`): dependency-aware,
    * shared upstreams generate once, independent branches in parallel, targets
    * regenerate unless `reuseTargets` (batch mode). The renderer keeps exactly
-   * two concerns: the §4.4 cost gate (modal below) and failure feedback.
+   * two concerns: the §4.4 run confirm (modal below) and failure feedback.
    */
   const runNodes = useCallback(
     async (targetNodeIds: string[], opts?: { reuseTargets?: boolean; variants?: number }) => {
@@ -654,33 +647,24 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
         variants
       })
 
-      // Cost gate: anything claiming 2+ generations gets a per-node breakdown +
-      // total + balance before any credit is spent — including a single node run
-      // with variants (§6.6). "Don't ask under X" short-circuits it.
+      // Run confirm: anything claiming 2+ generations gets a per-node breakdown
+      // (with its lint findings) before any credit is spent — including a single
+      // node run with variants (§6.6).
       const plannedRuns = plan.rows.reduce((sum, row) => sum + row.variants, 0)
       if (plannedRuns >= 2) {
-        const skipUnder = Number(localStorage.getItem(COST_SKIP_KEY) ?? '0')
-        if (!(skipUnder > 0 && plan.total <= skipUnder)) {
-          const balance = await invoke('kie:credits')
-            .then((r) => r.credits)
-            .catch(() => null)
-          const accepted = await new Promise<boolean>((resolve) =>
-            setCostPreview({
-              rows: plan.rows.map((r) => ({
-                id: r.nodeId,
-                label: r.label,
-                credits: r.credits,
-                variants: r.variants,
-                lint: r.lint
-              })),
-              total: plan.total,
-              balance,
-              resolve
-            })
-          )
-          setCostPreview(null)
-          if (!accepted) return
-        }
+        const accepted = await new Promise<boolean>((resolve) =>
+          setRunConfirm({
+            rows: plan.rows.map((r) => ({
+              id: r.nodeId,
+              label: r.label,
+              variants: r.variants,
+              lint: r.lint
+            })),
+            resolve
+          })
+        )
+        setRunConfirm(null)
+        if (!accepted) return
       }
 
       const res = await invoke('generations:runBatch', {
@@ -991,7 +975,7 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
         />
       </div>
 
-      {costPreview && <CostPreviewModal preview={costPreview} />}
+      {runConfirm && <RunConfirmModal preview={runConfirm} />}
       {anchorGuard && <FrameAnchorModal guard={anchorGuard} />}
 
       {/* Pane right-click: the add-node catalogue at the cursor, spawning at the click point. */}
@@ -1060,22 +1044,18 @@ function WorkflowEditorInner({ videoId, projectId }: Props) {
 }
 
 /**
- * Pre-run cost gate for multi-node runs (§4.4): per-node estimate breakdown,
- * grand total vs the live kie.ai balance, and an opt-out below a remembered
- * threshold. The promise held in `preview.resolve` gates the actual run.
+ * Pre-run confirm for multi-node runs (§4.4): the nodes that will claim a
+ * generation (×N for variants) with their prompt-lint findings — the last free
+ * moment to catch a bad prompt. The promise held in `preview.resolve` gates
+ * the actual run.
  */
-function CostPreviewModal({ preview }: { preview: CostPreviewState }) {
+function RunConfirmModal({ preview }: { preview: RunConfirmState }) {
   const { t } = useTranslation()
-  const [skipUnder, setSkipUnder] = useState(false)
 
   function settle(accepted: boolean) {
-    if (accepted && skipUnder && preview.total > 0) {
-      localStorage.setItem(COST_SKIP_KEY, String(Math.ceil(preview.total)))
-    }
     preview.resolve(accepted)
   }
 
-  const overBalance = preview.balance !== null && preview.total > preview.balance
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
@@ -1087,7 +1067,7 @@ function CostPreviewModal({ preview }: { preview: CostPreviewState }) {
         className="island w-full max-w-md px-5 py-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-sm font-semibold text-neutral-100">{t('editor.costModal.title')}</h2>
+        <h2 className="text-sm font-semibold text-neutral-100">{t('editor.runConfirm.title')}</h2>
         <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto">
           {preview.rows.map((row) => (
             <li key={row.id} className="text-xs">
@@ -1099,11 +1079,6 @@ function CostPreviewModal({ preview }: { preview: CostPreviewState }) {
                       ×{row.variants}
                     </span>
                   )}
-                </span>
-                <span className="font-mono text-neutral-400">
-                  {row.credits !== null
-                    ? t('editor.costModal.credits', { credits: row.credits })
-                    : t('editor.costModal.unknownCost')}
                 </span>
               </div>
               {/* §6.5 — the last free moment to catch a prompt problem. */}
@@ -1120,38 +1095,13 @@ function CostPreviewModal({ preview }: { preview: CostPreviewState }) {
             </li>
           ))}
         </ul>
-        <div className="mt-2 flex items-baseline justify-between border-t border-neutral-800 pt-2 text-xs">
-          <span className="font-semibold text-neutral-200">{t('editor.costModal.total')}</span>
-          <span className="font-mono font-semibold text-neutral-100">
-            {t('editor.costModal.credits', { credits: preview.total })}
-          </span>
-        </div>
-        {preview.balance !== null && (
-          <div
-            className={`mt-1 text-right text-[11px] ${overBalance ? 'text-danger' : 'text-neutral-500'}`}
-          >
-            {t('editor.costModal.balance', { credits: preview.balance.toLocaleString() })}
-            {overBalance && ` — ${t('editor.costModal.overBalance')}`}
-          </div>
-        )}
-        {preview.total > 0 && (
-          <label className="mt-3 flex items-center gap-2 text-[11px] text-neutral-400">
-            <input
-              type="checkbox"
-              checked={skipUnder}
-              onChange={(e) => setSkipUnder(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-neutral-600 bg-neutral-900"
-            />
-            {t('editor.costModal.dontAskUnder', { credits: Math.ceil(preview.total) })}
-          </label>
-        )}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => settle(false)}>
             {t('common.cancel')}
           </Button>
           <Button variant="primary" onClick={() => settle(true)} autoFocus>
             {/* Counted in generations, not nodes: 3 variants of one node are 3 runs. */}
-            {t('editor.costModal.confirm', {
+            {t('editor.runConfirm.confirm', {
               count: preview.rows.reduce((sum, row) => sum + row.variants, 0)
             })}
           </Button>

@@ -32,8 +32,8 @@ export const geminiOmniFlash11: ModelDefinition<Params> = {
   kind: 'video',
   recommendedFor: ['first-frame-animation', 'video-to-video', 'high-resolution', 'cinematic'],
   // Same model floored to 360p: kie prices 360p/720p/1080p identically, so this
-  // only saves credits on 4K nodes (−84/run) — but 360p generates up to 60%
-  // faster, which is what draft iteration is for. A node already at 360p
+  // only saves money on 4K nodes — but 360p generates up to 60% faster, which
+  // is what draft iteration is for. A node already at 360p
   // resolves to null and is never stamped draft.
   draftEquivalent: { modelId: 'google/gemini-omni-flash-1-1', params: { resolution: '360p' } },
   paramsSchema,
@@ -64,7 +64,7 @@ export const geminiOmniFlash11: ModelDefinition<Params> = {
       defaultValue: '720p',
       options: RESOLUTION.map((v) => ({ value: v, label: v })),
       description:
-        '360p drafts generate up to 60% faster at the same credit price as 720p/1080p; 4K adds a flat +84 credits per run.'
+        '360p drafts generate up to 60% faster at the same price as 720p/1080p; 4K costs extra per run.'
     },
     {
       key: 'video_start',
@@ -132,7 +132,7 @@ export const geminiOmniFlash11: ModelDefinition<Params> = {
     'Reference budget: 7 slots — each image takes 1, the source video takes 2. Wire the SAME character/style sheets on every shot for consistency; never wire a design sheet to the frame anchors.\n' +
     'Duration is 4/6/8/10 s and only applies without a source video; with one wired, the model decides the output length and reads up to 10 s of the trimmed window as context — that is the reliable way to extend a scene.\n' +
     "Between shots, CUT — do not chain. Wiring the previous node's lastFrame as this clip's first frame glitches the seam (a generated closing frame is motion-blurred and compressed); for genuine continuity, wire the previous CLIP as the source video instead.\n" +
-    'Iterate at 360p (up to 60% faster, same credit price as 720p/1080p), then re-run the keeper at 1080p or 4K (+84 credits flat).',
+    'Iterate at 360p (up to 60% faster, same price as 720p/1080p), then re-run the keeper at 1080p or 4K (priced higher).',
   // Distilled from kie.ai's Gemini Omni 1.1 Flash model page and the
   // google/gemini-omni-flash-1-1 createTask OpenAPI spec.
   promptGuide: `ANATOMY: one paragraph describing, in order — visual content (subject, setting, era) →
@@ -153,7 +153,7 @@ INPUT MODES (mutually exclusive per run — the API rejects a mix):
 DURATION & OUTPUT:
   - 4 / 6 / 8 / 10 s without a source video; WITH one, the model decides the length and the
     duration param is ignored — plan the timeline around the trimmed context window instead.
-  - 16:9 or 9:16. Draft at 360p (up to 60% faster, same credit price as 720p/1080p), then re-run
+  - 16:9 or 9:16. Draft at 360p (up to 60% faster, same price as 720p/1080p), then re-run
     the keeper at 1080p or 4K for the final master.
 
 PITFALLS:
@@ -168,14 +168,6 @@ FULL EXAMPLE:
   magenta practicals. Slow push-in at eye level as a courier in a reflective jacket steps out of
   a noodle stall into the crowd; steam drifts through the frame. Shallow depth of field, anamorphic
   flares, handheld micro-shake. She pauses, looks up at a holographic billboard, and smiles."`,
-  // Official kie.ai rates (https://kie.ai/gemini-omni-1-1-flash): 360p/720p/1080p
-  // share one price — 63/84/105/126 credits at 4/6/8/10 s — and 4K adds a flat
-  // +84. A run WITH a source video is billed flat instead (168, 4K 252);
-  // estimateCredits only sees params, never the wired handles, so the
-  // duration-based rate is what we quote.
-  estimateCredits: (params) =>
-    ({ 4: 63, 6: 84, 8: 105, 10: 126 })[snapDuration(params.duration)] +
-    (params.resolution === '4k' ? 84 : 0),
   buildPayload: ({ params, inputs }) => {
     const first = inputs.first_frame_url?.[0]
     const last = inputs.last_frame_url?.[0]

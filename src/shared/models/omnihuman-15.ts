@@ -30,9 +30,6 @@ export const omnihuman15: ModelDefinition<Params> = {
   kind: 'video',
   recommendedFor: ['lip-sync', 'talking-head', 'portrait-animation'],
   paramsSchema,
-  // No estimateCredits: the run is billed on the AUDIO's length, which is not a
-  // param (estimateCredits sees params only) — no per-run figure would be
-  // honest. Rates: https://kie.ai/pricing.
   paramFields: [
     {
       key: 'prompt',

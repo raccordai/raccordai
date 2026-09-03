@@ -2,11 +2,10 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 import { app } from 'electron'
 import { and, desc, eq } from 'drizzle-orm'
-import { estimateCreditsFor, getModel } from '@shared/models'
-import { resolveDraftRun } from '@shared/models/draft'
+import { getModel } from '@shared/models'
 import type { GraphNode } from '@shared/ipc/contracts'
 import { getDb } from '../db/client'
-import { generations, nodes, videos } from '../db/schema'
+import { generations, nodes } from '../db/schema'
 import { getAsset } from './assets'
 
 export type GenerationRow = typeof generations.$inferSelect
@@ -31,50 +30,6 @@ export function listGenerationsForVideo(videoId: string): GenerationRow[] {
 
 export function getGeneration(id: string): GenerationRow | null {
   return getDb().select().from(generations).where(eq(generations.id, id)).get() ?? null
-}
-
-/**
- * Indicative credit cost of running this node right now (its current params),
- * null when the model declares no rates. Under draft mode (§6.1) the run is
- * substituted, so the estimate follows the draft model — `forceFinal` asks for
- * the real-model cost instead (the finalize preview).
- */
-export function estimateNodeRunCredits(
-  nodeId: string,
-  opts?: { forceFinal?: boolean }
-): number | null {
-  const db = getDb()
-  const node = db.select().from(nodes).where(eq(nodes.id, nodeId)).get()
-  if (!node || node.modelId === 'studio/asset') return null
-  if (!opts?.forceFinal) {
-    const video = db.select().from(videos).where(eq(videos.id, node.videoId)).get()
-    if (video?.draftMode) {
-      const sub = resolveDraftRun(node.modelId, node.params ?? {})
-      if (sub) return estimateCreditsFor(sub.modelId, sub.params)
-    }
-  }
-  return estimateCreditsFor(node.modelId, node.params)
-}
-
-/**
- * Estimated kie.ai credits spent across a project (sum of the per-generation
- * estimates stamped at claim time) plus the raw attempt count. Estimates only —
- * the kie.ai dashboard is the authority on real spend.
- */
-export function projectCreditsUsage(projectId: string): {
-  estimatedCredits: number
-  generationCount: number
-} {
-  const rows = getDb()
-    .select({ credits: generations.creditsEstimated })
-    .from(generations)
-    .innerJoin(videos, eq(generations.videoId, videos.id))
-    .where(eq(videos.projectId, projectId))
-    .all()
-  return {
-    estimatedCredits: rows.reduce((sum, r) => sum + (r.credits ?? 0), 0),
-    generationCount: rows.length
-  }
 }
 
 export interface HistoryRow extends GenerationRow {

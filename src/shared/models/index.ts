@@ -104,19 +104,6 @@ export function getModelOrThrow(id: string): ModelDefinition {
 }
 
 /**
- * Indicative credit cost of running `modelId` with `params` (null when the
- * model declares no rates or the params don't validate). See
- * ModelDefinition.estimateCredits for the accuracy caveat.
- */
-export function estimateCreditsFor(modelId: string, params: unknown): number | null {
-  const model = getModel(modelId)
-  if (!model?.estimateCredits) return null
-  const parsed = model.paramsSchema.safeParse(params ?? {})
-  if (!parsed.success) return null
-  return model.estimateCredits(parsed.data)
-}
-
-/**
  * `value` brought back inside a number field's declared bounds, and snapped to
  * its step when the field describes a discrete set (Seedance 1.5: 4/8/12).
  * Those bounds are an API contract — a Seedance 2 clip shorter than 4 s is

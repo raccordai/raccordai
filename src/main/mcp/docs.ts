@@ -75,12 +75,12 @@ Typical session:
      asynchronous: poll get_generations until status is success/failed.
   6. Iterating? set_draft_mode makes every run substitute the model's cheap
      draft equivalent (generations stamped "draft"); finalize_video (plan_only
-     first for the draft-vs-final cost) re-runs the approved keepers on the
+     first to list what it would re-run) re-runs the approved keepers on the
      real models. review_generation runs a vision QC (pass/warn + notes) on a
      successful image generation; with the video's QC option on it runs
      automatically at every image settle. Unsure which direction to take?
      run_node / run_batch accept variants: N (2–4) to generate N candidates of
-     the same node in parallel (cost ×N) — the user arbitrates them in the
+     the same node in parallel (N paid runs) — the user arbitrates them in the
      app's compare grid, or select_generation picks the keeper.
   7. Free safety rails, use them: lint_node checks a node BEFORE the spend
      (undeclared reference, sheet on a frame anchor, missing anti-grid guard,

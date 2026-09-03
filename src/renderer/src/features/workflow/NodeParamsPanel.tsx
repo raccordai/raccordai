@@ -362,13 +362,6 @@ function ModelNodeEditor({
     return map
   }, [connections])
 
-  // Indicative credit cost for the CURRENT params — refetched whenever the
-  // node row changes (updatedAt bumps on every params commit).
-  const costEstimate = useQuery({
-    queryKey: ['generations', 'estimate', node.id, node.updatedAt],
-    queryFn: () => invoke('generations:estimateCost', { nodeId: node.id })
-  })
-
   // Voice personas (§8): the channel's named voices, offered on the speech
   // params (voiceId picker, dialogue voice-map inserts). Only fetched when the
   // model actually declares one of those fields.
@@ -541,7 +534,6 @@ function ModelNodeEditor({
 
   const isRunning = !!generations?.some((g) => g.status === 'running' || g.status === 'pending')
 
-  const estimatedCredits = costEstimate.data?.credits ?? null
   const runButton = (
     <div className="space-y-1">
       <Button
@@ -561,11 +553,6 @@ function ModelNodeEditor({
           </>
         )}
       </Button>
-      {estimatedCredits !== null && !isRunning && (
-        <div className="text-center text-[10px] text-neutral-500">
-          {t('editor.estimatedCost', { credits: estimatedCredits })}
-        </div>
-      )}
       {/* Variants ×N (§6.6): parallel exploration in one gesture — N queue
           slots, N candidates to arbitrate in the grid compare below. */}
       {onRunVariants && (
@@ -577,14 +564,7 @@ function ModelNodeEditor({
               onClick={() => onRunVariants(count)}
               disabled={isRunning}
               className="rounded border border-neutral-700 px-1.5 py-0.5 font-mono text-[10px] text-neutral-300 hover:border-accent hover:text-accent-soft disabled:opacity-40"
-              title={
-                estimatedCredits !== null
-                  ? t('editor.variants.runCost', {
-                      n: count,
-                      credits: Math.round(estimatedCredits * count)
-                    })
-                  : t('editor.variants.run', { n: count })
-              }
+              title={t('editor.variants.run', { n: count })}
             >
               ×{count}
             </button>
