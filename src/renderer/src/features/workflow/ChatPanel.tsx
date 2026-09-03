@@ -609,16 +609,7 @@ function PlanCard({
       <ul className="mt-2 space-y-1.5">
         {plan.shots.map((shot, i) => (
           <li key={i} className="rounded-md bg-neutral-900/60 px-2 py-1.5">
-            <div className="flex items-baseline justify-between gap-2 text-[11px]">
-              <span className="min-w-0 flex-1 truncate font-medium text-neutral-100">
-                {shot.label}
-              </span>
-              <span className="flex-shrink-0 font-mono text-[10px] text-neutral-400">
-                {shot.estCredits !== null
-                  ? t('chat.plan.credits', { credits: shot.estCredits })
-                  : '—'}
-              </span>
-            </div>
+            <div className="truncate text-[11px] font-medium text-neutral-100">{shot.label}</div>
             <div className="mt-0.5 text-[10px] leading-snug text-neutral-400">
               {shot.description}
             </div>
@@ -629,14 +620,6 @@ function PlanCard({
           </li>
         ))}
       </ul>
-      {plan.totalCredits !== null && (
-        <div className="mt-2 flex items-baseline justify-between border-t border-neutral-800 pt-1.5 text-[11px]">
-          <span className="font-semibold text-neutral-200">{t('chat.plan.total')}</span>
-          <span className="font-mono font-semibold text-neutral-100">
-            {t('chat.plan.credits', { credits: plan.totalCredits })}
-          </span>
-        </div>
-      )}
       {active && (
         <div className="mt-2.5 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onRequestChanges}>

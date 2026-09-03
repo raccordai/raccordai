@@ -4,7 +4,6 @@ import {
   clampParamToField,
   defaultParamsFor,
   describeParamsError,
-  estimateCreditsFor,
   getModel,
   getModelOrThrow,
   listModels,
@@ -44,17 +43,6 @@ describe('model registry invariants', () => {
         for (const tag of model.recommendedFor) {
           expect(tag).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
         }
-      })
-
-      it('estimates a positive, finite credit cost when rates are declared', () => {
-        if (!model.estimateCredits) return
-        const credits = estimateCreditsFor(model.id, {
-          ...defaultParamsFor(model.id),
-          prompt: 'test prompt'
-        })
-        expect(credits).not.toBeNull()
-        expect(credits!).toBeGreaterThan(0)
-        expect(Number.isFinite(credits)).toBe(true)
       })
 
       it('builds a payload from schema defaults and empty inputs', () => {
@@ -199,72 +187,6 @@ describe('dynamic models', () => {
   })
 })
 
-describe('estimateCreditsFor', () => {
-  it('scales video cost with duration and resolution', () => {
-    const short = estimateCreditsFor('bytedance/seedance-2-fast', {
-      duration: 4,
-      resolution: '480p'
-    })
-    const long = estimateCreditsFor('bytedance/seedance-2-fast', {
-      duration: 15,
-      resolution: '720p'
-    })
-    expect(short).not.toBeNull()
-    expect(long!).toBeGreaterThan(short!)
-  })
-
-  it('returns null for unknown models and invalid params', () => {
-    expect(estimateCreditsFor('nope', {})).toBeNull()
-    // gpt-image requires a non-empty prompt — invalid params → no estimate.
-    expect(estimateCreditsFor('gpt-image-2-text-to-image', {})).toBeNull()
-    expect(estimateCreditsFor('gpt-image-2-text-to-image', { prompt: 'x', resolution: '4K' })).toBe(
-      30
-    )
-  })
-
-  // kie.ai pricing (2026-07): per-second rates per tier, audio surcharge below 4K.
-  it('prices Kling 3.0 per mode, duration and audio', () => {
-    expect(estimateCreditsFor('kling-3.0/video', { prompt: 'x', mode: 'std', duration: 5 })).toBe(
-      70
-    )
-    expect(estimateCreditsFor('kling-3.0/video', { prompt: 'x', mode: 'pro', duration: 5 })).toBe(
-      90
-    )
-    expect(
-      estimateCreditsFor('kling-3.0/video', { prompt: 'x', mode: 'pro', duration: 5, sound: true })
-    ).toBe(135)
-    expect(
-      estimateCreditsFor('kling-3.0/video', { prompt: 'x', mode: '4K', duration: 5, sound: true })
-    ).toBe(335)
-  })
-
-  // kie.ai pricing (2026-07): grok-imagine — 1.6 cr/s at 480p, 3 cr/s at 720p.
-  it('prices Grok Imagine per resolution and duration, floor-snapped on i2v', () => {
-    expect(
-      estimateCreditsFor('grok-imagine/text-to-video', {
-        prompt: 'x',
-        resolution: '480p',
-        duration: 10
-      })
-    ).toBe(16)
-    expect(
-      estimateCreditsFor('grok-imagine/image-to-video', {
-        prompt: 'x',
-        resolution: '720p',
-        duration: 8
-      })
-    ).toBe(24)
-    // Legacy Grok 1.5 nodes may store sub-6s durations; the API bills 6s.
-    expect(
-      estimateCreditsFor('grok-imagine/image-to-video', {
-        prompt: 'x',
-        resolution: '480p',
-        duration: 4
-      })
-    ).toBeCloseTo(9.6)
-  })
-})
-
 describe('defaultParamsFor', () => {
   it('collects paramField defaults', () => {
     expect(defaultParamsFor('bytedance/seedance-2-fast')).toMatchObject({
@@ -404,7 +326,7 @@ describe('seedance 2 family', () => {
     expect(model.paramsSchema.safeParse({ duration: 31 }).success).toBe(false)
     expect(model.paramsSchema.safeParse({ duration: 3 }).success).toBe(false)
     // duration=-1 (API auto-length) is deliberately not exposed — the timeline
-    // and the credit estimate need a declared duration.
+    // and the render plan need a declared duration.
     expect(model.paramsSchema.safeParse({ duration: -1 }).success).toBe(false)
     const params = model.paramsSchema.parse({ prompt: 'a cat', duration: 30 })
     const payload = model.buildPayload({ params, inputs: {} })
@@ -440,18 +362,6 @@ describe('seedance 2 family', () => {
 })
 
 describe('nano banana family', () => {
-  it('nano-banana-pro charges 18 credits at 1K/2K and 24 at 4K', () => {
-    expect(estimateCreditsFor('nano-banana-pro', { prompt: 'x' })).toBe(18)
-    expect(estimateCreditsFor('nano-banana-pro', { prompt: 'x', resolution: '2K' })).toBe(18)
-    expect(estimateCreditsFor('nano-banana-pro', { prompt: 'x', resolution: '4K' })).toBe(24)
-  })
-
-  it('nano-banana-2 scales credits with resolution', () => {
-    expect(estimateCreditsFor('nano-banana-2', { prompt: 'x' })).toBe(8)
-    expect(estimateCreditsFor('nano-banana-2', { prompt: 'x', resolution: '2K' })).toBe(12)
-    expect(estimateCreditsFor('nano-banana-2', { prompt: 'x', resolution: '4K' })).toBe(18)
-  })
-
   it('nano-banana-2 forwards inputs on image_input with resolution and format', () => {
     const model = getModelOrThrow('nano-banana-2')
     const params = model.paramsSchema.parse({ prompt: 'a cat', output_format: 'jpg' })
@@ -614,15 +524,6 @@ describe('google/gemini-omni-flash-1-1', () => {
       video_list: [{ url: 'https://x/prev.mp4', start: 8, ends: 18 }]
     })
   })
-
-  it('prices by duration tier with a flat 4K surcharge', () => {
-    const base = { prompt: 'a fox' }
-    expect(estimateCreditsFor(gemini.id, { ...base, duration: 4 })).toBe(63)
-    expect(estimateCreditsFor(gemini.id, { ...base, duration: 8 })).toBe(105)
-    // 360p/720p/1080p share one price; 4K adds +84 flat.
-    expect(estimateCreditsFor(gemini.id, { ...base, duration: 8, resolution: '360p' })).toBe(105)
-    expect(estimateCreditsFor(gemini.id, { ...base, duration: 10, resolution: '4k' })).toBe(210)
-  })
 })
 
 describe('minimax-h3/image-to-video', () => {
@@ -663,17 +564,6 @@ describe('minimax-h3/image-to-video', () => {
       duration: 6,
       resolution: '2K'
     })
-  })
-
-  // kie.ai rates (model page pricing, 2026-08): 768P 8 cr/s, 2K 13 cr/s.
-  it('prices per second by resolution', () => {
-    expect(estimateCreditsFor(minimax.id, { prompt: 'x', duration: 6 })).toBe(78)
-    expect(estimateCreditsFor(minimax.id, { prompt: 'x', duration: 6, resolution: '768P' })).toBe(
-      48
-    )
-    expect(estimateCreditsFor(minimax.id, { prompt: 'x', duration: 15, resolution: '2K' })).toBe(
-      195
-    )
   })
 })
 

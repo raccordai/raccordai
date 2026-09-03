@@ -57,7 +57,7 @@ export const kling3: ModelDefinition<Params> = {
       type: 'select',
       defaultValue: 'pro',
       options: MODE.map((v) => ({ value: v, label: v })),
-      description: 'std=720p, pro=1080p, 4K=2160p. Higher modes cost more credits and time.'
+      description: 'std=720p, pro=1080p, 4K=2160p. Higher modes cost more and take longer.'
     },
     {
       key: 'sound',
@@ -124,12 +124,6 @@ PITFALLS:
 FULL EXAMPLE:
   "A red fox trots across a snow-covered meadow at dawn, leaving a trail of pawprints, low golden
   light, slow tracking shot at ground level, gentle wind and distant birdsong."`,
-  // kie.ai pricing (2026-07): per-second, per resolution tier, audio surcharge
-  // below 4K — 720p 14/20 cr/s, 1080p 18/27 cr/s, 4K 67 cr/s flat.
-  estimateCredits: (params) => {
-    const rates = params.sound ? { std: 20, pro: 27, '4K': 67 } : { std: 14, pro: 18, '4K': 67 }
-    return rates[params.mode] * params.duration
-  },
   buildPayload: ({ params, inputs }) => {
     const first = inputs.first_frame?.[0]
     const last = inputs.last_frame?.[0]

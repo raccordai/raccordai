@@ -110,9 +110,6 @@ FULL EXAMPLE:
   "A weathered fisherman in a yellow raincoat stands at the bow of a small boat in heavy rain,
   gripping the rail as waves rock the hull, handheld camera, cold blue light, rain SFX and low
   ominous strings."`,
-  // kie.ai pricing (2026-07): grok-imagine text-to-video — 1.6 cr/s at 480p,
-  // 3 cr/s at 720p.
-  estimateCredits: (params) => ({ '480p': 1.6, '720p': 3 })[params.resolution] * params.duration,
   buildPayload: ({ params }) => ({
     prompt: params.prompt,
     aspect_ratio: params.aspect_ratio,

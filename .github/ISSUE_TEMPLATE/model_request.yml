@@ -7,8 +7,8 @@ body:
       value: |
         A model is **one declarative file** in `src/shared/models/` plus one
         entry in the `MODELS` array — the node UI, the params form, the
-        payload, the credit estimate, the timeline, the assistant and the MCP
-        docs all derive from it. The full guide is
+        payload, the timeline, the assistant and the MCP docs all derive from
+        it. The full guide is
         [`docs/models.md`](https://github.com/raccordai/raccordai/blob/main/docs/models.md);
         adding a model is a great first contribution.
 
@@ -74,13 +74,6 @@ body:
         - duration: 4 | 8 (seconds), default 4 — sent as a string
         - resolution: "720p" | "1080p", default "720p"
         - aspect_ratio: "16:9" | "9:16" | "1:1", default "16:9"
-
-  - type: input
-    id: price
-    attributes:
-      label: Price per run
-      description: From https://kie.ai/pricing — feeds `estimateCredits` (indicative rate, declared in the model file).
-      placeholder: '$0.15 per 4s clip at 720p'
 
   - type: textarea
     id: prompting

@@ -1140,9 +1140,9 @@ function StyleMenu({
 }
 
 /**
- * §6.1 finalize preview: nodes whose selected generation is a draft, the
- * credits already spent in draft vs the estimate on the real models, and the
- * button that re-runs them all (the batch selects each success as it settles).
+ * §6.1 finalize preview: nodes whose selected generation is a draft, and the
+ * button that re-runs them all on the real models (the batch selects each
+ * success as it settles).
  */
 function FinalizeModal({ videoId, onClose }: { videoId: string; onClose: () => void }) {
   const { t } = useTranslation()
@@ -1190,33 +1190,13 @@ function FinalizeModal({ videoId, onClose }: { videoId: string; onClose: () => v
             {t('editor.draft.finalizeEmpty')}
           </div>
         ) : (
-          <>
-            <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto">
-              {rows.map((row) => (
-                <li key={row.nodeId} className="flex items-baseline justify-between gap-3 text-xs">
-                  <span className="min-w-0 flex-1 truncate text-neutral-300">{row.label}</span>
-                  <span className="font-mono text-neutral-400">
-                    {row.draftCredits !== null
-                      ? t('editor.costModal.credits', { credits: row.draftCredits })
-                      : t('editor.costModal.unknownCost')}
-                    {' → '}
-                    {row.finalCredits !== null
-                      ? t('editor.costModal.credits', { credits: row.finalCredits })
-                      : t('editor.costModal.unknownCost')}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-2 flex items-baseline justify-between border-t border-neutral-800 pt-2 text-xs">
-              <span className="font-semibold text-neutral-200">{t('editor.costModal.total')}</span>
-              <span className="font-mono font-semibold text-neutral-100">
-                {t('editor.costModal.credits', { credits: plan.data?.totalDraft ?? 0 })} (
-                {t('editor.draft.draftCost')}) {' → '}
-                {t('editor.costModal.credits', { credits: plan.data?.totalFinal ?? 0 })} (
-                {t('editor.draft.finalCost')})
-              </span>
-            </div>
-          </>
+          <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto">
+            {rows.map((row) => (
+              <li key={row.nodeId} className="truncate text-xs text-neutral-300">
+                {row.label}
+              </li>
+            ))}
+          </ul>
         )}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>

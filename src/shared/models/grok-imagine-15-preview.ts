@@ -140,11 +140,6 @@ FULL EXAMPLES (official patterns):
   "@image1 slowly turns her head to the right and smiles, soft breeze moving her hair, gentle camera push-in."
   "@image1 the sneaker rotates smoothly on the pedestal, camera orbiting at eye level, dramatic spotlight
   sweeping across the surface, upbeat electronic music."`,
-  // kie.ai rates as shipped before this model was retired: 1 cr/s at 480p,
-  // 2 cr/s at 720p. 1080p is UNVERIFIED — derived from xAI's own per-second
-  // ratio (0.25/0.08 ≈ 3×480p); confirm against https://kie.ai/pricing.
-  estimateCredits: (params) =>
-    ({ '480p': 1, '720p': 2, '1080p': 3 })[params.resolution] * params.duration,
   buildPayload: ({ params, inputs }) => {
     const images = inputs.image_urls ?? []
     if (params.resolution === '1080p' && images.length > 1) {

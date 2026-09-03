@@ -53,8 +53,6 @@ export const gptImage2T2I: ModelDefinition<Params> = {
   ],
   inputs: [],
   outputs: [{ key: 'output', label: 'Output image', kind: 'image' }],
-  // Indicative per-image rates by resolution — align with https://kie.ai/pricing.
-  estimateCredits: (params) => ({ '1K': 10, '2K': 15, '4K': 30 })[params.resolution],
   buildPayload: ({ params }) => ({
     prompt: params.prompt,
     aspect_ratio: params.aspect_ratio,

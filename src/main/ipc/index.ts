@@ -363,12 +363,6 @@ export function registerIpcHandlers(): void {
   handle('notifications:batchSummary', ({ succeeded, failed }) =>
     notificationsService.notifyBatchSummary(succeeded, failed)
   )
-  handle('generations:estimateCost', ({ nodeId }) => ({
-    credits: generationsService.estimateNodeRunCredits(nodeId)
-  }))
-  handle('projects:creditsUsage', ({ projectId }) =>
-    generationsService.projectCreditsUsage(projectId)
-  )
   handle('kie:credits', async () => ({ credits: await kieGetCredits() }))
   handle('ai:refineImagePrompt', (input) => aiService.refineImagePrompt(input))
   handle('assets:promoteGeneration', async ({ generationId, name, description }) =>

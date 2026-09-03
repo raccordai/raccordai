@@ -34,8 +34,6 @@ export const volcengineLipSync: ModelDefinition<Params> = {
   kind: 'video',
   recommendedFor: ['lip-sync', 'dubbing', 'video-to-video'],
   paramsSchema,
-  // No estimateCredits: kie.ai publishes no per-run rate for this model — the
-  // UI shows nothing rather than a guess (https://kie.ai/pricing).
   paramFields: [
     {
       key: 'mode',

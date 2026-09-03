@@ -1,6 +1,5 @@
 import { app } from 'electron'
 import { listModels } from '@shared/models'
-import * as generations from '../../services/generations'
 import { getChanges } from '../../services/changeFeed'
 import { kieGetCredits } from '../../services/kie'
 import { queueState } from '../../services/runEngine'
@@ -114,14 +113,6 @@ export const platformTools: AgentTool[] = [
         queue: { running: queue.running.length, queued: queue.queued.length }
       }
     }
-  },
-  {
-    name: 'project_credits_usage',
-    description: 'Estimated kie.ai credits already spent by a project’s generations.',
-    inputSchema: obj({ projectId: str() }, ['projectId']),
-    scope: 'project',
-    risk: 'read',
-    execute: ({ projectId }) => generations.projectCreditsUsage(String(projectId))
   },
   {
     name: 'search',

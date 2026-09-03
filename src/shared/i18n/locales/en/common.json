@@ -118,8 +118,6 @@
     "plan": {
       "title_one": "Proposed plan — {{count}} shot",
       "title_other": "Proposed plan — {{count}} shots",
-      "credits": "~{{credits}} cr",
-      "total": "Estimated total",
       "panels": "panels {{panels}}",
       "approve": "Approve",
       "requestChanges": "Request changes"
@@ -550,7 +548,6 @@
     "nodeCount_one": "{{count}} node",
     "nodeCount_other": "{{count}} nodes",
     "deleteConfirm": "Delete video “{{name}}”?",
-    "creditsUsage": "{{count}} generations · ~{{credits}} credits (estimated)",
     "startFrom": "Start from",
     "blankVideo": "Blank video",
     "blankVideoDesc": "An empty graph, build freely",
@@ -813,8 +810,7 @@
     },
     "variants": {
       "label": "Variants",
-      "run": "Generate {{n}} candidates in parallel and compare them",
-      "runCost": "Generate {{n}} candidates in parallel and compare them · ~{{credits}} credits"
+      "run": "Generate {{n}} candidates in parallel and compare them"
     },
     "generateVideos": "Generate videos",
     "generating": "Generating…",
@@ -847,7 +843,6 @@
     "deleteNodeConfirm": "Delete this node and all its generations?",
     "copyNodeName": "Copy the node name",
     "jumpToTimelineClip": "See this clip in the timeline",
-    "estimatedCost": "~{{credits}} credits (estimate)",
     "historyPanel": {
       "title": "History",
       "close": "Close panel",
@@ -889,8 +884,6 @@
       "finalizeTitle": "Finalize on the real models",
       "finalizeHint": "Re-runs every node whose selected generation is a draft on its real model, then selects the result.",
       "finalizeEmpty": "No node has a draft as its selected generation.",
-      "draftCost": "draft",
-      "finalCost": "final",
       "finalizeConfirm_one": "Finalize {{count}} node",
       "finalizeConfirm_other": "Finalize {{count}} nodes",
       "finalizeStarted": "Finalize started: {{count}} node(s) re-running at full quality",
@@ -936,17 +929,6 @@
       "generating": "Generating…",
       "retrying": "Retry {{attempt}}/{{max}}"
     },
-    "costModal": {
-      "title": "Confirm generation",
-      "credits": "~{{credits}} cr",
-      "unknownCost": "—",
-      "total": "Estimated total",
-      "balance": "Balance: {{credits}} credits",
-      "overBalance": "over your balance",
-      "dontAskUnder": "Don’t ask again under {{credits}} credits",
-      "confirm_one": "Generate {{count}} generation",
-      "confirm_other": "Generate {{count}} generations"
-    },
     "mentionInputs": "Connected inputs",
     "recipeMode": "Mode",
     "recipeModel": "Model",
@@ -961,7 +943,12 @@
     "promptGuide": "Model prompting guide",
     "promptingNotes": "Model tips (prompting, inputs, references)",
     "promptGuideShow": "Read the prompting guide",
-    "promptGuideHide": "Hide the guide"
+    "promptGuideHide": "Hide the guide",
+    "runConfirm": {
+      "title": "Confirm generation",
+      "confirm_one": "Generate {{count}} generation",
+      "confirm_other": "Generate {{count}} generations"
+    }
   },
   "mcp": {
     "title": "MCP server",

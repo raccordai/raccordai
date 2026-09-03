@@ -4,7 +4,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { estimateCreditsFor, getModel, getModelOrThrow } from '@shared/models'
+import { getModel, getModelOrThrow } from '@shared/models'
 import { remapDraftInputs } from '@shared/models/draft'
 import { getStyle, nodeAppliesVideoStyle } from '@shared/styles/registry'
 import { getDb } from '../db/client'
@@ -483,13 +483,12 @@ function claimRun(args: {
   videoId: string
   inputSnapshot: unknown
   reuseSatisfied: boolean
-  creditsEstimated: number | null
   draft: boolean
   /** §6.6 variants: claim a fresh row even if the node already has runs in
    *  flight — parallel candidates of the same node are the whole point. */
   forceNew?: boolean
 }): { generationId: string; reused: boolean; kieTaskId: string | null } {
-  const { nodeId, videoId, inputSnapshot, creditsEstimated, draft } = args
+  const { nodeId, videoId, inputSnapshot, draft } = args
   const db = getDb()
   const rows = db
     .select()
@@ -522,7 +521,6 @@ function claimRun(args: {
       // 'pending' = claimed and queued; flips to 'running' at submission time.
       status: 'pending',
       inputSnapshot,
-      creditsEstimated,
       draft,
       createdAt: Date.now()
     })
@@ -989,8 +987,6 @@ export async function runNode(
   const prep = await prepareRun(nodeId, opts)
   const queue = queueFor(prep.provider.queueKey)
 
-  const estimate = estimateCreditsFor(prep.modelId, prep.inputSnapshot.params)
-
   // Variants ×N (§6.6): ONE prepare (so every candidate submits the byte-identical
   // payload — including the same uploaded inputs) and N independent claims, each
   // taking its own queue slot. Dedup is bypassed on purpose: parallel candidates
@@ -1004,7 +1000,6 @@ export async function runNode(
           videoId: prep.videoId,
           inputSnapshot: prep.inputSnapshot,
           reuseSatisfied: false,
-          creditsEstimated: estimate,
           draft: prep.draft,
           forceNew: true
         }).generationId
@@ -1019,7 +1014,6 @@ export async function runNode(
     videoId: prep.videoId,
     inputSnapshot: prep.inputSnapshot,
     reuseSatisfied,
-    creditsEstimated: estimate,
     draft: prep.draft
   })
   if (claim.reused) {

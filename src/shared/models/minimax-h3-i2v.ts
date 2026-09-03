@@ -28,7 +28,7 @@ export const minimaxH3I2V: ModelDefinition<Params> = {
     'Animate a still image (or a first/last frame pair) with strong instruction following, readable on-screen text and native stereo audio (MiniMax Hailuo 03). 4-15 s clips at 768P or 2K.',
   kind: 'video',
   recommendedFor: ['first-frame-animation', 'high-resolution', 'native-audio'],
-  // Same model floored to 768P: 8 cr/s instead of 13 — iterate cheap, then
+  // Same model floored to 768P (cheaper per second) — iterate cheap, then
   // re-run the keeper at 2K. A node already at 768P resolves to null and is
   // never stamped draft.
   draftEquivalent: { modelId: 'minimax-h3/image-to-video', params: { resolution: '768P' } },
@@ -59,7 +59,7 @@ export const minimaxH3I2V: ModelDefinition<Params> = {
       type: 'select',
       defaultValue: '2K',
       options: RESOLUTION.map((v) => ({ value: v, label: v })),
-      description: '768P costs 8 credits/s, 2K costs 13 credits/s — draft at 768P, master at 2K.'
+      description: '768P is the cheaper tier — draft at 768P, master at 2K.'
     }
   ],
   inputs: [
@@ -124,8 +124,8 @@ AUDIO (native stereo, same pass):
   There is no audio parameter — the prompt is the mix.
 
 PARAMS:
-  Duration: any integer 4-15 s (default 6). Resolution: 768P for cheap drafts (8 credits/s),
-  2K for the final master (13 credits/s).
+  Duration: any integer 4-15 s (default 6). Resolution: 768P for cheap drafts, 2K for the
+  final master.
 
 PITFALLS:
   - A prompt fighting the image (new outfit, different setting) warps the opening frames.
@@ -137,11 +137,6 @@ FULL EXAMPLE:
   "The chef looks up from the cutting board and smiles, steam rising from the pan behind her.
   Slow push-in from waist-level to a chest-up framing. Keep the restaurant logo on her apron
   exactly as in the image. Warm kitchen ambience, sizzling oil, soft jazz in the background."`,
-  // kie.ai rates (model page pricing, 2026-08): 768P 8 credits/s, 2K 13
-  // credits/s. Additional image inputs are billed +4 credits each, but
-  // estimateCredits only sees params, never the wired handles — the
-  // per-second rate is what we quote.
-  estimateCredits: (params) => ({ '768P': 8, '2K': 13 })[params.resolution] * params.duration,
   buildPayload: ({ params, inputs }) => {
     const first = inputs.first_frame_url?.[0]
     const last = inputs.last_frame_url?.[0]

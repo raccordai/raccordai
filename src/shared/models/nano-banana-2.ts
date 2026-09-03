@@ -41,9 +41,6 @@ export const nanoBanana2: ModelDefinition<Params> = {
   // the draft layer clamps the extra connections).
   draftEquivalent: { modelId: 'nano-banana-2-lite', inputs: { image_input: 'image_urls' } },
   paramsSchema,
-  // Indicative per-image rates by resolution — align with https://kie.ai/pricing
-  // (8 credits for 1K, 12 for 2K, 18 for 4K).
-  estimateCredits: (params) => ({ '1K': 8, '2K': 12, '4K': 18 })[params.resolution],
   paramFields: [
     {
       key: 'prompt',

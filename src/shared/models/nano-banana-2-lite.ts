@@ -34,8 +34,6 @@ export const nanoBanana2Lite: ModelDefinition<Params> = {
   kind: 'image',
   recommendedFor: ['cheap-draft', 'fast-iteration'],
   paramsSchema,
-  // Indicative flat per-image rate (1K only) — align with https://kie.ai/pricing (4 credits).
-  estimateCredits: () => 4,
   paramFields: [
     {
       key: 'prompt',
@@ -67,7 +65,7 @@ export const nanoBanana2Lite: ModelDefinition<Params> = {
   ],
   outputs: [{ key: 'output', label: 'Output image', kind: 'image' }],
   promptingNotes:
-    'Describe scenes in full sentences (narrative beats keyword lists). Output is 1K only, no resolution/format params — draft here (fast, 4 credits), then re-run the keeper on Nano Banana 2 or Pro for 2K/4K. Up to 10 input images; reference each by its role and connection order.',
+    'Describe scenes in full sentences (narrative beats keyword lists). Output is 1K only, no resolution/format params — draft here (fast and cheap), then re-run the keeper on Nano Banana 2 or Pro for 2K/4K. Up to 10 input images; reference each by its role and connection order.',
   // Distilled from Google's official Gemini image prompting guide
   // (https://ai.google.dev/gemini-api/docs/image-generation).
   promptGuide: `CORE PRINCIPLE (official): describe the scene, don't stack keywords. The model's deep language

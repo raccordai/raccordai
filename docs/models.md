@@ -3,7 +3,7 @@
 A "model" is one kie.ai generation capability (an image, video or audio
 generator) described declaratively in **one file** under `src/shared/models/`.
 That single `ModelDefinition` object drives _everything_: the node UI, the
-params form, the run payload, credit estimates, the timeline, the assistant
+params form, the run payload, the timeline, the assistant
 and the MCP docs. There is no other place to wire a model — if it's in the
 registry, the whole app knows it.
 
@@ -26,19 +26,16 @@ Special-provider example: `suno-music.ts` (dedicated Suno API).
 2. **Register it**: append the export to the `MODELS` array in
    `src/shared/models/index.ts`. Order matters only for display (Add-node menu,
    docs listing).
-3. **Align `estimateCredits` with <https://kie.ai/pricing>** — indicative
-   per-run rates, declared in the model file itself (see the comment style in
-   `seedance-15-pro.ts`).
-4. **Write `promptingNotes`** (always) and a **`promptGuide`** (for any model
+3. **Write `promptingNotes`** (always) and a **`promptGuide`** (for any model
    where prompt quality matters, i.e. all of them) — this is what the embedded
    assistant and external MCP agents read before writing prompts. Distill the
    provider's official prompt guide, don't improvise.
-5. **Tests**: `models.test.ts` already runs registry-wide invariants on every
+4. **Tests**: `models.test.ts` already runs registry-wide invariants on every
    entry (unique ids/handles, defaults parse, payload builds). Add
    model-specific cases when the model has non-trivial logic: value snapping,
    conditional schema (see the suno describe block), payload shape.
-6. **Run** `pnpm typecheck && pnpm test && pnpm build`.
-7. **Verify at runtime without credits**: point `RACCORD_KIE_BASE` at a local
+5. **Run** `pnpm typecheck && pnpm test && pnpm build`.
+6. **Verify at runtime without credits**: point `RACCORD_KIE_BASE` at a local
    mock (see CLAUDE.md "Credit-free E2E tests") and run the node from the UI —
    check the payload the mock receives.
 
@@ -60,7 +57,6 @@ export const myModel: ModelDefinition<Params> = {
   paramsSchema, paramFields,             // parameters (zod + form)
   inputs, outputs,                       // graph handles
   buildPayload,                          // params+inputs → kie.ai body
-  estimateCredits?,                      // indicative cost
   draftEquivalent?,                      // cheap stand-in for draft mode (§6.1)
   promptingNotes?, promptGuide?,         // agent-facing guidance
 }
@@ -97,8 +93,8 @@ export const myModel: ModelDefinition<Params> = {
 Two views of the same params, and both matter:
 
 - **`paramsSchema` (zod)** is the _contract_. It validates at run time
-  (`prepareRun` rejects the run with a user-visible error), on JSON workflow
-  import, and for credit estimation. Give **every field a `.default()`** so
+  (`prepareRun` rejects the run with a user-visible error) and on JSON workflow
+  import. Give **every field a `.default()`** so
   partial params (imported JSON, older nodes) still parse. Store numbers as
   numbers even when the API wants strings — snap/convert in `buildPayload`
   (see `duration` in seedance: stored `8`, sent `"8"`), because the timeline
@@ -238,21 +234,6 @@ the hard way:
 - Omit optional fields rather than sending empty strings when the API treats
   presence as intent (see suno's conditional payload).
 
-### `estimateCredits(params)`
-
-Indicative, per-run, derived from the params that drive cost (duration ×
-resolution for video). Stamped on every generation as `creditsEstimated` and
-summed per project (`projects:creditsUsage`). Keep the rates as named
-constants with a comment pointing at <https://kie.ai/pricing>; the kie
-dashboard is the authority, this is an order of magnitude. Omit entirely if no
-reliable rate is known — the UI then shows nothing (never guess).
-
-The signature takes **params only** — never the wired inputs. When a model
-prices a run differently depending on what is connected (the Seedance 2 family
-bills a video-input run as `price × (input + output)` seconds at a lower unit
-price), quote the no-video rate: it is the higher per-output-second of the two,
-so the preview never under-sells the run.
-
 ### `draftEquivalent` — draft mode (§6.1)
 
 Optional cheap stand-in used while the video's **draft mode** is on:
@@ -304,7 +285,6 @@ afterthought.
 | Node creation    | `defaultParamsFor()` (paramField defaults)                                     | `graph.ts` / `Toolbar.tsx`                                                |
 | Model swap       | params intersected by key, edges re-mapped by `accepts`/`kind`, else dropped   | `replaceNodeModel` in `graph.ts`                                          |
 | Run              | `paramsSchema.parse`, `required`/`maxCount` checks, `buildPayload`, `provider` | `prepareRun`/`submitGeneration` in `runEngine.ts`                         |
-| Credits          | `estimateCredits` → `creditsEstimated` → per-project totals                    | `runEngine.ts`, `projects:creditsUsage`                                   |
 | Draft mode       | `draftEquivalent` → substituted run + `draft` stamp; finalize re-runs          | `shared/models/draft.ts`, `prepareRun`, `runBatch.ts` (`planFinalize`)    |
 | Timeline         | `kind === 'video'`/`'audio'`, `params.duration`, `params.resolution`           | `Timeline.tsx` (`collectTimelineClips`, `clipDuration`), `TimelineV2.tsx` |
 | Continuity       | `lastFrame` output ← browser-side frame extraction                             | `useLastFrameExtractor.ts`                                                |
@@ -327,8 +307,6 @@ the registry stays testable and usable from both processes.
 - [ ] `duration` stored as a number of seconds if the model is video (timeline
       dependency), converted in `buildPayload` if the API wants a string.
 - [ ] Video model declares the `lastFrame` output.
-- [ ] `estimateCredits` cross-checked against kie.ai pricing, with the rates
-      as commented constants.
 - [ ] `promptGuide` distilled from the provider's official guide (source noted
       in a comment), not invented.
 - [ ] Model-specific tests for any snapping/conditional logic in

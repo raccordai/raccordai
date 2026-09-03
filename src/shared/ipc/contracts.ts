@@ -796,8 +796,8 @@ export type WorkflowExport = z.infer<typeof workflowExportSchema>
 
 /**
  * A structured production plan presented by the assistant before building or
- * running (§4.7): per-shot model + estimated cost, rendered as an approval
- * card in the chat panel.
+ * running (§4.7): per-shot description + model, rendered as an approval card
+ * in the chat panel.
  */
 export const chatPlanSchema = z.object({
   shots: z.array(
@@ -805,14 +805,12 @@ export const chatPlanSchema = z.object({
       label: z.string(),
       description: z.string(),
       modelId: z.string(),
-      estCredits: z.number().nullable(),
       /** Storyboard panels this shot covers (e.g. "1-3"), when relevant. */
       panels: z.string().optional()
     })
   ),
   /** Style template id or label the plan commits to, when one was chosen. */
-  style: z.string().nullable(),
-  totalCredits: z.number().nullable()
+  style: z.string().nullable()
 })
 export type ChatPlan = z.infer<typeof chatPlanSchema>
 
@@ -937,12 +935,10 @@ export const lintFindingSchema = z.object({
   message: z.string()
 })
 
-/** One line of the pre-run cost preview (§4.4), variants-aware since §6.6. */
+/** One line of the pre-run confirm (§4.4), variants-aware since §6.6. */
 export const plannedRowSchema = z.object({
   nodeId: z.string(),
   label: z.string(),
-  /** Total for this node: per-run estimate × variants (null = no declared rates). */
-  credits: z.number().nullable(),
   variants: z.number().int().min(1),
   /** §6.5 — what the prompt lint says about this node, shown in the run confirm. */
   lint: z.array(lintFindingSchema)
@@ -1614,14 +1610,9 @@ export const ipcContracts = {
     input: z.object({ succeeded: z.number().int().min(0), failed: z.number().int().min(0) }),
     output: z.void()
   },
-  /** Indicative credit cost of running this node now (null = no rates declared). */
-  'generations:estimateCost': {
-    input: z.object({ nodeId: z.string() }),
-    output: z.object({ credits: z.number().nullable() })
-  },
   /** §4.10 phase 4 — smart-run planning in the main process: nodes that will
    *  claim a generation (deps always reuse; targets only with reuseTargets)
-   *  + per-node credit estimates. Feeds the §4.4 cost modal. */
+   *  + their lint findings. Feeds the §4.4 run confirm. */
   'generations:planRun': {
     input: z.object({
       videoId: z.string(),
@@ -1629,10 +1620,7 @@ export const ipcContracts = {
       reuseTargets: z.boolean(),
       variants: variantsSchema
     }),
-    output: z.object({
-      rows: z.array(plannedRowSchema),
-      total: z.number()
-    })
+    output: z.object({ rows: z.array(plannedRowSchema) })
   },
   /** Runs the same plan dependency-aware (shared upstreams once, independent
    *  branches parallel, settle-aware sequencing) and resolves when the whole
@@ -1651,22 +1639,11 @@ export const ipcContracts = {
       generations: z.record(z.string(), z.string())
     })
   },
-  /** §6.1 finalize — nodes whose selected generation is a draft, with the
-   *  draft cost already spent vs the estimated cost on the real models. */
+  /** §6.1 finalize — nodes whose selected generation is a draft (what a
+   *  finalize would re-run on the real models). */
   'generations:planFinalize': {
     input: z.object({ videoId: z.string() }),
-    output: z.object({
-      rows: z.array(
-        z.object({
-          nodeId: z.string(),
-          label: z.string(),
-          draftCredits: z.number().nullable(),
-          finalCredits: z.number().nullable()
-        })
-      ),
-      totalDraft: z.number(),
-      totalFinal: z.number()
-    })
+    output: z.object({ rows: z.array(z.object({ nodeId: z.string(), label: z.string() })) })
   },
   /** Re-runs every draft-selected node on the real models (draft substitution
    *  bypassed for these runs; draft mode itself stays on for exploration). */
@@ -1727,11 +1704,6 @@ export const ipcContracts = {
   'generations:reviewGeneration': {
     input: z.object({ generationId: z.string() }),
     output: z.object({ verdict: qcVerdictSchema, notes: z.string() })
-  },
-  /** Estimated credits spent + attempt count across a whole project. */
-  'projects:creditsUsage': {
-    input: z.object({ projectId: z.string() }),
-    output: z.object({ estimatedCredits: z.number(), generationCount: z.number() })
   },
   /** Remaining kie.ai account credits (live query against the kie API). */
   'kie:credits': {

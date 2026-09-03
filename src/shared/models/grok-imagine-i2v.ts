@@ -141,11 +141,6 @@ FULL EXAMPLES (official patterns):
   "@image1 slowly turns her head to the right and smiles, soft breeze moving her hair, gentle camera push-in."
   "@image1 the sneaker rotates smoothly on the pedestal, camera orbiting at eye level, dramatic spotlight
   sweeping across the surface, upbeat electronic music."`,
-  // kie.ai pricing (2026-07): grok-imagine image-to-video — 1.6 cr/s at 480p,
-  // 3 cr/s at 720p. Same floor-snap as buildPayload: a legacy sub-6s node is
-  // billed at 6s, so the estimate quotes what the API will actually charge.
-  estimateCredits: (params) =>
-    ({ '480p': 1.6, '720p': 3 })[params.resolution] * Math.max(MIN_API_DURATION, params.duration),
   buildPayload: ({ params, inputs }) => ({
     image_urls: inputs.image_urls ?? [],
     prompt: params.prompt,

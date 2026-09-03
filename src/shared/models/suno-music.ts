@@ -173,8 +173,6 @@ FULL EXAMPLE (custom mode):
   title: "Neon Rain" · negativeTags: "heavy metal, aggressive drums" · vocalGender: "f"
   prompt: "[Intro]\\n[Synth]\\n\\n[Verse]\\nCity lights are bleeding through the window pane\\n...\\n
   [Chorus]\\nNeon rain, falling down on me (falling down)\\n...\\n[Outro]\\n[Fade Out]\\n[End]"`,
-  // Indicative per-song rate — align with https://kie.ai/pricing.
-  estimateCredits: () => 8,
   buildPayload: ({ params }) => {
     const body: Record<string, unknown> = {
       prompt: params.prompt,

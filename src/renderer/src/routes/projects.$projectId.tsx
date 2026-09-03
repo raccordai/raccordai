@@ -147,10 +147,6 @@ function VideosPage(): React.JSX.Element {
     () => new Set((duplicateGroups.data ?? []).flat()),
     [duplicateGroups.data]
   )
-  const creditsUsage = useQuery({
-    queryKey: ['generations', 'creditsUsage', projectId],
-    queryFn: () => invoke('projects:creditsUsage', { projectId })
-  })
   const invalidateAssets = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['assets'] })
   }
@@ -248,15 +244,6 @@ function VideosPage(): React.JSX.Element {
             </button>
           ) : null}
         </div>
-
-        {(creditsUsage.data?.generationCount ?? 0) > 0 && (
-          <div className="mt-1 text-xs text-neutral-500">
-            {t('videosPage.creditsUsage', {
-              count: creditsUsage.data!.generationCount,
-              credits: Math.round(creditsUsage.data!.estimatedCredits)
-            })}
-          </div>
-        )}
 
         {/* Videos / Assets tabs — the asset library is project-wide, shared by every video. */}
         <div className="mt-5 flex gap-1 border-b border-neutral-800">

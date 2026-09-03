@@ -93,15 +93,13 @@ user-visible string gets an i18next key in fr **and** en; graph mutations go
 through the graph service (`withGraphHistory`); colors through the
 `styles.css` tokens.
 
-| Proposal                                                                           | Effort  | Why                                                                                                                                                                                                                      |
-| ---------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Grow the model catalogue (Veo, Kling variants, Flux…)                              | S/model | The registry makes adding nearly declarative: one file + one entry in `MODELS`, invariant tests come for free                                                                                                            |
-| Move the remaining hardcoded strings of `NodeParamsPanel` + `ModelNode` to i18next | S       | Node action tooltips, "No output yet", the promote-asset form are hardcoded English — the canvas is only partially localized (full inventory: §7.7)                                                                      |
-| More i18n locales (es, de, ja) through community contributions                     | S       | The i18n infra + parity test makes contributing a locale trivial and safe                                                                                                                                                |
-| Verify the per-model credit rates against the kie.ai dashboard                     | S       | Video models are done (Seedance 2 family, then Kling 3.0 + Grok Imagine from the dashboard, with `draftEquivalent` on Grok — draft mode now covers the whole video catalogue); the image/Suno rates are still indicative |
-| Per-project soft budget (`creditWarnThreshold`) in the cost modal                  | S       | Warn when `projectCreditsUsage + planned` exceeds a per-project threshold                                                                                                                                                |
-| Move `autoLayout.ts` (pure) to `src/shared/` and expose a `tidy_workflow` tool     | S       | Optional leftover from the tool-registry unification — the assistant/MCP can't tidy the canvas yet                                                                                                                       |
-| Click-to-focus affordance on node ids in assistant replies                         | S       | Optional transcript polish left out of the sidebar work — `focus_node`/`event:focusNode` already exist                                                                                                                   |
+| Proposal                                                                           | Effort  | Why                                                                                                                                                 |
+| ---------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Grow the model catalogue (Veo, Kling variants, Flux…)                              | S/model | The registry makes adding nearly declarative: one file + one entry in `MODELS`, invariant tests come for free                                       |
+| Move the remaining hardcoded strings of `NodeParamsPanel` + `ModelNode` to i18next | S       | Node action tooltips, "No output yet", the promote-asset form are hardcoded English — the canvas is only partially localized (full inventory: §7.7) |
+| More i18n locales (es, de, ja) through community contributions                     | S       | The i18n infra + parity test makes contributing a locale trivial and safe                                                                           |
+| Move `autoLayout.ts` (pure) to `src/shared/` and expose a `tidy_workflow` tool     | S       | Optional leftover from the tool-registry unification — the assistant/MCP can't tidy the canvas yet                                                  |
+| Click-to-focus affordance on node ids in assistant replies                         | S       | Optional transcript polish left out of the sidebar work — `focus_node`/`event:focusNode` already exist                                              |
 
 Cleanup (fold into whichever item touches the file first): undo/redo stacks
 (`graphHistory.ts`, in-memory, cap 100) and retry budgets reset silently on
@@ -117,7 +115,7 @@ model in place (`replace_node_model`, destructive: generations don't survive
 a model change), toggle vision QC (`set_qc_enabled`), manage checkpoints and
 notes end-to-end (`delete_checkpoint`, `add_annotation`, `delete_annotation`),
 check what a deletion breaks (`asset_references`), see the queue
-(`queue_state`) and per-project spend (`project_credits_usage`), and drive the
+(`queue_state`), and drive the
 render fully (`render_video` with fps/resolution, `cancel_render`). The
 last-frame extraction also moved into main (bundled ffmpeg, right after the
 result downloads), so `lastFrame` edges resolve without any window — the one
@@ -355,16 +353,16 @@ write), zod output-parsing of large lists on every invalidation
 
 The pure modules are well tested; the services that MOVE the risk are not:
 
-| Gap                                                                                                                                                                                  | Where                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| `checkpoints.ts` — the product's only `destructive` op: zero tests, not in `coverage.include`, zero E2E spec (its twin `graphHistory.ts` is at 94.5%)                                | `services/checkpoints.ts:121-167`                                  |
-| `lint.ts` `connectionsFor` — the "@Image2 here == @Image2 at payload" promise (edge ordering + per-handle counter) rests on untested sorting                                         | `services/lint.ts:29-60`                                           |
-| `estimateNodeRunCredits` (the number shown before spending, draft-aware), `annotations.ts` `createEditNodeFromAnnotations`, `wrapPromptWithStyle` (all 3 branches)                   | `generations.ts:39`, `annotations.ts:96`, `styles/registry.ts:221` |
-| The §6.11 `durationSeconds` invariant ("the subtle part") — no test builds a recipe node with an imposed duration and checks param + beat timeline agree                             | `designs/registry.ts:1416-1435`                                    |
-| Template test has dead branches asserting the INVERSE doctrine — replace with `no edge has output === 'lastFrame'` across all templates                                              | `templates/registry.test.ts:244-262`                               |
-| `transitions.ts` is the only registry without a registry test; board/anchorSafe invariant claimed "registry-tested" but isn't; i18n parity untested for templates/styles/transitions | various                                                            |
-| `checkpointDiff` edge key ignores `edge.output` — an output→lastFrame rewire can read `identical: true` before a destructive restore                                                 | `shared/checkpointDiff.ts:41-43`                                   |
-| E2E: no checkpoints spec; text-layers covered only by `create`; casting missing the idempotence second pass (`alreadyCast`)                                                          | `e2e/specs/`                                                       |
+| Gap                                                                                                                                                                                  | Where                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| `checkpoints.ts` — the product's only `destructive` op: zero tests, not in `coverage.include`, zero E2E spec (its twin `graphHistory.ts` is at 94.5%)                                | `services/checkpoints.ts:121-167`             |
+| `lint.ts` `connectionsFor` — the "@Image2 here == @Image2 at payload" promise (edge ordering + per-handle counter) rests on untested sorting                                         | `services/lint.ts:29-60`                      |
+| `annotations.ts` `createEditNodeFromAnnotations`, `wrapPromptWithStyle` (all 3 branches)                                                                                             | `annotations.ts:96`, `styles/registry.ts:221` |
+| The §6.11 `durationSeconds` invariant ("the subtle part") — no test builds a recipe node with an imposed duration and checks param + beat timeline agree                             | `designs/registry.ts:1416-1435`               |
+| Template test has dead branches asserting the INVERSE doctrine — replace with `no edge has output === 'lastFrame'` across all templates                                              | `templates/registry.test.ts:244-262`          |
+| `transitions.ts` is the only registry without a registry test; board/anchorSafe invariant claimed "registry-tested" but isn't; i18n parity untested for templates/styles/transitions | various                                       |
+| `checkpointDiff` edge key ignores `edge.output` — an output→lastFrame rewire can read `identical: true` before a destructive restore                                                 | `shared/checkpointDiff.ts:41-43`              |
+| E2E: no checkpoints spec; text-layers covered only by `create`; casting missing the idempotence second pass (`alreadyCast`)                                                          | `e2e/specs/`                                  |
 
 ### 7.7 i18n debt (S)
 
